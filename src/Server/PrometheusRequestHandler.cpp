@@ -362,7 +362,7 @@ public:
 
         /// Some parameters (database, default_format, everything used in the code above) do not
         /// belong to the Settings class.
-        static const NameSet reserved_param_names{"user", "password", "query", "time", "start", "end", "step"};
+        static const NameSet reserved_param_names{"user", "password", "query", "time", "start", "end", "step", "match[]"};
         return !reserved_param_names.contains(name);
     }
 
@@ -373,6 +373,12 @@ public:
 
 
         const String & uri = request.getURI();
+        /// `uri` includes the query string; path-only checks must ignore it (e.g. `/api/v1/label/x/values?match[]=...`).
+        const String path_without_query = [&]
+        {
+            const auto q = uri.find('?');
+            return q == String::npos ? uri : uri.substr(0, q);
+        }();
         LOG_DEBUG(log(), "Processing Query API request: method={}, uri={}", request.getMethod(), uri);
 
         response.setContentType("application/json");
@@ -447,12 +453,12 @@ public:
 
                 protocol.getLabels(getOutputStream(response), match, start, end);
             }
-            else if (uri.find("/api/v1/label/") != String::npos && uri.ends_with("/values"))
+            else if (path_without_query.find("/api/v1/label/") != String::npos && path_without_query.ends_with("/values"))
             {
                 // Extract label name from URI: /api/v1/label/<name>/values
-                size_t start_pos = uri.find("/api/v1/label/") + 14; // length of "/api/v1/label/"
-                size_t end_pos = uri.find("/values");
-                String label_name = uri.substr(start_pos, end_pos - start_pos);
+                size_t start_pos = path_without_query.find("/api/v1/label/") + 14; // length of "/api/v1/label/"
+                size_t end_pos = path_without_query.find("/values");
+                String label_name = path_without_query.substr(start_pos, end_pos - start_pos);
 
                 String match = params->get("match[]", "");
                 String start = params->get("start", "");

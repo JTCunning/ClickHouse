@@ -1,6 +1,7 @@
 #include <Storages/TimeSeries/PrometheusHTTPProtocolAPI.h>
 
 #include <Common/logger_useful.h>
+#include <Common/quoteString.h>
 #include <Core/Field.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
@@ -10,6 +11,7 @@
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/Converter.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
+#include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/Context.h>
 #include <Core/Settings.h>
@@ -22,17 +24,239 @@
 #include <DataTypes/DataTypeDateTime64.h>
 #include <Core/Types.h>
 #include <Columns/ColumnArray.h>
+#include <Columns/ColumnMap.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnString.h>
+#include <Common/typeid_cast.h>
+#include <fmt/format.h>
+
+#include <algorithm>
+#include <optional>
+#include <set>
+#include <vector>
 
 
 namespace DB
 {
 
+namespace TimeSeriesSetting
+{
+    extern const TimeSeriesSettingsBool store_min_time_and_max_time;
+    extern const TimeSeriesSettingsBool filter_by_min_time_and_max_time;
+    extern const TimeSeriesSettingsMap tags_to_columns;
+}
+
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
+}
+
+namespace
+{
+
+using MatcherList = PrometheusQueryTree::MatcherList;
+using Matcher = PrometheusQueryTree::Matcher;
+using MatcherType = PrometheusQueryTree::MatcherType;
+
+std::optional<String> findColumnForTag(const Map & tags_to_columns, const String & label_name)
+{
+    for (const auto & tag_name_and_column_name : tags_to_columns)
+    {
+        const auto & tuple = tag_name_and_column_name.safeGet<Tuple>();
+        const auto & tag_name = tuple.at(0).safeGet<String>();
+        if (tag_name == label_name)
+            return tuple.at(1).safeGet<String>();
+    }
+    return std::nullopt;
+}
+
+MatcherList parseMatchers(const String & match_param)
+{
+    if (match_param.empty())
+        return {};
+
+    PrometheusQueryTree tree;
+    String err;
+    size_t err_pos = 0;
+    if (tree.tryParse(match_param, 3, &err, &err_pos))
+    {
+        const auto * root = tree.getRoot();
+        if (root && root->node_type == PrometheusQueryTree::NodeType::InstantSelector)
+        {
+            const auto * sel = typeid_cast<const PrometheusQueryTree::InstantSelector *>(root);
+            chassert(sel);
+            return sel->matchers;
+        }
+    }
+
+    MatcherList fallback;
+    Matcher m;
+    m.label_name = "__name__";
+    m.label_value = match_param;
+    m.matcher_type = MatcherType::EQ;
+    fallback.push_back(std::move(m));
+    return fallback;
+}
+
+String predicateForMatcher(const Matcher & matcher, const Map & tags_to_columns)
+{
+    const auto * metric_name_col = TimeSeriesColumnNames::MetricName;
+    const auto * tags_col_name = TimeSeriesColumnNames::Tags;
+
+    if (matcher.label_name == "__name__")
+    {
+        switch (matcher.matcher_type)
+        {
+            case MatcherType::EQ:
+                return fmt::format("{} = {}", metric_name_col, quoteString(matcher.label_value));
+            case MatcherType::NE:
+                return fmt::format("{} != {}", metric_name_col, quoteString(matcher.label_value));
+            case MatcherType::RE:
+                return fmt::format("match({}, {})", metric_name_col, quoteString(matcher.label_value));
+            case MatcherType::NRE:
+                return fmt::format("NOT match({}, {})", metric_name_col, quoteString(matcher.label_value));
+        }
+    }
+
+    if (auto promoted_col = findColumnForTag(tags_to_columns, matcher.label_name))
+    {
+        const auto col = backQuoteIfNeed(*promoted_col);
+        switch (matcher.matcher_type)
+        {
+            case MatcherType::EQ:
+                return fmt::format("{} = {}", col, quoteString(matcher.label_value));
+            case MatcherType::NE:
+                return fmt::format("{} != {}", col, quoteString(matcher.label_value));
+            case MatcherType::RE:
+                return fmt::format("match({}, {})", col, quoteString(matcher.label_value));
+            case MatcherType::NRE:
+                return fmt::format("NOT match({}, {})", col, quoteString(matcher.label_value));
+        }
+    }
+
+    const auto key_lit = quoteString(matcher.label_name);
+    const auto map_access = fmt::format("{}[{}]", tags_col_name, key_lit);
+    switch (matcher.matcher_type)
+    {
+        case MatcherType::EQ:
+            return fmt::format(
+                "mapContains({}, {}) AND {} = {}", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
+        case MatcherType::NE:
+            return fmt::format(
+                "(NOT mapContains({}, {})) OR ({} != {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
+        case MatcherType::RE:
+            return fmt::format(
+                "mapContains({}, {}) AND match({}, {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
+        case MatcherType::NRE:
+            return fmt::format(
+                "(NOT mapContains({}, {})) OR NOT match({}, {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
+    }
+    UNREACHABLE();
+}
+
+String buildTimeOverlapWhere(const TimeSeriesSettings & settings, const String & start_param, const String & end_param)
+{
+    if (!settings[TimeSeriesSetting::store_min_time_and_max_time] || !settings[TimeSeriesSetting::filter_by_min_time_and_max_time])
+        return {};
+
+    if (start_param.empty() && end_param.empty())
+        return {};
+
+    constexpr UInt32 ts_scale = 3;
+    String predicates;
+    if (!end_param.empty())
+    {
+        const DateTime64 end_ts = parseTimeSeriesTimestamp(end_param, ts_scale);
+        predicates = fmt::format(
+            "{} <= toDateTime64({}, {})",
+            TimeSeriesColumnNames::MinTime,
+            end_ts.value,
+            ts_scale);
+    }
+    if (!start_param.empty())
+    {
+        const DateTime64 start_ts = parseTimeSeriesTimestamp(start_param, ts_scale);
+        String p = fmt::format(
+            "{} >= toDateTime64({}, {})",
+            TimeSeriesColumnNames::MaxTime,
+            start_ts.value,
+            ts_scale);
+        if (!predicates.empty())
+            predicates += " AND ";
+        predicates += p;
+    }
+    return predicates;
+}
+
+String combineWhereClause(const MatcherList & matchers, const Map & tags_to_columns, const String & time_predicate)
+{
+    std::vector<String> parts;
+    for (const auto & matcher : matchers)
+        parts.push_back(predicateForMatcher(matcher, tags_to_columns));
+    if (!time_predicate.empty())
+        parts.push_back(time_predicate);
+
+    if (parts.empty())
+        return {};
+
+    String out = " WHERE ";
+    for (size_t i = 0; i < parts.size(); ++i)
+    {
+        if (i)
+            out += " AND ";
+        out += parts[i];
+    }
+    return out;
+}
+
+void writeJsonPairsFromTagsColumn(
+    const ColumnPtr & tags_column,
+    size_t row_index,
+    WriteBuffer & response,
+    const FormatSettings & format_settings)
+{
+    if (const auto * map_col = typeid_cast<const ColumnMap *>(tags_column.get()))
+    {
+        const auto & array_column = map_col->getNestedColumn();
+        const auto & offsets = array_column.getOffsets();
+        const auto & tuple_column = typeid_cast<const ColumnTuple &>(array_column.getData());
+        const auto & key_column = tuple_column.getColumn(0);
+        const auto & value_column = tuple_column.getColumn(1);
+
+        size_t start = row_index == 0 ? 0 : offsets[row_index - 1];
+        size_t end = offsets[row_index];
+        for (size_t j = start; j < end; ++j)
+        {
+            writeString(",", response);
+            writeJSONString(key_column.getDataAt(j), response, format_settings);
+            writeString(":", response);
+            writeJSONString(value_column.getDataAt(j), response, format_settings);
+        }
+        return;
+    }
+
+    if (const auto * array_column = typeid_cast<const ColumnArray *>(tags_column.get()))
+    {
+        const auto & offsets = array_column->getOffsets();
+        const auto & tuple_column = typeid_cast<const ColumnTuple &>(array_column->getData());
+        const auto & key_column = tuple_column.getColumn(0);
+        const auto & value_column = tuple_column.getColumn(1);
+
+        size_t start = row_index == 0 ? 0 : offsets[row_index - 1];
+        size_t end = offsets[row_index];
+        for (size_t j = start; j < end; ++j)
+        {
+            writeString(",", response);
+            writeJSONString(key_column.getDataAt(j), response, format_settings);
+            writeString(":", response);
+            writeJSONString(value_column.getDataAt(j), response, format_settings);
+        }
+    }
+}
+
+static constexpr UInt64 DEFAULT_PROMETHEUS_MAX_SERIES = 100000;
+
 }
 
 PrometheusHTTPProtocolAPI::PrometheusHTTPProtocolAPI(ConstStoragePtr time_series_storage_, const ContextMutablePtr & context_)
@@ -312,36 +536,236 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
     }
 }
 
-
 void PrometheusHTTPProtocolAPI::getSeries(
     WriteBuffer & response,
-    const String & /* match_param */,
-    const String & /* start_param */,
-    const String & /* end_param */)
+    const String & match_param,
+    const String & start_param,
+    const String & end_param)
 {
-    UNUSED(response);
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The series endpoint is not implemented");
+    const auto & ts_settings = time_series_storage->getStorageSettings();
+    const Map & tags_to_columns_map = ts_settings[TimeSeriesSetting::tags_to_columns];
+    const MatcherList matchers = parseMatchers(match_param);
+    const String time_where = buildTimeOverlapWhere(ts_settings, start_param, end_param);
+    const String where_clause = combineWhereClause(matchers, tags_to_columns_map, time_where);
+
+    auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
+    auto tags_table_id = tags_table->getStorageID();
+
+    std::vector<String> select_list;
+    select_list.push_back(TimeSeriesColumnNames::MetricName);
+    select_list.push_back(TimeSeriesColumnNames::Tags);
+    std::vector<std::pair<String, String>> promoted_tags;
+    for (const auto & tag_name_and_column_name : tags_to_columns_map)
+    {
+        const auto & tuple = tag_name_and_column_name.safeGet<Tuple>();
+        const auto & tag_name = tuple.at(0).safeGet<String>();
+        const auto & column_name = tuple.at(1).safeGet<String>();
+        select_list.push_back(backQuoteIfNeed(column_name));
+        promoted_tags.emplace_back(tag_name, column_name);
+    }
+
+    String select_expr;
+    for (size_t si = 0; si < select_list.size(); ++si)
+    {
+        if (si)
+            select_expr += ", ";
+        select_expr += select_list[si];
+    }
+
+    String query = fmt::format(
+        "SELECT {} FROM {}{} LIMIT {}",
+        select_expr,
+        tags_table_id.getFullTableName(),
+        where_clause,
+        DEFAULT_PROMETHEUS_MAX_SERIES);
+
+    LOG_TRACE(log, "Prometheus series query: {}", query);
+
+    auto [ast, io] = executeQuery(query, getContext(), {}, QueryProcessingStage::Complete);
+
+    PullingPipelineExecutor executor(io.pipeline);
+    Block result_block;
+
+    writeString(R"({"status":"success","data":[)", response);
+
+    bool first_row = true;
+    while (executor.pull(result_block))
+    {
+        if (result_block.empty() || result_block.rows() == 0)
+            continue;
+
+        const auto & metric_name_col = result_block.getByName(TimeSeriesColumnNames::MetricName).column;
+        const auto & tags_col = result_block.getByName(TimeSeriesColumnNames::Tags).column;
+
+        for (size_t i = 0; i < result_block.rows(); ++i)
+        {
+            if (!first_row)
+                writeString(",", response);
+            first_row = false;
+
+            writeString(R"({"__name__":)", response);
+            writeJSONString(metric_name_col->getDataAt(i), response, format_settings);
+
+            for (const auto & [tag_name, column_name] : promoted_tags)
+            {
+                const auto & col = result_block.getByName(column_name).column;
+                writeString(",", response);
+                writeJSONString(std::string_view{tag_name}, response, format_settings);
+                writeString(":", response);
+                writeJSONString(col->getDataAt(i), response, format_settings);
+            }
+
+            writeJsonPairsFromTagsColumn(tags_col, i, response, format_settings);
+            writeString("}", response);
+        }
+    }
+
+    writeString("]}", response);
 }
 
 void PrometheusHTTPProtocolAPI::getLabels(
     WriteBuffer & response,
-    const String & /* match_param */,
-    const String & /* start_param */,
-    const String & /* end_param */)
+    const String & match_param,
+    const String & start_param,
+    const String & end_param)
 {
-    UNUSED(response);
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The labels endpoint is not implemented");
+    const auto & ts_settings = time_series_storage->getStorageSettings();
+    const Map & tags_to_columns_map = ts_settings[TimeSeriesSetting::tags_to_columns];
+    const MatcherList matchers = parseMatchers(match_param);
+    const String time_where = buildTimeOverlapWhere(ts_settings, start_param, end_param);
+    const String where_clause = combineWhereClause(matchers, tags_to_columns_map, time_where);
+
+    auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
+    auto tags_table_id = tags_table->getStorageID();
+
+    String query = fmt::format(
+        "SELECT arrayJoin(groupUniqArrayArray(mapKeys({}))) AS label_key FROM {}{}",
+        TimeSeriesColumnNames::Tags,
+        tags_table_id.getFullTableName(),
+        where_clause);
+
+    LOG_TRACE(log, "Prometheus labels query: {}", query);
+
+    auto [ast, io] = executeQuery(query, getContext(), {}, QueryProcessingStage::Complete);
+
+    PullingPipelineExecutor executor(io.pipeline);
+    Block result_block;
+
+    std::set<String> label_names;
+    label_names.insert("__name__");
+    for (const auto & tag_name_and_column_name : tags_to_columns_map)
+    {
+        const auto & tuple = tag_name_and_column_name.safeGet<Tuple>();
+        label_names.insert(tuple.at(0).safeGet<String>());
+    }
+
+    while (executor.pull(result_block))
+    {
+        if (result_block.empty() || result_block.rows() == 0)
+            continue;
+
+        const auto & label_col = result_block.getByName("label_key").column;
+        for (size_t i = 0; i < result_block.rows(); ++i)
+        {
+            auto label = label_col->getDataAt(i);
+            if (label.empty())
+                continue;
+            label_names.insert(String{label});
+        }
+    }
+
+    writeString(R"({"status":"success","data":[)", response);
+    bool first_label = true;
+    for (const auto & name : label_names)
+    {
+        if (!first_label)
+            writeString(",", response);
+        first_label = false;
+        writeJSONString(std::string_view{name}, response, format_settings);
+    }
+    writeString("]}", response);
 }
 
 void PrometheusHTTPProtocolAPI::getLabelValues(
     WriteBuffer & response,
-    const String & /* label_name */,
-    const String & /* match_param */,
-    const String & /* start_param */,
-    const String & /* end_param */)
+    const String & label_name,
+    const String & match_param,
+    const String & start_param,
+    const String & end_param)
 {
-    UNUSED(response);
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The label values endpoint is not implemented");
+    const auto & ts_settings = time_series_storage->getStorageSettings();
+    const Map & tags_to_columns_map = ts_settings[TimeSeriesSetting::tags_to_columns];
+    const MatcherList matchers = parseMatchers(match_param);
+    const String time_where = buildTimeOverlapWhere(ts_settings, start_param, end_param);
+    const String where_clause = combineWhereClause(matchers, tags_to_columns_map, time_where);
+
+    auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
+    auto tags_table_id = tags_table->getStorageID();
+
+    String query;
+
+    if (label_name == "__name__")
+    {
+        query = fmt::format(
+            "SELECT DISTINCT {} AS label_value FROM {}{} ORDER BY label_value",
+            TimeSeriesColumnNames::MetricName,
+            tags_table_id.getFullTableName(),
+            where_clause);
+    }
+    else if (auto promoted_col = findColumnForTag(tags_to_columns_map, label_name))
+    {
+        query = fmt::format(
+            "SELECT DISTINCT {} AS label_value FROM {}{} ORDER BY label_value",
+            backQuoteIfNeed(*promoted_col),
+            tags_table_id.getFullTableName(),
+            where_clause);
+    }
+    else
+    {
+        const auto key_lit = quoteString(label_name);
+        const auto map_access = fmt::format("{}[{}]", TimeSeriesColumnNames::Tags, key_lit);
+        String map_where;
+        if (where_clause.empty())
+            map_where = fmt::format(" WHERE mapContains({}, {})", TimeSeriesColumnNames::Tags, key_lit);
+        else
+            map_where = where_clause + fmt::format(" AND mapContains({}, {})", TimeSeriesColumnNames::Tags, key_lit);
+        query = fmt::format(
+            "SELECT label_value FROM (SELECT arrayJoin(groupUniqArray({})) AS label_value FROM {}{}) ORDER BY label_value",
+            map_access,
+            tags_table_id.getFullTableName(),
+            map_where);
+    }
+
+    LOG_TRACE(log, "Prometheus label values query: {}", query);
+
+    auto [ast, io] = executeQuery(query, getContext(), {}, QueryProcessingStage::Complete);
+
+    PullingPipelineExecutor executor(io.pipeline);
+    Block result_block;
+
+    writeString(R"({"status":"success","data":[)", response);
+
+    bool first = true;
+    while (executor.pull(result_block))
+    {
+        if (result_block.empty() || result_block.rows() == 0)
+            continue;
+
+        const auto & value_col = result_block.getByName("label_value").column;
+
+        for (size_t i = 0; i < result_block.rows(); ++i)
+        {
+            auto value = value_col->getDataAt(i);
+            if (value.empty())
+                continue;
+            if (!first)
+                writeString(",", response);
+            first = false;
+            writeJSONString(value, response, format_settings);
+        }
+    }
+
+    writeString("]}", response);
 }
 
 
