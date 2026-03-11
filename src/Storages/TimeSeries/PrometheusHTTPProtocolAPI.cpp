@@ -1,6 +1,8 @@
 #include <Storages/TimeSeries/PrometheusHTTPProtocolAPI.h>
 
+#include <base/scope_guard.h>
 #include <Common/logger_useful.h>
+#include <exception>
 #include <Core/Field.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
@@ -100,38 +102,50 @@ void PrometheusHTTPProtocolAPI::executePromQLQuery(
 
     auto [ast, io] = executeQuery(sql_query->formatWithSecretsOneLine(), getContext(), {}, QueryProcessingStage::Complete);
 
-    PullingPipelineExecutor executor(io.pipeline);
-    Block result_block;
+    /// Ensure QueryFinish is logged to system.query_log when we leave scope successfully.
+    /// On exception, the catch block calls io.onException() to log the exception.
+    SCOPE_EXIT({
+        if (!std::uncaught_exceptions())
+            io.onFinish();
+    });
 
-    /// Mind using the getResultType() method from PrometheusQueryToSQLConverter, not from the PrometheusQueryTree.
-    if (converter.getResultType() == PrometheusQueryTree::ResultType::RANGE_VECTOR)
+    try
     {
-        writeRangeQueryHeader(response);
-        while (executor.pull(result_block))
-            writeRangeQueryResponse(response, result_block);
-        writeRangeQueryFooter(response);
-        return;
+        PullingPipelineExecutor executor(io.pipeline);
+        Block result_block;
+
+        /// Mind using the getResultType() method from PrometheusQueryToSQLConverter, not from the PrometheusQueryTree.
+        if (converter.getResultType() == PrometheusQueryTree::ResultType::RANGE_VECTOR)
+        {
+            writeRangeQueryHeader(response);
+            while (executor.pull(result_block))
+                writeRangeQueryResponse(response, result_block);
+            writeRangeQueryFooter(response);
+        }
+        else if (converter.getResultType() == PrometheusQueryTree::ResultType::INSTANT_VECTOR)
+        {
+            writeInstantQueryHeader(response);
+            while (executor.pull(result_block))
+                writeInstantQueryResponse(response, result_block);
+            writeInstantQueryFooter(response);
+        }
+        else if (converter.getResultType() == PrometheusQueryTree::ResultType::SCALAR)
+        {
+            writeInstantQueryHeader(response);
+            while (executor.pull(result_block))
+                writeScalarQueryResponse(response, result_block);
+            writeInstantQueryFooter(response);
+        }
+        else
+        {
+            LOG_ERROR(log, "Unsupported result type: {}", converter.getResultType());
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Unsupported result type");
+        }
     }
-    else if (converter.getResultType() == PrometheusQueryTree::ResultType::INSTANT_VECTOR)
+    catch (...)
     {
-        writeInstantQueryHeader(response);
-        while (executor.pull(result_block))
-            writeInstantQueryResponse(response, result_block);
-        writeInstantQueryFooter(response);
-        return;
-    }
-    else if (converter.getResultType() == PrometheusQueryTree::ResultType::SCALAR)
-    {
-        writeInstantQueryHeader(response);
-        while (executor.pull(result_block))
-            writeScalarQueryResponse(response, result_block);
-        writeInstantQueryFooter(response);
-        return;
-    }
-    else
-    {
-        LOG_ERROR(log, "Unsupported result type: {}", converter.getResultType());
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Unsupported result type");
+        io.onException();
+        throw;
     }
 }
 
