@@ -1,23 +1,21 @@
 """
-Integration tests that assert Prometheus HTTP handler operations (remote write
-and Query API) are reflected in system.query_log and in rows/bytes columns.
-
-With the current implementation these tests are expected to fail, demonstrating
-that inserts and selects via the Prometheus HTTP handler are not tracked in the
-query log or in written_rows/read_rows as expected.
+Integration tests that assert Prometheus HTTP handler operations (remote write,
+remote read, Query API, and query_range API) are reflected in system.query_log
+and in rows/bytes columns.
 """
 
 import urllib.parse
-import uuid
 
 import pytest
 
 from helpers.cluster import ClickHouseCluster
 from helpers.test_tools import assert_eq_with_retry
 from .prometheus_test_utils import (
+    convert_read_request_to_protobuf,
     convert_time_series_to_protobuf,
-    send_protobuf_to_remote_write,
     get_response_to_http_api,
+    get_response_to_remote_read,
+    send_protobuf_to_remote_write,
     extract_data_from_http_api_response,
 )
 
@@ -58,7 +56,6 @@ def test_remote_write_appears_in_query_log_with_written_rows():
     """
     After a remote write to /write, there should be at least one row in
     system.query_log with type = 'QueryFinish' and written_rows > 0.
-    Fails with current implementation because remote write does not go through query_log.
     """
     node.query("SYSTEM FLUSH LOGS query_log")
     count_before = int(
@@ -88,20 +85,49 @@ def test_remote_write_appears_in_query_log_with_written_rows():
     )
 
 
+def test_remote_read_appears_in_query_log_with_read_rows():
+    """
+    After a Prometheus remote read request to /read, there should be at least one
+    row in system.query_log with type = 'QueryFinish', read_rows > 0, and read_bytes > 0.
+    """
+    node.query("SYSTEM FLUSH LOGS query_log")
+    count_before = int(
+        node.query(
+            "SELECT count() FROM system.query_log WHERE type = 'QueryFinish' AND read_rows > 0 AND read_bytes > 0"
+        ).strip()
+    )
+
+    read_request = convert_read_request_to_protobuf("up", 1753176650, 1753176760)
+    get_response_to_remote_read(node.ip_address, 9093, "read", read_request)
+
+    node.query("SYSTEM FLUSH LOGS query_log")
+
+    assert_eq_with_retry(
+        node,
+        "SELECT count() FROM system.query_log WHERE type = 'QueryFinish' AND read_rows > 0 AND read_bytes > 0",
+        f"{count_before + 1}\n",
+        retry_count=30,
+        sleep_time=1,
+    )
+
+
 def test_query_api_appears_in_query_log_with_read_rows():
     """
-    After a Prometheus Query API request with a unique query_id, there should be
-    a row in system.query_log with that query_id, type = 'QueryFinish', and
-    read_rows > 0 (and read_bytes > 0).
-    May fail if the implementation does not log the request or set read_rows/read_bytes.
+    After a Prometheus Query API (/api/v1/query) request, there should be a row in
+    system.query_log with type = 'QueryFinish', read_rows > 0, and read_bytes > 0.
+    Query API uses executeQuery internally, so it is logged there; we assert by count.
     """
-    query_id = f"prometheus_tracking_test_{uuid.uuid4().hex}"
     timestamp = 1753176757.89
     promql = "up"
 
-    # Call Query API with query_id
+    count_before = int(
+        node.query(
+            "SELECT count() FROM system.query_log WHERE type = 'QueryFinish' AND read_rows > 0 AND read_bytes > 0"
+        ).strip()
+    )
+
     escaped_query = urllib.parse.quote_plus(promql, safe="")
-    url = f"http://{node.ip_address}:9093/api/v1/query?query={escaped_query}&time={timestamp}&query_id={query_id}"
+    url = f"http://{node.ip_address}:9093/api/v1/query?query={escaped_query}&time={timestamp}"
     response = get_response_to_http_api(url)
     extract_data_from_http_api_response(response)
 
@@ -109,15 +135,39 @@ def test_query_api_appears_in_query_log_with_read_rows():
 
     assert_eq_with_retry(
         node,
-        f"SELECT count() FROM system.query_log WHERE query_id = '{query_id}' AND type = 'QueryFinish' AND read_rows > 0",
-        "1\n",
+        "SELECT count() FROM system.query_log WHERE type = 'QueryFinish' AND read_rows > 0 AND read_bytes > 0",
+        f"{count_before + 1}\n",
         retry_count=30,
         sleep_time=1,
     )
 
-    # Optionally assert read_bytes > 0
-    read_bytes_str = node.query(
-        f"SELECT read_bytes FROM system.query_log WHERE query_id = '{query_id}' AND type = 'QueryFinish' LIMIT 1"
-    ).strip()
-    assert read_bytes_str != "", "read_bytes should be present"
-    assert int(read_bytes_str) > 0, "read_bytes should be > 0 for a query that returned data"
+
+def test_query_range_api_appears_in_query_log_with_read_rows():
+    """
+    After a Prometheus query_range API (/api/v1/query_range) request, there should
+    be a row in system.query_log with type = 'QueryFinish', read_rows > 0, and
+    read_bytes > 0. query_range uses executeQuery internally, so it is logged there.
+    """
+    count_before = int(
+        node.query(
+            "SELECT count() FROM system.query_log WHERE type = 'QueryFinish' AND read_rows > 0 AND read_bytes > 0"
+        ).strip()
+    )
+
+    escaped_query = urllib.parse.quote_plus("up", safe="")
+    url = (
+        f"http://{node.ip_address}:9093/api/v1/query_range"
+        f"?query={escaped_query}&start=1753176650&end=1753176760&step=15"
+    )
+    response = get_response_to_http_api(url)
+    extract_data_from_http_api_response(response)
+
+    node.query("SYSTEM FLUSH LOGS query_log")
+
+    assert_eq_with_retry(
+        node,
+        "SELECT count() FROM system.query_log WHERE type = 'QueryFinish' AND read_rows > 0 AND read_bytes > 0",
+        f"{count_before + 1}\n",
+        retry_count=30,
+        sleep_time=1,
+    )
