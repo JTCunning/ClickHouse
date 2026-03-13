@@ -325,7 +325,7 @@ def _config_workflow(workflow: Workflow.Config, job_name) -> Result:
                 env.PR_LABELS = labels
             env.dump()
 
-    if workflow.enable_report:
+    if workflow.enable_report and not env.is_local_run():
         print("Push pending CI report")
         HtmlRunnerHooks.push_pending_ci_report(workflow)
 

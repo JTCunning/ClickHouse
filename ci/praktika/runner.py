@@ -295,24 +295,26 @@ class Runner:
             )
             from_root = "root" in docker_settings
             settings = [s for s in docker_settings if s.startswith("-")]
-            if ":" in job.run_in_docker:
-                docker_name, docker_tag = job.run_in_docker.split(":")
-                print(
-                    f"WARNING: Job [{job.name}] use custom docker image with a tag - praktika won't control docker version"
-                )
-            else:
-                docker_name, docker_tag = (
-                    job.run_in_docker,
-                    RunConfig.from_workflow_data().digest_dockers[job.run_in_docker],
-                )
-                if Utils.is_arm():
-                    docker_tag += "_arm"
-                elif Utils.is_amd():
-                    docker_tag += "_amd"
+            if not docker:
+                if ":" in job.run_in_docker:
+                    docker_name, docker_tag = job.run_in_docker.split(":")
+                    print(
+                        f"WARNING: Job [{job.name}] use custom docker image with a tag - praktika won't control docker version"
+                    )
                 else:
-                    raise RuntimeError("Unsupported CPU architecture")
-
-            docker = docker or f"{docker_name}:{docker_tag}"
+                    docker_name, docker_tag = (
+                        job.run_in_docker,
+                        RunConfig.from_workflow_data().digest_dockers[
+                            job.run_in_docker
+                        ],
+                    )
+                    if Utils.is_arm():
+                        docker_tag += "_arm"
+                    elif Utils.is_amd():
+                        docker_tag += "_amd"
+                    else:
+                        raise RuntimeError("Unsupported CPU architecture")
+                docker = f"{docker_name}:{docker_tag}"
             current_dir = os.getcwd()
             # Derive a stable container name from the worktree path and job name
             # so that different jobs (or the same job in different worktrees)

@@ -124,6 +124,8 @@ class HtmlRunnerHooks:
     def push_pending_ci_report(cls, _workflow):
         # generate pending Results for all jobs in the workflow
         env = _Environment.get()
+        if env.is_local_run():
+            return
         results = []
         for job in _workflow.jobs:
             if job.name == Settings.CI_CONFIG_JOB_NAME:

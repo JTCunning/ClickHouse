@@ -499,6 +499,15 @@ tar -czf ./ci/tmp/logs.tar.gz \
     ), f"Clickhouse config dir does not exist [{clickhouse_server_config_dir}]"
     print(f"Using ClickHouse binary at [{clickhouse_path}]")
 
+    # When running inside the runner container, the binary may be on a bind mount;
+    # the packed binary decompresses to /tmp and can hit "unlink: Device or resource busy".
+    # Copy to a writable path inside the container to avoid that.
+    if Path("/.dockerenv").exists() and Path(clickhouse_path).exists():
+        copy_dest = "/tmp/clickhouse_integration_bin"
+        Shell.check(f"cp -f {clickhouse_path} {copy_dest} && chmod +x {copy_dest}", verbose=True, strict=True)
+        clickhouse_path = copy_dest
+        print(f"Running in container: using copied binary at [{clickhouse_path}]")
+
     changed_test_modules = []
     if is_bugfix_validation or is_flaky_check or is_targeted_check:
         if info.is_local_run:
@@ -546,7 +555,16 @@ tar -czf ./ci/tmp/logs.tar.gz \
         ), "No changed test modules found, either job must be skipped or bug in changed test search logic"
 
     Shell.check(f"chmod +x {clickhouse_path}", verbose=True, strict=True)
-    Shell.check(f"{clickhouse_path} --version", verbose=True, strict=True)
+    # On macOS local runs the binary may be Linux (for Docker); skip host --version check
+    _version_ok = Shell.run(f"{clickhouse_path} --version", verbose=True, strict=False)
+    if _version_ok != 0:
+        if info.is_local_run and _version_ok == 126:
+            print(
+                "WARNING: ClickHouse binary not executable on host (e.g. Linux binary on macOS). "
+                "Assuming it is for Docker; continuing."
+            )
+        else:
+            Shell.check(f"{clickhouse_path} --version", verbose=True, strict=True)
 
     targeted_tests = []
     if is_targeted_check:
@@ -599,6 +617,11 @@ tar -czf ./ci/tmp/logs.tar.gz \
     # Setup environment variables for tests
     for image_name, env_name in IMAGES_ENV.items():
         tag = info.docker_tag(image_name)
+        if not tag and info.is_local_run:
+            tag = os.environ.get(env_name, "latest")
+            print(
+                f"Local run: no workflow config for [{image_name}], using [{tag}]"
+            )
         if tag:
             print(f"Setting environment variable [{env_name}] to [{tag}]")
             os.environ[env_name] = tag
