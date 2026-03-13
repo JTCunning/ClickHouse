@@ -29,9 +29,15 @@
 #include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
 #include <Core/Settings.h>
+#include <Common/DateLUT.h>
+#include <Core/QueryLogElementType.h>
+#include <Interpreters/QueryLog.h>
+#include <Interpreters/QueryLogElement.h>
 #include <Storages/TimeSeries/PrometheusRemoteReadProtocol.h>
 #include <Storages/TimeSeries/PrometheusRemoteWriteProtocol.h>
 #include <Storages/TimeSeries/PrometheusHTTPProtocolAPI.h>
+
+#include <chrono>
 
 
 namespace DB
@@ -227,6 +233,8 @@ public:
     void handlingRequestWithContext([[maybe_unused]] HTTPServerRequest & request, [[maybe_unused]] HTTPServerResponse & response) override
     {
 #if USE_PROMETHEUS_PROTOBUFS
+        const auto query_start_time = std::chrono::system_clock::now();
+
         checkHTTPHeader(request, "Content-Type", "application/x-protobuf");
         checkHTTPHeader(request, "Content-Encoding", "snappy");
 
@@ -244,11 +252,41 @@ public:
         auto table = DatabaseCatalog::instance().getTable(StorageID{config().time_series_table_name}, context);
         PrometheusRemoteWriteProtocol protocol{table, context};
 
+        PrometheusRemoteWriteResult total_written{0, 0};
+
         if (write_request.timeseries_size())
-            protocol.writeTimeSeries(write_request.timeseries());
+        {
+            auto result = protocol.writeTimeSeries(write_request.timeseries());
+            total_written.written_rows += result.written_rows;
+            total_written.written_bytes += result.written_bytes;
+        }
 
         if (write_request.metadata_size())
-            protocol.writeMetricsMetadata(write_request.metadata());
+        {
+            auto result = protocol.writeMetricsMetadata(write_request.metadata());
+            total_written.written_rows += result.written_rows;
+            total_written.written_bytes += result.written_bytes;
+        }
+
+        if (total_written.written_rows > 0 || total_written.written_bytes > 0)
+        {
+            if (auto query_log = context->getQueryLog())
+            {
+                const auto now = std::chrono::system_clock::now();
+                QueryLogElement elem;
+                elem.type = QueryLogElementType::QUERY_FINISH;
+                elem.event_time = static_cast<time_t>(timeInSeconds(now));
+                elem.event_time_microseconds = Decimal64(timeInMicroseconds(now));
+                elem.query_start_time = static_cast<time_t>(timeInSeconds(query_start_time));
+                elem.query_start_time_microseconds = Decimal64(timeInMicroseconds(query_start_time));
+                elem.query_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - query_start_time).count();
+                elem.written_rows = total_written.written_rows;
+                elem.written_bytes = total_written.written_bytes;
+                elem.query = "Prometheus remote write";
+                elem.client_info = context->getClientInfo();
+                query_log->add(elem);
+            }
+        }
 
         response.setStatusAndReason(Poco::Net::HTTPResponse::HTTPStatus::HTTP_NO_CONTENT, Poco::Net::HTTPResponse::HTTP_REASON_NO_CONTENT);
         response.setChunkedTransferEncoding(false);
@@ -274,6 +312,8 @@ public:
     void handlingRequestWithContext([[maybe_unused]] HTTPServerRequest & request, [[maybe_unused]] HTTPServerResponse & response) override
     {
 #if USE_PROMETHEUS_PROTOBUFS
+        const auto query_start_time = std::chrono::system_clock::now();
+
         checkHTTPHeader(request, "Content-Type", "application/x-protobuf");
         checkHTTPHeader(request, "Content-Encoding", "snappy");
 
@@ -292,17 +332,42 @@ public:
 
         prometheus::ReadResponse read_response;
 
+        UInt64 total_read_rows = 0;
+        UInt64 total_read_bytes = 0;
+
         size_t num_queries = read_request.queries_size();
         for (size_t i = 0; i != num_queries; ++i)
         {
             const auto & query = read_request.queries(static_cast<int>(i));
             auto & new_query_result = *read_response.add_results();
-            protocol.readTimeSeries(
+            auto result = protocol.readTimeSeries(
                 *new_query_result.mutable_timeseries(),
                 query.start_timestamp_ms(),
                 query.end_timestamp_ms(),
                 query.matchers(),
                 query.hints());
+            total_read_rows += result.read_rows;
+            total_read_bytes += result.read_bytes;
+        }
+
+        if (total_read_rows > 0 || total_read_bytes > 0)
+        {
+            if (auto query_log = context->getQueryLog())
+            {
+                const auto now = std::chrono::system_clock::now();
+                QueryLogElement elem;
+                elem.type = QueryLogElementType::QUERY_FINISH;
+                elem.event_time = static_cast<time_t>(timeInSeconds(now));
+                elem.event_time_microseconds = Decimal64(timeInMicroseconds(now));
+                elem.query_start_time = static_cast<time_t>(timeInSeconds(query_start_time));
+                elem.query_start_time_microseconds = Decimal64(timeInMicroseconds(query_start_time));
+                elem.query_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - query_start_time).count();
+                elem.read_rows = total_read_rows;
+                elem.read_bytes = total_read_bytes;
+                elem.query = "Prometheus remote read";
+                elem.client_info = context->getClientInfo();
+                query_log->add(elem);
+            }
         }
 
 #    if 0

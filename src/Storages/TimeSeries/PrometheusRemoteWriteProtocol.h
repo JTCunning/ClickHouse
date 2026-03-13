@@ -13,6 +13,13 @@ namespace DB
 {
 class StorageTimeSeries;
 
+/// Result of a remote write operation for query_log and profile events.
+struct PrometheusRemoteWriteResult
+{
+    UInt64 written_rows = 0;
+    UInt64 written_bytes = 0;
+};
+
 /// Helper class to support the prometheus remote write protocol.
 class PrometheusRemoteWriteProtocol : WithContext
 {
@@ -21,10 +28,10 @@ public:
     ~PrometheusRemoteWriteProtocol();
 
     /// Insert time series received by remote write protocol to our table.
-    void writeTimeSeries(const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series);
+    PrometheusRemoteWriteResult writeTimeSeries(const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series);
 
     /// Insert metrics metadata received by remote write protocol to our table.
-    void writeMetricsMetadata(const google::protobuf::RepeatedPtrField<prometheus::MetricMetadata> & metrics_metadata);
+    PrometheusRemoteWriteResult writeMetricsMetadata(const google::protobuf::RepeatedPtrField<prometheus::MetricMetadata> & metrics_metadata);
 
 private:
     std::shared_ptr<StorageTimeSeries> time_series_storage;

@@ -515,6 +515,18 @@ namespace
         return res;
     }
 
+    /// Returns total rows and bytes from blocks (for query_log).
+    static PrometheusRemoteWriteResult countRowsAndBytes(const BlocksToInsert & blocks)
+    {
+        PrometheusRemoteWriteResult res;
+        for (const auto & [_, block] : blocks.blocks)
+        {
+            res.written_rows += block.rows();
+            res.written_bytes += block.bytes();
+        }
+        return res;
+    }
+
     /// Inserts blocks to target tables.
     void insertToTargetTables(BlocksToInsert && blocks, StorageTimeSeries & time_series_storage, ContextPtr context, Poco::Logger * log)
     {
@@ -572,7 +584,7 @@ PrometheusRemoteWriteProtocol::PrometheusRemoteWriteProtocol(StoragePtr time_ser
 PrometheusRemoteWriteProtocol::~PrometheusRemoteWriteProtocol() = default;
 
 
-void PrometheusRemoteWriteProtocol::writeTimeSeries(const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series)
+PrometheusRemoteWriteResult PrometheusRemoteWriteProtocol::writeTimeSeries(const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series)
 {
     auto time_series_storage_id = time_series_storage->getStorageID();
 
@@ -583,13 +595,15 @@ void PrometheusRemoteWriteProtocol::writeTimeSeries(const google::protobuf::Repe
     const auto & time_series_settings = time_series_storage->getStorageSettings();
 
     auto blocks = toBlocks(time_series, getContext(), time_series_storage_id, *time_series_storage_metadata, time_series_settings);
+    auto result = countRowsAndBytes(blocks);
     insertToTargetTables(std::move(blocks), *time_series_storage, getContext(), log.get());
 
     LOG_TRACE(log, "{}: {} time series written",
               time_series_storage_id.getNameForLogs(), time_series.size());
+    return result;
 }
 
-void PrometheusRemoteWriteProtocol::writeMetricsMetadata(const google::protobuf::RepeatedPtrField<prometheus::MetricMetadata> & metrics_metadata)
+PrometheusRemoteWriteResult PrometheusRemoteWriteProtocol::writeMetricsMetadata(const google::protobuf::RepeatedPtrField<prometheus::MetricMetadata> & metrics_metadata)
 {
     auto time_series_storage_id = time_series_storage->getStorageID();
 
@@ -600,10 +614,12 @@ void PrometheusRemoteWriteProtocol::writeMetricsMetadata(const google::protobuf:
     const auto & time_series_settings = time_series_storage->getStorageSettings();
 
     auto blocks = toBlocks(metrics_metadata, time_series_storage_id, *time_series_storage_metadata, time_series_settings);
+    auto result = countRowsAndBytes(blocks);
     insertToTargetTables(std::move(blocks), *time_series_storage, getContext(), log.get());
 
     LOG_TRACE(log, "{}: {} metrics metadata written",
               time_series_storage_id.getNameForLogs(), metrics_metadata.size());
+    return result;
 }
 
 }

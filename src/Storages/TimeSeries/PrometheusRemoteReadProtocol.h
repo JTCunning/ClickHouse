@@ -13,6 +13,13 @@ namespace DB
 {
 class StorageTimeSeries;
 
+/// Result of a remote read operation for query_log.
+struct PrometheusRemoteReadResult
+{
+    UInt64 read_rows = 0;
+    UInt64 read_bytes = 0;
+};
+
 /// Helper class to support the prometheus remote read protocol.
 class PrometheusRemoteReadProtocol : public WithContext
 {
@@ -21,11 +28,12 @@ public:
     ~PrometheusRemoteReadProtocol();
 
     /// Reads time series to send to client by remote read protocol.
-    void readTimeSeries(google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & out_time_series,
-                        Int64 start_timestamp_ms,
-                        Int64 end_timestamp_ms,
-                        const google::protobuf::RepeatedPtrField<prometheus::LabelMatcher> & label_matcher,
-                        const prometheus::ReadHints & read_hints);
+    /// Returns read_rows and read_bytes for query_log.
+    PrometheusRemoteReadResult readTimeSeries(google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & out_time_series,
+                                              Int64 start_timestamp_ms,
+                                              Int64 end_timestamp_ms,
+                                              const google::protobuf::RepeatedPtrField<prometheus::LabelMatcher> & label_matcher,
+                                              const prometheus::ReadHints & read_hints);
 
 private:
     std::shared_ptr<const StorageTimeSeries> time_series_storage;

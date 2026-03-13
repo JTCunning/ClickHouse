@@ -219,13 +219,15 @@ PrometheusRemoteReadProtocol::PrometheusRemoteReadProtocol(ConstStoragePtr time_
 
 PrometheusRemoteReadProtocol::~PrometheusRemoteReadProtocol() = default;
 
-void PrometheusRemoteReadProtocol::readTimeSeries(google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & out_time_series,
-                                                  Int64 start_timestamp_ms,
-                                                  Int64 end_timestamp_ms,
-                                                  const google::protobuf::RepeatedPtrField<prometheus::LabelMatcher> & label_matcher,
-                                                  const prometheus::ReadHints &)
+PrometheusRemoteReadResult PrometheusRemoteReadProtocol::readTimeSeries(google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & out_time_series,
+                                                                       Int64 start_timestamp_ms,
+                                                                       Int64 end_timestamp_ms,
+                                                                       const google::protobuf::RepeatedPtrField<prometheus::LabelMatcher> & label_matcher,
+                                                                       const prometheus::ReadHints &)
 {
     out_time_series.Clear();
+
+    PrometheusRemoteReadResult result;
 
     auto time_series_storage_id = time_series_storage->getStorageID();
 
@@ -257,11 +259,17 @@ void PrometheusRemoteReadProtocol::readTimeSeries(google::protobuf::RepeatedPtrF
                   time_series_storage_id.getNameForLogs(), block.columns(), block.rows());
 
         if (!block.empty())
+        {
+            result.read_rows += block.rows();
+            result.read_bytes += block.bytes();
             convertBlockToProtobuf(std::move(block), out_time_series);
+        }
     }
 
     LOG_TRACE(log, "{}: {} time series read",
               time_series_storage_id.getNameForLogs(), out_time_series.size());
+
+    return result;
 }
 
 }
