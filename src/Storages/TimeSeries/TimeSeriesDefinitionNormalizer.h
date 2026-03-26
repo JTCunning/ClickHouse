@@ -18,7 +18,8 @@ public:
     /// Constructor stores a reference to argument `time_series_settings_` (it's unnecessary to copy it).
     TimeSeriesDefinitionNormalizer(StorageID time_series_storage_id_,
                                    std::reference_wrapper<const TimeSeriesSettings> time_series_settings_,
-                                   const ASTCreateQuery * as_create_query_);
+                                   const ASTCreateQuery * as_create_query_,
+                                   bool use_locality_id_);
 
     /// Adds missing columns to the definition and reorders all the columns in the canonical way.
     /// Also adds engines of inner tables to the definition if they aren't specified yet.
@@ -50,6 +51,7 @@ private:
     const StorageID time_series_storage_id;
     const TimeSeriesSettings & time_series_settings;
     const ASTCreateQuery * as_create_query = nullptr;
+    const bool use_locality_id = false;
 };
 
 }

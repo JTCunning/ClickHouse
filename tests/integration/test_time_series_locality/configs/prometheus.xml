@@ -1,0 +1,35 @@
+<clickhouse>
+    <prometheus>
+        <port>9093</port>
+        <handlers>
+            <locality_write>
+                <url>/write_locality</url>
+                <handler>
+                    <type>remote_write</type>
+                    <table>default.ts_locality</table>
+                </handler>
+            </locality_write>
+            <legacy_write>
+                <url>/write_legacy</url>
+                <handler>
+                    <type>remote_write</type>
+                    <table>default.ts_legacy</table>
+                </handler>
+            </legacy_write>
+            <promote_a_write>
+                <url>/write_promote_a</url>
+                <handler>
+                    <type>remote_write</type>
+                    <table>default.ts_promote_a</table>
+                </handler>
+            </promote_a_write>
+            <promote_b_write>
+                <url>/write_promote_b</url>
+                <handler>
+                    <type>remote_write</type>
+                    <table>default.ts_promote_b</table>
+                </handler>
+            </promote_b_write>
+        </handlers>
+    </prometheus>
+</clickhouse>

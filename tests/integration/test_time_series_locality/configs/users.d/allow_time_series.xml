@@ -2,7 +2,6 @@
     <profiles>
         <default>
             <allow_experimental_time_series_table>1</allow_experimental_time_series_table>
-            <allow_experimental_time_series_locality_id>1</allow_experimental_time_series_locality_id>
         </default>
     </profiles>
 </clickhouse>

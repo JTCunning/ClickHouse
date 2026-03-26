@@ -7512,6 +7512,9 @@ Allows creation of tables with the [TimeSeries](../../engines/table-engines/inte
 - 0 — the [TimeSeries](../../engines/table-engines/integrations/time-series.md) table engine is disabled.
 - 1 — the [TimeSeries](../../engines/table-engines/integrations/time-series.md) table engine is enabled.
 )", EXPERIMENTAL) \
+    DECLARE(Bool, allow_experimental_time_series_locality_id, false, R"(
+If enabled together with `allow_experimental_time_series_table`, the implicit `DEFAULT` expression for the `id` column of `TimeSeries` tables uses the `timeSeriesLocalityId` function to improve data locality in the inner `MergeTree` table. If disabled, the previous `sipHash128`-based default is used.
+)", EXPERIMENTAL) \
     DECLARE(Bool, allow_experimental_codecs, false, R"(
 If it is set to true, allow to specify experimental compression codecs (but we don't have those yet and this option does nothing).
 )", EXPERIMENTAL) \

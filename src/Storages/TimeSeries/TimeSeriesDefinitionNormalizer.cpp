@@ -33,10 +33,12 @@ namespace ErrorCodes
 
 TimeSeriesDefinitionNormalizer::TimeSeriesDefinitionNormalizer(StorageID time_series_storage_id_,
                                                                std::reference_wrapper<const TimeSeriesSettings> time_series_settings_,
-                                                               const ASTCreateQuery * as_create_query_)
+                                                               const ASTCreateQuery * as_create_query_,
+                                                               bool use_locality_id_)
     : time_series_storage_id(std::move(time_series_storage_id_))
     , time_series_settings(time_series_settings_)
     , as_create_query(as_create_query_)
+    , use_locality_id(use_locality_id_)
 {
 }
 
@@ -288,11 +290,40 @@ void TimeSeriesDefinitionNormalizer::addMissingDefaultForIDColumn(ASTCreateQuery
 
 ASTPtr TimeSeriesDefinitionNormalizer::chooseIDAlgorithm(const ASTColumnDeclaration & id_column) const
 {
-    /// Build a list of arguments for a hash function.
-    /// All hash functions below allow multiple arguments, so we use two arguments: metric_name, all_tags.
+    auto make_locality_id_call = [&]() -> ASTPtr
+    {
+        ASTs args;
+        args.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
+
+        if (time_series_settings[TimeSeriesSetting::use_all_tags_column_to_generate_id])
+        {
+            args.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::AllTags));
+        }
+        else
+        {
+            const Map & tags_to_columns = time_series_settings[TimeSeriesSetting::tags_to_columns];
+            for (const auto & tag_name_and_column_name : tags_to_columns)
+            {
+                const auto & tuple = tag_name_and_column_name.safeGet<Tuple>();
+                const auto & tag_name = tuple.at(0).safeGet<String>();
+                const auto & column_name = tuple.at(1).safeGet<String>();
+                args.push_back(make_intrusive<ASTLiteral>(tag_name));
+                args.push_back(make_intrusive<ASTIdentifier>(column_name));
+            }
+            args.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Tags));
+        }
+
+        auto function = make_intrusive<ASTFunction>();
+        function->name = "timeSeriesLocalityId";
+        auto arguments_list = make_intrusive<ASTExpressionList>();
+        arguments_list->children = std::move(args);
+        function->arguments = arguments_list;
+        return function;
+    };
+
+    /// Build a list of arguments for sipHash64 (used only for UInt64 `id`).
     ASTs arguments_for_hash_function;
     arguments_for_hash_function.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
-
     if (time_series_settings[TimeSeriesSetting::use_all_tags_column_to_generate_id])
     {
         arguments_for_hash_function.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::AllTags));
@@ -325,18 +356,25 @@ ASTPtr TimeSeriesDefinitionNormalizer::chooseIDAlgorithm(const ASTColumnDeclarat
 
     if (id_type_which.isUInt64())
     {
+        /// UInt64 is too small for locality bits + sipHash64 tail without excessive collision risk.
         return make_hash_function("sipHash64");
     }
     if (id_type_which.isFixedString() && typeid_cast<const DataTypeFixedString &>(*id_type).getN() == 16)
     {
+        if (use_locality_id)
+            return make_locality_id_call();
         return make_hash_function("sipHash128");
     }
     if (id_type_which.isUUID())
     {
+        if (use_locality_id)
+            return makeASTFunction("reinterpretAsUUID", make_locality_id_call());
         return makeASTFunction("reinterpretAsUUID", make_hash_function("sipHash128"));
     }
     if (id_type_which.isUInt128())
     {
+        if (use_locality_id)
+            return makeASTFunction("reinterpretAsUInt128", make_locality_id_call());
         return makeASTFunction("reinterpretAsUInt128", make_hash_function("sipHash128"));
     }
 
@@ -345,7 +383,7 @@ ASTPtr TimeSeriesDefinitionNormalizer::chooseIDAlgorithm(const ASTColumnDeclarat
         "{}: The DEFAULT expression for column {} must contain an expression "
         "which will be used to calculate the identifier of each time series: {} {} DEFAULT ... "
         "If the DEFAULT expression is not specified then it can be chosen implicitly but only if the column type is one of these: "
-        "UInt64, UInt128, UUID. "
+        "UInt64, UInt128, UUID, FixedString(16). "
         "For type {} the DEFAULT expression can't be chosen automatically, so please specify it explicitly",
         time_series_storage_id.getNameForLogs(),
         id_column.name,

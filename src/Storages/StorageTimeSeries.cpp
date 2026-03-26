@@ -24,6 +24,7 @@ namespace DB
 namespace Setting
 {
     extern const SettingsBool allow_experimental_time_series_table;
+    extern const SettingsBool allow_experimental_time_series_locality_id;
 }
 
 namespace ErrorCodes
@@ -116,7 +117,11 @@ void StorageTimeSeries::normalizeTableDefinition(ASTCreateQuery & create_query, 
         as_create_query = boost::static_pointer_cast<const ASTCreateQuery>(
             DatabaseCatalog::instance().getDatabase(as_database)->getCreateTableQuery(create_query.as_table, local_context));
     }
-    TimeSeriesDefinitionNormalizer normalizer{time_series_storage_id, time_series_settings, as_create_query.get()};
+    TimeSeriesDefinitionNormalizer normalizer{
+        time_series_storage_id,
+        time_series_settings,
+        as_create_query.get(),
+        local_context->getSettingsRef()[Setting::allow_experimental_time_series_locality_id]};
     normalizer.normalize(create_query);
 }
 
