@@ -4,6 +4,10 @@
 #if USE_PROMETHEUS_PROTOBUFS
 
 #include <algorithm>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnMap.h>
 #include <Columns/ColumnTuple.h>
@@ -48,13 +52,17 @@ namespace ErrorCodes
 
 namespace
 {
-    /// Checks that a specified set of labels is sorted and has no duplications, and there is one label named "__name__".
-    void checkLabels(const google::protobuf::RepeatedPtrField<prometheus::Label> & labels)
+    /// Prometheus remote write does not require labels to be sorted; we normalize to lexicographic order by name for storage.
+    /// Empty label values are skipped (same as treating the label as absent). Requires non-empty `__name__`.
+    std::vector<std::pair<std::string, std::string>> prepareSortedLabels(
+        const google::protobuf::RepeatedPtrField<prometheus::Label> & labels)
     {
-        bool metric_name_found = false;
-        for (size_t i = 0; i != static_cast<size_t>(labels.size()); ++i)
+        std::vector<std::pair<std::string, std::string>> sorted;
+        sorted.reserve(static_cast<size_t>(labels.size()));
+
+        for (int i = 0; i < labels.size(); ++i)
         {
-            const auto & label = labels[static_cast<int>(i)];
+            const auto & label = labels[i];
             const auto & label_name = label.name();
             const auto & label_value = label.value();
 
@@ -63,28 +71,31 @@ namespace
             if (label_value.empty())
                 continue; /// Empty label value is treated like the label doesn't exist.
 
-            if (label_name == TimeSeriesTagNames::MetricName)
-                metric_name_found = true;
+            sorted.emplace_back(label_name, label_value);
+        }
 
-            if (i)
+        std::sort(sorted.begin(), sorted.end(), [](const auto & a, const auto & b) { return a.first < b.first; });
+
+        for (size_t i = 1; i < sorted.size(); ++i)
+        {
+            if (sorted[i].first == sorted[i - 1].first)
+                throw Exception(ErrorCodes::ILLEGAL_TIME_SERIES_TAGS, "Found duplicate label {}", sorted[i].first);
+        }
+
+        bool metric_name_found = false;
+        for (const auto & [name, _] : sorted)
+        {
+            if (name == TimeSeriesTagNames::MetricName)
             {
-                /// Check that labels are sorted.
-                const auto & previous_label_name = labels[static_cast<int>(i - 1)].name();
-                if (label_name <= previous_label_name)
-                {
-                    if (label_name == previous_label_name)
-                        throw Exception(ErrorCodes::ILLEGAL_TIME_SERIES_TAGS, "Found duplicate label {}", label_name);
-                    throw Exception(
-                        ErrorCodes::ILLEGAL_TIME_SERIES_TAGS,
-                        "Label names are not sorted in lexicographical order ({} > {})",
-                        previous_label_name,
-                        label_name);
-                }
+                metric_name_found = true;
+                break;
             }
         }
 
         if (!metric_name_found)
             throw Exception(ErrorCodes::ILLEGAL_TIME_SERIES_TAGS, "Metric name (label {}) not found", TimeSeriesTagNames::MetricName);
+
+        return sorted;
     }
 
     /// Finds the description of an insertable column in the list.
@@ -331,24 +342,20 @@ namespace
                 continue;
 
             const auto & labels = element.labels();
-            checkLabels(labels);
+            const auto sorted_labels = prepareSortedLabels(labels);
 
-            for (size_t j = 0; j != static_cast<size_t>(labels.size()); ++j)
+            for (const auto & [tag_name, tag_value] : sorted_labels)
             {
-                const auto & label = labels[static_cast<int>(j)];
-                const auto & tag_name = label.name();
-                const auto & tag_value = label.value();
-
                 if (tag_name == TimeSeriesTagNames::MetricName)
                 {
-                    metric_name_column.insertData(tag_value.data(), tag_value.length());
+                    metric_name_column.insertData(tag_value.data(), tag_value.size());
                 }
                 else
                 {
                     if (time_series_settings[TimeSeriesSetting::use_all_tags_column_to_generate_id])
                     {
-                        all_tags_names->insertData(tag_name.data(), tag_name.length());
-                        all_tags_values->insertData(tag_value.data(), tag_value.length());
+                        all_tags_names->insertData(tag_name.data(), tag_name.size());
+                        all_tags_values->insertData(tag_value.data(), tag_value.size());
                     }
 
                     auto it = columns_by_tag_name.find(tag_name);
@@ -356,12 +363,12 @@ namespace
                     if (has_column_for_tag_value)
                     {
                         auto * column = it->second;
-                        column->insertData(tag_value.data(), tag_value.length());
+                        column->insertData(tag_value.data(), tag_value.size());
                     }
                     else
                     {
-                        tags_names.insertData(tag_name.data(), tag_name.length());
-                        tags_values.insertData(tag_value.data(), tag_value.length());
+                        tags_names.insertData(tag_name.data(), tag_name.size());
+                        tags_values.insertData(tag_value.data(), tag_value.size());
                     }
                 }
             }

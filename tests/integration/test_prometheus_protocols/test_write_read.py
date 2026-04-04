@@ -140,6 +140,41 @@ def test_remote_read_auth():
     assert auth_fail_response.status_code == requests.codes.forbidden
 
 
+def test_remote_write_unsorted_labels_ok():
+    """Prometheus RW1 may send labels not in lexicographic order; server must accept (normalize when storing)."""
+    ts_ms = int(time.time() * 1000)
+    label_order = [
+        ("job", "prometheus"),
+        ("instance", "localhost:9090"),
+        ("__name__", "rw1_unsorted_labels_test"),
+    ]
+    write_request = write_request_one_series_from_label_tuples(
+        label_order, ts_ms, 42.0
+    )
+    send_protobuf_to_remote_write(node.ip_address, 9093, "/write", write_request)
+    assert (
+        node.query(
+            "SELECT count() FROM timeSeriesTags(prometheus) WHERE metric_name = 'rw1_unsorted_labels_test'"
+        ).strip()
+        == "1"
+    )
+
+
+def test_remote_write_corrupt_snappy_returns_bad_request():
+    url = f"http://{node.ip_address}:9093/write"
+    response = requests.post(
+        url,
+        data=b"\xffnot_valid_snappy_payload",
+        headers={
+            "Content-Encoding": "snappy",
+            "Content-Type": "application/x-protobuf",
+            "User-Agent": requests.utils.default_user_agent(),
+            "X-Prometheus-Remote-Write-Version": "0.1.0",
+        },
+    )
+    assert response.status_code == requests.codes.bad_request
+
+
 def test_remote_read_big_data():
     read_request = convert_read_request_to_protobuf(
         "^big_data$", 1724112000, 1724115600

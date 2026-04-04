@@ -16,6 +16,20 @@ import prompb.remote_pb2 as remote_pb2
 import prompb.types_pb2 as types_pb2
 
 
+# Builds a WriteRequest with one time series; `label_tuples` preserve insertion order in the protobuf (not necessarily sorted).
+def write_request_one_series_from_label_tuples(label_tuples, timestamp_ms, value):
+    write_request = remote_pb2.WriteRequest()
+    ts = write_request.timeseries.add()
+    for name, val in label_tuples:
+        lab = ts.labels.add()
+        lab.name = name
+        lab.value = val
+    sample = ts.samples.add()
+    sample.timestamp = timestamp_ms
+    sample.value = value
+    return write_request
+
+
 # Converts time series data
 # [ ({'label_name1': 'label_value1], ...}, {timestamp1: value1, ...} ), ... ]
 # to a protobuf message of type remote_pb2.WriteRequest.

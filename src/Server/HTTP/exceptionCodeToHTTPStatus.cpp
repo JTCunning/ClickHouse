@@ -64,6 +64,8 @@ namespace ErrorCodes
     extern const int HTTP_LENGTH_REQUIRED;
 
     extern const int TIMEOUT_EXCEEDED;
+
+    extern const int SNAPPY_UNCOMPRESS_FAILED;
 }
 
 
@@ -92,7 +94,8 @@ Poco::Net::HTTPResponse::HTTPStatus exceptionCodeToHTTPStatus(int exception_code
         || exception_code == ErrorCodes::TOO_DEEP_AST || exception_code == ErrorCodes::TOO_BIG_AST
         || exception_code == ErrorCodes::UNEXPECTED_AST_STRUCTURE || exception_code == ErrorCodes::SYNTAX_ERROR
         || exception_code == ErrorCodes::INCORRECT_DATA || exception_code == ErrorCodes::TYPE_MISMATCH
-        || exception_code == ErrorCodes::VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE)
+        || exception_code == ErrorCodes::VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE
+        || exception_code == ErrorCodes::SNAPPY_UNCOMPRESS_FAILED)
     {
         return HTTPResponse::HTTP_BAD_REQUEST;
     }
