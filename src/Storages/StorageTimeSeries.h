@@ -44,6 +44,8 @@ public:
     const TimeSeriesSettings & getStorageSettings() const;
 
     StorageID getTargetTableId(ViewTarget::Kind target_kind) const;
+    /// Whether the physical **data** target table has a `metric_locality_id` column (may be false for older / external layouts).
+    bool dataTargetHasMetricLocalityIdColumn(const ContextPtr & local_context) const;
     StoragePtr getTargetTable(ViewTarget::Kind target_kind, const ContextPtr & local_context) const;
     StoragePtr tryGetTargetTable(ViewTarget::Kind target_kind, const ContextPtr & local_context) const;
 

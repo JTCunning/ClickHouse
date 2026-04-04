@@ -1,6 +1,8 @@
 #include <Storages/StorageTimeSeriesSelector.h>
 
 #include <Common/quoteString.h>
+#include <Core/Field.h>
+#include <Core/Joins.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DatabaseCatalog.h>
@@ -16,9 +18,11 @@
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
 #include <Parsers/makeASTForLogicalFunction.h>
+#include <optional>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
+#include <Storages/TimeSeries/TimeSeriesMetricLocalityId.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <Storages/TimeSeries/timeSeriesTypesToAST.h>
@@ -300,13 +304,166 @@ namespace
         return select_with_union_query;
     }
 
+    /// Same scan shape as `makeSelectQueryFromTagsTable`, but projects `id` and `metric_name` for legacy data tables
+    /// that have no `metric_locality_id` column on the data target (synthetic locality via `timeSeriesMetricLocalityId`).
+    ASTPtr makeSelectIdAndMetricNameFromTagsTable(
+        const StorageID & tags_table_id,
+        const PrometheusQueryTree::MatcherList & matchers,
+        const std::unordered_map<String, String> & column_name_by_tag_name,
+        const std::optional<DateTime64> & min_time,
+        const std::optional<DateTime64> & max_time,
+        const DataTypePtr & timestamp_data_type)
+    {
+        auto select_query = make_intrusive<ASTSelectQuery>();
+
+        {
+            auto select_list_exp = make_intrusive<ASTExpressionList>();
+            auto & select_list = select_list_exp->children;
+
+            select_list.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+            select_list.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
+
+            select_query->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+        }
+
+        auto tables = make_intrusive<ASTTablesInSelectQuery>();
+
+        {
+            auto table = make_intrusive<ASTTablesInSelectQueryElement>();
+            auto table_exp = make_intrusive<ASTTableExpression>();
+            table_exp->database_and_table_name = make_intrusive<ASTTableIdentifier>(tags_table_id);
+            table_exp->children.emplace_back(table_exp->database_and_table_name);
+
+            table->table_expression = table_exp;
+            tables->children.push_back(table);
+
+            select_query->setExpression(ASTSelectQuery::Expression::TABLES, tables);
+        }
+
+        {
+            auto where_filter = makeWhereFilterForTagsTable(matchers, column_name_by_tag_name, min_time, max_time, timestamp_data_type);
+            select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_filter));
+        }
+
+        auto select_with_union_query = make_intrusive<ASTSelectWithUnionQuery>();
+        select_with_union_query->union_mode = SelectUnionMode::UNION_DEFAULT;
+        auto list_of_selects = make_intrusive<ASTExpressionList>();
+        list_of_selects->children.push_back(std::move(select_query));
+        select_with_union_query->children.push_back(std::move(list_of_selects));
+        select_with_union_query->list_of_selects = select_with_union_query->children.back();
+
+        return select_with_union_query;
+    }
+
+    ASTPtr wrapDataInnerSelectWithTagsJoinForSyntheticLocality(
+        ASTPtr data_inner_union,
+        ASTPtr tags_id_and_metric_name_union,
+        const DataTypePtr & id_data_type,
+        const DataTypePtr & timestamp_data_type,
+        const DataTypePtr & scalar_data_type)
+    {
+        static constexpr const char * data_alias = "_ts_sel_data";
+        static constexpr const char * tags_alias = "_ts_sel_tags";
+
+        auto data_subquery = make_intrusive<ASTSubquery>(std::move(data_inner_union));
+        data_subquery->setAlias(data_alias);
+
+        auto tags_subquery = make_intrusive<ASTSubquery>(std::move(tags_id_and_metric_name_union));
+        tags_subquery->setAlias(tags_alias);
+
+        auto outer = make_intrusive<ASTSelectQuery>();
+
+        {
+            auto select_list_exp = make_intrusive<ASTExpressionList>();
+            auto & select_list = select_list_exp->children;
+
+            select_list.push_back(makeASTFunction(
+                "CAST",
+                make_intrusive<ASTIdentifier>(std::vector<String>{data_alias, String(TimeSeriesColumnNames::ID)}),
+                make_intrusive<ASTLiteral>(id_data_type->getName())));
+            select_list.back()->setAlias(TimeSeriesColumnNames::ID);
+
+            select_list.push_back(timeSeriesTimestampASTCast(
+                make_intrusive<ASTIdentifier>(std::vector<String>{data_alias, String(TimeSeriesColumnNames::Timestamp)}),
+                timestamp_data_type));
+            select_list.back()->setAlias(TimeSeriesColumnNames::Timestamp);
+
+            select_list.push_back(timeSeriesScalarASTCast(
+                make_intrusive<ASTIdentifier>(std::vector<String>{data_alias, String(TimeSeriesColumnNames::Value)}),
+                scalar_data_type));
+            select_list.back()->setAlias(TimeSeriesColumnNames::Value);
+
+            select_list.push_back(makeASTFunction(
+                "timeSeriesMetricLocalityId",
+                make_intrusive<ASTIdentifier>(std::vector<String>{tags_alias, String(TimeSeriesColumnNames::MetricName)})));
+            select_list.back()->setAlias(TimeSeriesColumnNames::MetricLocalityId);
+
+            outer->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+        }
+
+        auto tables = make_intrusive<ASTTablesInSelectQuery>();
+
+        {
+            auto table = make_intrusive<ASTTablesInSelectQueryElement>();
+            auto table_exp = make_intrusive<ASTTableExpression>();
+            table_exp->subquery = data_subquery;
+            table_exp->children.push_back(data_subquery);
+            table->table_expression = table_exp;
+            tables->children.push_back(table);
+        }
+
+        {
+            auto table_join = make_intrusive<ASTTableJoin>();
+            table_join->strictness = JoinStrictness::Any;
+            table_join->kind = JoinKind::Inner;
+            table_join->on_expression = makeASTFunction(
+                "equals",
+                make_intrusive<ASTIdentifier>(std::vector<String>{data_alias, String(TimeSeriesColumnNames::ID)}),
+                make_intrusive<ASTIdentifier>(std::vector<String>{tags_alias, String(TimeSeriesColumnNames::ID)}));
+            table_join->children.push_back(table_join->on_expression);
+
+            auto table = make_intrusive<ASTTablesInSelectQueryElement>();
+            table->table_join = table_join;
+
+            auto table_exp = make_intrusive<ASTTableExpression>();
+            table_exp->subquery = tags_subquery;
+            table_exp->children.push_back(tags_subquery);
+
+            table->table_expression = table_exp;
+            table->children.push_back(table_join);
+            table->children.push_back(table_exp);
+
+            tables->children.push_back(table);
+        }
+
+        outer->setExpression(ASTSelectQuery::Expression::TABLES, std::move(tables));
+
+        auto wrapped = make_intrusive<ASTSelectWithUnionQuery>();
+        wrapped->union_mode = SelectUnionMode::UNION_DEFAULT;
+        auto list_of_selects = make_intrusive<ASTExpressionList>();
+        list_of_selects->children.push_back(std::move(outer));
+        wrapped->children.push_back(std::move(list_of_selects));
+        wrapped->list_of_selects = wrapped->children.back();
+        return wrapped;
+    }
+
     ASTPtr makeWhereFilterForDataTable(
         ASTPtr select_query_from_tags_table,
         DateTime64 min_time,
         DateTime64 max_time,
-        const DataTypePtr & timestamp_data_type)
+        const DataTypePtr & timestamp_data_type,
+        std::optional<UInt32> metric_locality_id_hint)
     {
         ASTs conditions;
+
+        /// metric_locality_id = const (MergeTree primary-key prefix for the data table) when `__name__` is an exact matcher.
+        if (metric_locality_id_hint)
+        {
+            conditions.push_back(makeASTFunction(
+                "equals",
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricLocalityId),
+                make_intrusive<ASTLiteral>(Field{*metric_locality_id_hint})));
+        }
 
         /// id IN (SELECT id FROM (select_id_query))
         conditions.push_back(makeASTFunction("in", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), select_query_from_tags_table));
@@ -326,17 +483,28 @@ namespace
         return makeASTForLogicalAnd(std::move(conditions));
     }
 
-    ASTPtr makeSelectQueryFromDataTable(const StorageID & data_table_id,
-                                        ASTPtr select_query_from_tags_table,
-                                        DateTime64 min_time,
-                                        DateTime64 max_time,
-                                        const DataTypePtr & id_data_type,
-                                        const DataTypePtr & timestamp_data_type,
-                                        const DataTypePtr & scalar_data_type)
+    ASTPtr makeSelectQueryFromDataTable(
+        const StorageID & data_table_id,
+        ASTPtr select_query_from_tags_table,
+        DateTime64 min_time,
+        DateTime64 max_time,
+        const DataTypePtr & id_data_type,
+        const DataTypePtr & timestamp_data_type,
+        const DataTypePtr & scalar_data_type,
+        std::optional<UInt32> metric_locality_id_hint,
+        bool data_table_has_metric_locality_id_column,
+        const StorageID & tags_table_id,
+        const PrometheusQueryTree::MatcherList & matchers,
+        const std::unordered_map<String, String> & column_name_by_tag_name,
+        const std::optional<DateTime64> & min_time_to_filter_ids,
+        const std::optional<DateTime64> & max_time_to_filter_ids)
     {
+        const std::optional<UInt32> prewhere_locality_hint
+            = data_table_has_metric_locality_id_column ? metric_locality_id_hint : std::nullopt;
+
         auto select_query = make_intrusive<ASTSelectQuery>();
 
-        /// SELECT id, timestamp, value
+        /// SELECT id, timestamp, value [, metric_locality_id]
         {
             auto select_list_exp = make_intrusive<ASTExpressionList>();
             auto & select_list = select_list_exp->children;
@@ -352,7 +520,26 @@ namespace
             select_list.push_back(timeSeriesScalarASTCast(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Value), scalar_data_type));
             select_list.back()->setAlias(TimeSeriesColumnNames::Value);
 
-            select_query->setExpression(ASTSelectQuery::Expression::SELECT, select_list_exp);
+            if (data_table_has_metric_locality_id_column)
+            {
+                /// Physical column (MergeTree sort-key prefix); `PREWHERE` can pin it when `__name__` matches by EQ.
+                select_list.push_back(makeASTFunction(
+                    "CAST",
+                    make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricLocalityId),
+                    make_intrusive<ASTLiteral>("UInt32")));
+                select_list.back()->setAlias(TimeSeriesColumnNames::MetricLocalityId);
+            }
+            else if (metric_locality_id_hint)
+            {
+                /// Older data targets without `metric_locality_id`: value is implied by the selector’s `__name__` EQ matcher.
+                select_list.push_back(makeASTFunction(
+                    "CAST",
+                    make_intrusive<ASTLiteral>(Field{*metric_locality_id_hint}),
+                    make_intrusive<ASTLiteral>("UInt32")));
+                select_list.back()->setAlias(TimeSeriesColumnNames::MetricLocalityId);
+            }
+
+            select_query->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
         }
 
         /// FROM data_table_id
@@ -370,7 +557,7 @@ namespace
             select_query->setExpression(ASTSelectQuery::Expression::TABLES, tables);
         }
 
-        /// PREWHERE (id IN (SELECT id FROM (select_query_from_tags_table))) AND (timestamp >= min_time) AND (timestamp <= max_time)
+        /// PREWHERE (metric_locality_id = const)? AND (id IN (...)) AND (timestamp bounds)
         ///
         /// NOTE: We have to use PREWHERE and not WHERE here to make sure that tags are stored in ContextTimeSeriesTagsCollector before we use them.
         /// Otherwise in case the result of timeSeriesSelector() is passed to timeSeriesIdToGroup() as following:
@@ -378,7 +565,8 @@ namespace
         /// ClickHouse may decide to parallelize and execute timeSeriesIdToGroup(id) before executing timeSeriesStoreTags()
         /// which may cause exception "Unknown identifier".
         {
-            auto prewhere_filter = makeWhereFilterForDataTable(select_query_from_tags_table, min_time, max_time, timestamp_data_type);
+            auto prewhere_filter = makeWhereFilterForDataTable(
+                select_query_from_tags_table, min_time, max_time, timestamp_data_type, prewhere_locality_hint);
             select_query->setExpression(ASTSelectQuery::Expression::PREWHERE, std::move(prewhere_filter));
         }
 
@@ -389,6 +577,20 @@ namespace
         list_of_selects->children.push_back(std::move(select_query));
         select_with_union_query->children.push_back(std::move(list_of_selects));
         select_with_union_query->list_of_selects = select_with_union_query->children.back();
+
+        /// No physical locality column and no single constant from `__name__` EQ: compute locality per row from tags.
+        if (!data_table_has_metric_locality_id_column && !metric_locality_id_hint)
+        {
+            auto tags_for_join = makeSelectIdAndMetricNameFromTagsTable(
+                tags_table_id,
+                matchers,
+                column_name_by_tag_name,
+                min_time_to_filter_ids,
+                max_time_to_filter_ids,
+                timestamp_data_type);
+            return wrapDataInnerSelectWithTagsJoinForSyntheticLocality(
+                select_with_union_query, tags_for_join, id_data_type, timestamp_data_type, scalar_data_type);
+        }
 
         return select_with_union_query;
     }
@@ -406,6 +608,21 @@ namespace
             res[tag_name] = column_name;
         }
         return res;
+    }
+
+    /// When the instant selector fixes `__name__` by equality, we can constrain the data table by `metric_locality_id`
+    /// (first key column of the inner MergeTree) for better IO.
+    ///
+    /// Locality is a **function of metric name only**; see `computeTimeSeriesMetricLocalityId` docs for why tag keys / tag KV
+    /// are not folded into this UInt32 without a separate sort-key column (PREWHERE must use a constant from `__name__` EQ).
+    std::optional<UInt32> tryGetMetricLocalityFromMatchers(const PrometheusQueryTree::MatcherList & matchers)
+    {
+        for (const auto & matcher : matchers)
+        {
+            if (matcher.label_name == TimeSeriesTagNames::MetricName && matcher.matcher_type == PrometheusQueryTree::MatcherType::EQ)
+                return computeTimeSeriesMetricLocalityId(matcher.label_value);
+        }
+        return {};
     }
 }
 
@@ -428,6 +645,8 @@ void StorageTimeSeriesSelector::read(
     auto data_table_id = time_series_storage->getTargetTableId(ViewTarget::Data);
     auto tags_table_id = time_series_storage->getTargetTableId(ViewTarget::Tags);
 
+    const bool data_table_has_metric_locality_id_column = time_series_storage->dataTargetHasMetricLocalityIdColumn(context);
+
     auto column_name_by_tag_name = makeColumnNameByTagNameMap(time_series_settings);
 
     std::optional<DateTime64> min_time_to_filter_ids;
@@ -441,6 +660,8 @@ void StorageTimeSeriesSelector::read(
     ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
         tags_table_id, matchers, column_name_by_tag_name, min_time_to_filter_ids, max_time_to_filter_ids, config.timestamp_data_type);
 
+    auto metric_locality_hint = tryGetMetricLocalityFromMatchers(matchers);
+
     ASTPtr select_query_from_data_table = makeSelectQueryFromDataTable(
         data_table_id,
         select_query_from_tags_table,
@@ -448,7 +669,14 @@ void StorageTimeSeriesSelector::read(
         config.max_time,
         config.id_data_type,
         config.timestamp_data_type,
-        config.scalar_data_type);
+        config.scalar_data_type,
+        metric_locality_hint,
+        data_table_has_metric_locality_id_column,
+        tags_table_id,
+        matchers,
+        column_name_by_tag_name,
+        min_time_to_filter_ids,
+        max_time_to_filter_ids);
 
     auto options = SelectQueryOptions(QueryProcessingStage::Complete, 0, false, query_info.settings_limit_offset_done);
 

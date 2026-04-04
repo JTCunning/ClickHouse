@@ -35,6 +35,9 @@ private:
     /// Adds the DEFAULT expression for the 'id' column if it isn't specified yet.
     void addMissingDefaultForIDColumn(ASTCreateQuery & create) const;
 
+    /// Adds DEFAULT timeSeriesMetricLocalityId(metric_name) for metric_locality_id if not set (outer table only).
+    void addMissingDefaultForMetricLocalityIdColumn(ASTCreateQuery & create) const;
+
     /// Generates a formulae for calculating the identifier of a time series from the metric name and all the tags.
     ASTPtr chooseIDAlgorithm(const ASTColumnDeclaration & id_column) const;
 

@@ -7,6 +7,8 @@ namespace DB
 struct TimeSeriesColumnNames
 {
     /// The "data" table contains time series:
+    /// Dense UInt32 prefix from metric name for inner data MergeTree ORDER BY / primary key.
+    static constexpr const char * MetricLocalityId = "metric_locality_id";
     static constexpr const char * ID = "id";
     static constexpr const char * Timestamp = "timestamp";
     static constexpr const char * Value = "value";

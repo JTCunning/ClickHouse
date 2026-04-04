@@ -1,5 +1,7 @@
 #include <Storages/TimeSeries/TimeSeriesDefinitionNormalizer.h>
 
+#include <algorithm>
+
 #include <Common/quoteString.h>
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/DataTypeFixedString.h>
@@ -45,6 +47,7 @@ void TimeSeriesDefinitionNormalizer::normalize(ASTCreateQuery & create_query) co
 {
     reorderColumns(create_query);
     addMissingColumns(create_query);
+    addMissingDefaultForMetricLocalityIdColumn(create_query);
     addMissingDefaultForIDColumn(create_query);
 
     if (as_create_query)
@@ -87,6 +90,7 @@ void TimeSeriesDefinitionNormalizer::reorderColumns(ASTCreateQuery & create) con
     };
 
     /// Reorder columns for the "data" table.
+    add_column_in_correct_order(TimeSeriesColumnNames::MetricLocalityId);
     add_column_in_correct_order(TimeSeriesColumnNames::ID);
     add_column_in_correct_order(TimeSeriesColumnNames::Timestamp);
     add_column_in_correct_order(TimeSeriesColumnNames::Value);
@@ -123,7 +127,7 @@ void TimeSeriesDefinitionNormalizer::reorderColumns(ASTCreateQuery & create) con
         throw Exception(
             ErrorCodes::INCOMPATIBLE_COLUMNS,
             "{}: Column {} can't be used in this table. "
-            "The TimeSeries table engine supports only a limited set of columns (id, timestamp, value, metric_name, tags, metric_family_name, type, unit, help). "
+            "The TimeSeries table engine supports only a limited set of columns (metric_locality_id, id, timestamp, value, metric_name, tags, metric_family_name, type, unit, help). "
             "Extra columns representing tags must be specified in the 'tags_to_columns' setting.",
             time_series_storage_id.getNameForLogs(), columns_by_name.begin()->first);
     }
@@ -187,6 +191,9 @@ void TimeSeriesDefinitionNormalizer::addMissingColumns(ASTCreateQuery & create) 
     };
 
     /// Add missing columns for the "data" table.
+    if (!is_next_column_named(TimeSeriesColumnNames::MetricLocalityId))
+        make_new_column(TimeSeriesColumnNames::MetricLocalityId, makeASTDataType("UInt32"));
+
     if (!is_next_column_named(TimeSeriesColumnNames::ID))
         make_new_column(TimeSeriesColumnNames::ID, get_uuid_type());
 
@@ -259,6 +266,34 @@ void TimeSeriesDefinitionNormalizer::addMissingColumns(ASTCreateQuery & create) 
     chassert(position == columns.size());
 }
 
+
+void TimeSeriesDefinitionNormalizer::addMissingDefaultForMetricLocalityIdColumn(ASTCreateQuery & create) const
+{
+    if (!create.columns_list || !create.columns_list->columns)
+        return;
+
+    auto & columns = create.columns_list->columns->children;
+    auto it = std::find_if(columns.begin(), columns.end(), [](const ASTPtr & column)
+    {
+        return typeid_cast<const ASTColumnDeclaration &>(*column).name == TimeSeriesColumnNames::MetricLocalityId;
+    });
+
+    if (it == columns.end())
+        return;
+
+    auto & column_declaration = typeid_cast<ASTColumnDeclaration &>(**it);
+
+    if (column_declaration.default_specifier == ColumnDefaultSpecifier::Empty && !column_declaration.getDefaultExpression())
+    {
+        column_declaration.default_specifier = ColumnDefaultSpecifier::Default;
+        auto function = make_intrusive<ASTFunction>();
+        function->name = "timeSeriesMetricLocalityId";
+        auto arguments_list = make_intrusive<ASTExpressionList>();
+        arguments_list->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
+        function->arguments = arguments_list;
+        column_declaration.setDefaultExpression(std::move(function));
+    }
+}
 
 void TimeSeriesDefinitionNormalizer::addMissingDefaultForIDColumn(ASTCreateQuery & create) const
 {
@@ -425,6 +460,7 @@ void TimeSeriesDefinitionNormalizer::setInnerEngineByDefault(ViewTarget::Kind in
             {
                 inner_storage_def.set(inner_storage_def.order_by,
                                       makeASTOperator("tuple",
+                                                      make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricLocalityId),
                                                       make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID),
                                                       make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Timestamp)));
             }

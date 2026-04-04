@@ -235,6 +235,12 @@ StorageID StorageTimeSeries::getTargetTableId(ViewTarget::Kind target_kind) cons
     throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected target kind {}", toString(target_kind));
 }
 
+bool StorageTimeSeries::dataTargetHasMetricLocalityIdColumn(const ContextPtr & local_context) const
+{
+    const auto data_table = DatabaseCatalog::instance().getTable(getTargetTableId(ViewTarget::Data), local_context);
+    return data_table->getInMemoryMetadataPtr()->columns.has(String(TimeSeriesColumnNames::MetricLocalityId));
+}
+
 StoragePtr StorageTimeSeries::getTargetTable(ViewTarget::Kind target_kind, const ContextPtr & local_context) const
 {
     return DatabaseCatalog::instance().getTable(getTargetTableId(target_kind), local_context);

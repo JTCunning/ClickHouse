@@ -52,6 +52,14 @@ ColumnsDescription TimeSeriesInnerTablesCreator::getInnerTableColumnsDescription
     {
         case ViewTarget::Data:
         {
+            /// Column "metric_locality_id".
+            {
+                auto locality_column = time_series_columns.get(TimeSeriesColumnNames::MetricLocalityId);
+                /// Filled on insert from metric name; inner table has no DEFAULT (metric_name exists only on the tags table).
+                locality_column.default_desc = {};
+                columns.add(std::move(locality_column));
+            }
+
             /// Column "id".
             {
                 auto id_column = time_series_columns.get(TimeSeriesColumnNames::ID);

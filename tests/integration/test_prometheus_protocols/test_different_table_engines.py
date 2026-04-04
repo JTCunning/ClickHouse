@@ -131,6 +131,9 @@ def cleanup_after_test():
         node.query("DROP TABLE IF EXISTS mydata SYNC")
         node.query("DROP TABLE IF EXISTS mytable SYNC")
         node.query("DROP TABLE IF EXISTS mymetrics SYNC")
+        node.query("DROP TABLE IF EXISTS mylegacy_data SYNC")
+        node.query("DROP TABLE IF EXISTS mylegacy_tags SYNC")
+        node.query("DROP TABLE IF EXISTS mylegacy_metrics SYNC")
 
 
 def test_default():
@@ -166,7 +169,7 @@ def test_create_as_table():
 def test_inner_engines():
     node.query(
         "CREATE TABLE prometheus ENGINE=TimeSeries "
-        "DATA ENGINE=MergeTree ORDER BY (id, timestamp) "
+        "DATA ENGINE=MergeTree ORDER BY (metric_locality_id, id, timestamp) "
         "TAGS ENGINE=AggregatingMergeTree ORDER BY (metric_name, id) "
         "METRICS ENGINE=ReplacingMergeTree ORDER BY metric_family_name"
     )
@@ -180,8 +183,8 @@ def test_external_tables():
     node.query("DROP TABLE IF EXISTS prometheus")
 
     node.query(
-        "CREATE TABLE mydata (id UUID, timestamp DateTime64(3), value Float64) "
-        "ENGINE=MergeTree ORDER BY (id, timestamp)"
+        "CREATE TABLE mydata (metric_locality_id UInt32, id UUID, timestamp DateTime64(3), value Float64) "
+        "ENGINE=MergeTree ORDER BY (metric_locality_id, id, timestamp)"
     )
     node.query(
         "CREATE TABLE mytags ("
@@ -205,3 +208,42 @@ def test_external_tables():
         "DATA mydata TAGS mytags METRICS mymetrics"
     )
     check()
+
+
+def test_external_data_without_metric_locality_id():
+    """DATA target without `metric_locality_id` (legacy layout): remote write + PromQL + synthetic locality in reads."""
+    node.query("DROP TABLE IF EXISTS mylegacy_data")
+    node.query("DROP TABLE IF EXISTS mylegacy_tags")
+    node.query("DROP TABLE IF EXISTS mylegacy_metrics")
+    node.query("DROP TABLE IF EXISTS prometheus SYNC")
+
+    node.query(
+        "CREATE TABLE mylegacy_data (id UUID, timestamp DateTime64(3), value Float64) "
+        "ENGINE=MergeTree ORDER BY (id, timestamp)"
+    )
+    node.query(
+        "CREATE TABLE mylegacy_tags ("
+        "id UUID, "
+        "metric_name LowCardinality(String), "
+        "tags Map(LowCardinality(String), String), "
+        "min_time SimpleAggregateFunction(min, Nullable(DateTime64(3))), "
+        "max_time SimpleAggregateFunction(max, Nullable(DateTime64(3)))) "
+        "ENGINE=AggregatingMergeTree ORDER BY (metric_name, id)"
+    )
+    node.query(
+        "CREATE TABLE mylegacy_metrics (metric_family_name String, type String, unit String, help String) "
+        "ENGINE=ReplacingMergeTree ORDER BY metric_family_name"
+    )
+    node.query(
+        "CREATE TABLE prometheus ENGINE=TimeSeries "
+        "DATA mylegacy_data TAGS mylegacy_tags METRICS mylegacy_metrics"
+    )
+    check()
+    assert (
+        node.query(
+            "SELECT any(metric_locality_id) = timeSeriesMetricLocalityId('up') FROM timeSeriesSelector("
+            "'default', 'prometheus', 'up', "
+            "toDateTime64('2025-07-01 00:00:00', 3), toDateTime64('2025-08-01 00:00:00', 3))"
+        ).strip()
+        == "1"
+    )

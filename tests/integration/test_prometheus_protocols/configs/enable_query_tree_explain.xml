@@ -1,0 +1,9 @@
+<clickhouse>
+    <profiles>
+        <default>
+            <!-- EXPLAIN QUERY TREE (and metric_locality_id visibility in explain) requires the analyzer, same as 04078_time_series_selector_metric_locality_in_prewhere.sql -->
+            <enable_analyzer>1</enable_analyzer>
+            <allow_experimental_analyzer>1</allow_experimental_analyzer>
+        </default>
+    </profiles>
+</clickhouse>
