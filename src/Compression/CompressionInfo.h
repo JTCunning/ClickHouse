@@ -50,7 +50,10 @@ enum class CompressionMethodByte : uint8_t
     GCD             = 0x9a,
     /// ZSTD_QPL        = 0x9b, /// Removed, don't reuse for another codec
     ALP             = 0x9c,
-    DoubleDeltaVarInt = 0x9d,
+    /// DoubleDelta with Int64 little-endian delta-of-delta tail (chain head before VarInt).
+    DoubleDeltaWide = 0x9d,
+    /// Variable-length encoding of Int64 tail produced by DoubleDeltaWide.
+    VarInt          = 0x9e,
 };
 
 }

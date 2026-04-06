@@ -26,6 +26,30 @@ namespace ErrorCodes
     extern const int UNKNOWN_CODEC;
     extern const int UNEXPECTED_AST_STRUCTURE;
     extern const int DATA_TYPE_CANNOT_HAVE_ARGUMENTS;
+    extern const int BAD_ARGUMENTS;
+}
+
+CompressionCodecPtr createCompressionCodecDoubleDeltaWide(const ASTPtr & arguments, const IDataType * column_type);
+CompressionCodecPtr createCompressionCodecVarInt(const ASTPtr & arguments, const IDataType * column_type);
+void registerCodecDoubleDeltaWide(CompressionCodecFactory & factory);
+void registerCodecVarInt(CompressionCodecFactory & factory);
+
+namespace
+{
+
+bool isBareVarIntCodecAST(const ASTPtr & ast)
+{
+    if (const auto * id = ast->as<ASTIdentifier>())
+        return Poco::toUpper(id->name()) == "VARINT";
+    if (const auto * f = ast->as<ASTFunction>())
+    {
+        if (Poco::toUpper(f->name) != "VARINT")
+            return false;
+        return !f->arguments || f->arguments->children.empty();
+    }
+    return false;
+}
+
 }
 
 CompressionCodecPtr CompressionCodecFactory::getDefaultCodec() const
@@ -63,8 +87,10 @@ CompressionCodecPtr CompressionCodecFactory::get(
     {
         Codecs codecs;
         codecs.reserve(func->arguments->children.size());
-        for (const auto & inner_codec_ast : func->arguments->children)
+        const auto & codec_children = func->arguments->children;
+        for (size_t idx = 0; idx < codec_children.size(); ++idx)
         {
+            const auto & inner_codec_ast = codec_children[idx];
             String codec_family_name;
             ASTPtr codec_arguments;
             if (const auto * family_name = inner_codec_ast->as<ASTIdentifier>())
@@ -79,6 +105,27 @@ CompressionCodecPtr CompressionCodecFactory::get(
             }
             else
                 throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "Unexpected AST element for compression codec");
+
+            const String family_upper = Poco::toUpper(codec_family_name);
+
+            if (family_upper == "VARINT")
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS,
+                    "Codec VarInt is only allowed immediately after DoubleDelta (use CODEC(DoubleDelta, VarInt, ...))");
+
+            if (family_upper == "DOUBLEDELTA" && idx + 1 < codec_children.size() && isBareVarIntCodecAST(codec_children[idx + 1]))
+            {
+                CompressionCodecPtr dd_wide = createCompressionCodecDoubleDeltaWide(codec_arguments, column_type);
+                CompressionCodecPtr var_int = createCompressionCodecVarInt(codec_arguments, column_type);
+
+                if (!only_generic || (dd_wide->isGenericCompression() || var_int->isGenericCompression()))
+                {
+                    codecs.emplace_back(std::move(dd_wide));
+                    codecs.emplace_back(std::move(var_int));
+                }
+                ++idx;
+                continue;
+            }
 
             CompressionCodecPtr codec;
             if (codec_family_name == DEFAULT_CODEC_NAME)
@@ -169,6 +216,15 @@ void CompressionCodecFactory::registerCompressionCodecWithType(
                             std::to_string(*byte_code));
 }
 
+void CompressionCodecFactory::registerCompressionCodecCodeOnly(uint8_t byte_code, CreatorWithType creator)
+{
+    if (creator == nullptr)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "CompressionCodecFactory: codec code {} has null constructor", toString(byte_code));
+
+    if (!family_code_with_codec.emplace(byte_code, std::move(creator)).second)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "CompressionCodecFactory: the codec family code '{}' is not unique", toString(byte_code));
+}
+
 void CompressionCodecFactory::registerCompressionCodec(const String & family_name, std::optional<uint8_t> byte_code, Creator creator)
 {
     registerCompressionCodecWithType(family_name, byte_code, [family_name, creator](const ASTPtr & ast, const IDataType * /* data_type */)
@@ -217,7 +273,6 @@ void registerCodecEncrypted(CompressionCodecFactory & factory);
 void registerCodecFPC(CompressionCodecFactory & factory);
 void registerCodecGCD(CompressionCodecFactory & factory);
 void registerCodecALP(CompressionCodecFactory & factory);
-void registerCodecDoubleDeltaVarInt(CompressionCodecFactory & factory);
 
 CompressionCodecFactory::CompressionCodecFactory()
 {
@@ -234,7 +289,8 @@ CompressionCodecFactory::CompressionCodecFactory()
     registerCodecFPC(*this);
     registerCodecGCD(*this);
     registerCodecALP(*this);
-    registerCodecDoubleDeltaVarInt(*this);
+    registerCodecDoubleDeltaWide(*this);
+    registerCodecVarInt(*this);
 
     default_codec = get("LZ4", {});
 }

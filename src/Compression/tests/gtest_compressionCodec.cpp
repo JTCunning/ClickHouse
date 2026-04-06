@@ -815,9 +815,9 @@ const auto DefaultCodecsToTest = ::testing::Values(
     Codec("DoubleDelta"),
     Codec("DoubleDelta, LZ4"),
     Codec("DoubleDelta, ZSTD"),
-    Codec("DoubleDeltaVarInt"),
-    Codec("DoubleDeltaVarInt, LZ4"),
-    Codec("DoubleDeltaVarInt, ZSTD"),
+    Codec("DoubleDelta, VarInt"),
+    Codec("DoubleDelta, VarInt, LZ4"),
+    Codec("DoubleDelta, VarInt, ZSTD"),
     Codec("Gorilla"),
     Codec("Gorilla, LZ4"),
     Codec("Gorilla, ZSTD"),
@@ -1402,9 +1402,9 @@ TEST(DoubleDeltaTest, TranscodeRawInput)
     }
 }
 
-/// DoubleDeltaVarInt-specific tests
+/// DoubleDelta + VarInt chain tests
 
-/// DoubleDeltaVarInt uses varint encoding, so the corner points differ from DoubleDelta.
+/// VarInt stage uses varint encoding, so the corner points differ from DoubleDelta alone.
 /// Varint encoding boundaries: [-63,64] (1 byte), [-8191,8192] (2 bytes),
 /// [-1048575,1048576] (3 bytes), [-2^31,2^31] (5 bytes), else 9 bytes.
 template <typename ValueType>
@@ -1433,13 +1433,13 @@ auto DDVarIntCompatibilityTestSequence()
     return ret;
 }
 
-INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarInt,
+INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntChain,
     CodecTest,
     ::testing::Combine(
         ::testing::Values(
-            Codec("DoubleDeltaVarInt"),
-            Codec("DoubleDeltaVarInt, LZ4"),
-            Codec("DoubleDeltaVarInt, ZSTD")
+            Codec("DoubleDelta, VarInt"),
+            Codec("DoubleDelta, VarInt, LZ4"),
+            Codec("DoubleDelta, VarInt, ZSTD")
         ),
         ::testing::ValuesIn(std::vector<CodecTestSequence>{
             DDVarIntCompatibilityTestSequence<Int8>(),
@@ -1454,13 +1454,13 @@ INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarInt,
     )
 );
 
-/// DoubleDeltaVarInt overflow: deltas out of bounds for target type
-INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntOverflow,
+/// DoubleDelta + VarInt overflow: deltas out of bounds for target type
+INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntChainOverflow,
     CodecTest,
     ::testing::Combine(
         ::testing::Values(
-            Codec("DoubleDeltaVarInt", 1.2),
-            Codec("DoubleDeltaVarInt, LZ4", 1.0)
+            Codec("DoubleDelta, VarInt", 1.2),
+            Codec("DoubleDelta, VarInt, LZ4", 1.0)
         ),
         ::testing::Values(
             generateSeq<UInt32>(G(MinMaxGenerator())),
@@ -1471,12 +1471,12 @@ INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntOverflow,
     )
 );
 
-/// ZSTD output is not aligned, may break DoubleDeltaVarInt.
-INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntUnalignedTranscode,
+/// ZSTD output is not aligned; chain must tolerate unaligned intermediate buffers.
+INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntChainUnalignedTranscode,
     CodecTest,
     ::testing::Combine(
         ::testing::Values(
-            Codec("ZSTD, DoubleDeltaVarInt")
+            Codec("ZSTD, DoubleDelta, VarInt")
         ),
         ::testing::Values(
             makeSeq<Float64>(0, 1),
@@ -1486,12 +1486,12 @@ INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntUnalignedTranscode,
 );
 
 /// Time-series specific test: regular timestamp intervals (the primary use case).
-INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntTimeSeries,
+INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntChainTimeSeries,
     CodecTest,
     ::testing::Combine(
         ::testing::Values(
-            Codec("DoubleDeltaVarInt"),
-            Codec("DoubleDeltaVarInt, ZSTD")
+            Codec("DoubleDelta, VarInt"),
+            Codec("DoubleDelta, VarInt, ZSTD")
         ),
         ::testing::Values(
             /// Regular 15s scrape intervals (Prometheus-like)
@@ -1506,7 +1506,7 @@ INSTANTIATE_TEST_SUITE_P(DoubleDeltaVarIntTimeSeries,
     )
 );
 
-TEST(DoubleDeltaVarIntTest, TranscodeRawInput)
+TEST(DoubleDeltaVarIntChainTest, TranscodeRawInput)
 {
     std::vector<DataTypePtr> types = {
         std::make_shared<DataTypeInt8>(),
@@ -1532,7 +1532,7 @@ TEST(DoubleDeltaVarIntTest, TranscodeRawInput)
             DB::Memory<> memory_for_compression;
             memory_for_compression.resize(ICompressionCodec::getHeaderSize() + buffer_size);
 
-            auto codec = makeCodec("DoubleDeltaVarInt", type);
+            auto codec = makeCodec("DoubleDelta, VarInt", type);
 
             auto compressed = codec->compress(source_memory.data(), UInt32(source_memory.size()), memory_for_compression.data());
 

@@ -84,6 +84,9 @@ public:
     /// Register codec without parameters
     void registerSimpleCompressionCodec(const String & family_name, std::optional<uint8_t> byte_code, SimpleCreator creator);
 
+    /// Register codec only by method byte (for decompression). Not visible as a CODEC(...) family name.
+    void registerCompressionCodecCodeOnly(uint8_t byte_code, CreatorWithType creator);
+
     std::vector<String> getAllRegisteredNames() const;
 
 protected:
