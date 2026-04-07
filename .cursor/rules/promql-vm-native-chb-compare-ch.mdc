@@ -1,0 +1,23 @@
+---
+description: Default promql-transpiler compare-ch on VM — native CHb (PROMQL_VM_NATIVE_CHB), CHd/CHb parity, remote_write pitfalls
+alwaysApply: false
+---
+
+# promql-transpiler `--compare-ch` on the Linux VM (native CHb defaults)
+
+Follow **`~/.cursor/skills/clickhouse-vm-promql-transpiler-benchmark/SKILL.md`** — it is the source of truth.
+
+## Default one-liner (host CHb ≈ docker `head` lineage + same DDL/users)
+
+```bash
+PROMQL_VM_NATIVE_CHB=1 BENCHMARK_COMPARE_CH_USE_DOCKER_BRANCH=0 \
+  bash ~/.cursor/skills/clickhouse-vm-promql-transpiler-benchmark/scripts/run-benchmark-on-vm.sh \
+  /path/to/promql-transpiler -- --compare-ch --fast
+```
+
+- **CHb binary (default):** CI **`master/{amd64|aarch64}/clickhouse`** from **`clickhouse-builds` S3**, not necessarily the Mac-built binary. Use **`PROMQL_VM_CHB_USE_BUILD_BINARY=1`** for **`$CLICKHOUSE_ROOT/build/programs/clickhouse`** on the VM.
+- **Parity with CHd:** same **`benchmark/clickhouse-init.sql`**, same **`benchmark/clickhouse-users.xml`** (profiler + **`default`** user **`networks`** / empty **`password`** so Prometheus remote_write from Docker works). **`CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1`** for native CHb matches compose.
+- **Do not** set **`CLICKHOUSE_BUILD_PROMETHEUS_URL`** to **`172.17.0.1`** by default — Prometheus runs on the **compose** network; use **`run.ts`** default **`http://host.docker.internal:29363/write`** (compose **`host-gateway`**).
+- **Ingest broken (empty CHb compression stats, 401 in prometheus logs):** almost always **`allow_only_from_localhost`** + missing **`users.xml`** override — fixed in transpiler **`benchmark/clickhouse-users.xml`**.
+
+See also **`vm-linux-clickhouse-builds.mdc`**: full server builds and long benchmarks belong on the **VM**, not Darwin.
