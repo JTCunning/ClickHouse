@@ -41,8 +41,10 @@ namespace DB
  *   1110xxxx + 4 bytes          - value in [-2^31, 2^31], 5 bytes
  *   1111xxxx + 8 bytes          - full 64-bit value, 9 bytes
  *
- * Best used with: CODEC(DoubleDeltaVarInt, ZSTD(1))
- * Best for: DateTime64, UInt32/UInt64 timestamps, monotonic counters.
+ * Best used with: CODEC(DoubleDeltaVarInt, ZSTD(1)) or CODEC(DoubleDeltaVarInt, LZ4)
+ * Best for: DateTime64, integer timestamps/counters; may also be applied explicitly to
+ *   `Float64` `value` on `ENGINE = TimeSeries` when you want this delta-of-delta + varint
+ *   representation instead of `Gorilla` (see docs for `DoubleDeltaVarInt`).
  */
 class CompressionCodecDoubleDeltaVarInt : public ICompressionCodec
 {

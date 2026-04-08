@@ -427,6 +427,14 @@ These codecs are designed to make compression more effective by exploiting speci
 
 `DoubleDelta(bytes_size)` — Calculates delta of deltas and writes it in compact binary form. The `bytes_size` has a similar meaning than `delta_bytes` in [Delta](#delta) codec. Specifying `bytes_size` as an argument is deprecated and support will be removed in a future release. Optimal compression rates are achieved for monotonic sequences with a constant stride, such as time series data. Can be used with any numeric type. Implements the algorithm used in Gorilla TSDB, extending it to support 64-bit types. Uses 1 extra bit for 32-bit deltas: 5-bit prefixes instead of 4-bit prefixes. For additional information, see Compressing Time Stamps in [Gorilla: A Fast, Scalable, In-Memory Time Series Database](http://www.vldb.org/pvldb/vol8/p1816-teller.pdf). DoubleDelta is a data preparation codec, i.e. it cannot be used stand-alone.
 
+#### DoubleDeltaVarInt {#doubledeltavarint}
+
+`DoubleDeltaVarInt([bytes_size])` — Like `DoubleDelta`, computes delta-of-delta of consecutive values, but encodes the delta-of-delta stream with byte-aligned variable-length integers so a following general-purpose codec (typically `ZSTD` or `LZ4`) can compress highly regular scrape intervals efficiently. Optional `bytes_size` is `1`, `2`, `4`, or `8` (default: width of the column type). Applicable to numeric types of those sizes.
+
+For [TimeSeries](../../../engines/table-engines/integrations/time-series.md) tables (including Prometheus-style metrics), you can set this codec explicitly on the `value` column, for example: `value Float64 CODEC(DoubleDeltaVarInt, ZSTD(1))` or `CODEC(DoubleDeltaVarInt, LZ4)`. Values are compressed using the same binary layout as the column’s in-memory representation (for floating-point columns this follows the underlying integer bit pattern in fixed-width steps).
+
+`DoubleDeltaVarInt` is a data preparation codec, i.e. it cannot be used stand-alone.
+
 #### GCD {#gcd}
 
 `GCD()` - - Calculates the greatest common denominator (GCD) of the values in the column, then divides each value by the GCD. Can be used with integer, decimal and date/time columns. The codec is well suited for columns with values that change (increase or decrease) in multiples of the GCD, e.g. 24, 28, 16, 24, 8, 24 (GCD = 4). GCD is a data preparation codec, i.e. it cannot be used stand-alone.
