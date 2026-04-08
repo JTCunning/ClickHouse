@@ -89,8 +89,8 @@ ASTPtr CompressionCodecFactory::validateCodecAndGetPreprocessedAST(
         /// For a plain column type, validate the full `CODEC(...)` with `get()` so codec chains that are not
         /// registered as standalone families (e.g. `VarInt` immediately after `DoubleDelta`) resolve correctly.
         /// The per-element `getImpl()` loop below resolves each codec name in isolation and fails for `VarInt`.
-        if (func->name == "CODEC" && column_type && column_type.get() && !column_type->isTuple() && !column_type->isArray()
-            && !column_type->isMap() && !typeid_cast<const DataTypeNested *>(column_type.get()))
+        if (func->name == "CODEC" && column_type && column_type.get() && !isTuple(column_type) && !isArray(column_type)
+            && !isMap(column_type) && !isNested(column_type))
         {
             CompressionCodecPtr combined = get(ast, column_type.get());
 
