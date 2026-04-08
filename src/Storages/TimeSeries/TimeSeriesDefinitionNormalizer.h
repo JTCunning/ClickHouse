@@ -32,6 +32,9 @@ private:
     /// Adds missing columns with data types set by default..
     void addMissingColumns(ASTCreateQuery & create) const;
 
+    /// Sets CODEC(DoubleDelta, VarInt, ZSTD(1)) on the `value` column when no codec is specified.
+    void addDefaultCodecForValueColumn(ASTCreateQuery & create) const;
+
     /// Adds the DEFAULT expression for the 'id' column if it isn't specified yet.
     void addMissingDefaultForIDColumn(ASTCreateQuery & create) const;
 

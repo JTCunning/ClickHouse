@@ -30,6 +30,19 @@ namespace ErrorCodes
     extern const int INCORRECT_QUERY;
 }
 
+namespace
+{
+
+ASTPtr makeDefaultTimeSeriesValueCodecAST()
+{
+    return makeASTFunction("CODEC",
+        make_intrusive<ASTIdentifier>("DoubleDelta"),
+        make_intrusive<ASTIdentifier>("VarInt"),
+        makeASTFunction("ZSTD", make_intrusive<ASTLiteral>(UInt64(1))));
+}
+
+}
+
 
 TimeSeriesDefinitionNormalizer::TimeSeriesDefinitionNormalizer(StorageID time_series_storage_id_,
                                                                std::reference_wrapper<const TimeSeriesSettings> time_series_settings_,
@@ -45,6 +58,7 @@ void TimeSeriesDefinitionNormalizer::normalize(ASTCreateQuery & create_query) co
 {
     reorderColumns(create_query);
     addMissingColumns(create_query);
+    addDefaultCodecForValueColumn(create_query);
     addMissingDefaultForIDColumn(create_query);
 
     if (as_create_query)
@@ -197,7 +211,11 @@ void TimeSeriesDefinitionNormalizer::addMissingColumns(ASTCreateQuery & create) 
     auto timestamp_type = boost::static_pointer_cast<ASTDataType>(timestamp_column->getType());
 
     if (!is_next_column_named(TimeSeriesColumnNames::Value))
+    {
         make_new_column(TimeSeriesColumnNames::Value, get_float_type());
+        auto value_decl = boost::static_pointer_cast<ASTColumnDeclaration>(columns[position - 1]);
+        value_decl->setCodec(makeDefaultTimeSeriesValueCodecAST());
+    }
 
     /// Add missing columns for the "tags" table.
     if (!is_next_column_named(TimeSeriesColumnNames::MetricName))
@@ -257,6 +275,24 @@ void TimeSeriesDefinitionNormalizer::addMissingColumns(ASTCreateQuery & create) 
 
     /// If the following fails that means the order in which columns are processed in this function doesn't match the order of columns in reorderColumns().
     chassert(position == columns.size());
+}
+
+
+void TimeSeriesDefinitionNormalizer::addDefaultCodecForValueColumn(ASTCreateQuery & create) const
+{
+    if (!create.columns_list || !create.columns_list->columns)
+        return;
+
+    for (const auto & child : create.columns_list->columns->children)
+    {
+        auto & decl = typeid_cast<ASTColumnDeclaration &>(*child);
+        if (decl.name != TimeSeriesColumnNames::Value)
+            continue;
+        if (decl.getCodec())
+            return;
+        decl.setCodec(makeDefaultTimeSeriesValueCodecAST());
+        return;
+    }
 }
 
 

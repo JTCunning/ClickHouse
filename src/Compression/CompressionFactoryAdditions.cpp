@@ -6,6 +6,7 @@
 
 #include <Compression/CompressionFactory.h>
 
+#include <Compression/CompressionCodecMultiple.h>
 #include <Compression/ICompressionCodec.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
@@ -83,6 +84,27 @@ ASTPtr CompressionCodecFactory::validateCodecAndGetPreprocessedAST(
     {
         ASTPtr codecs_descriptions = make_intrusive<ASTExpressionList>();
 
+        const IDataType * raw_type = column_type ? column_type.get() : nullptr;
+        CompressionCodecPtr combined = get(ast, raw_type, default_codec, /*only_generic=*/ false);
+
+        Codecs codecs_list;
+        if (auto * multiple = dynamic_cast<CompressionCodecMultiple *>(combined.get()))
+            codecs_list = multiple->getNestedCodecs();
+        else
+            codecs_list.push_back(combined);
+
+        for (const auto & codec : codecs_list)
+        {
+            if (!allow_experimental_codecs && codec->isExperimental())
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Codec {} is experimental and not meant to be used in production."
+                    " You can enable it with the 'allow_experimental_codecs' setting",
+                    codec->getCodecDesc()->formatForErrorMessage());
+        }
+
+        for (const auto & codec : codecs_list)
+            codecs_descriptions->children.emplace_back(codec->getCodecDesc());
+
         bool with_compression_codec = false;
         bool with_none_codec = false;
         std::optional<size_t> first_generic_compression_codec_pos;
@@ -90,77 +112,9 @@ ASTPtr CompressionCodecFactory::validateCodecAndGetPreprocessedAST(
         std::optional<size_t> last_floating_point_time_series_codec_pos;
         std::set<size_t> encryption_codecs_pos;
 
-        bool can_substitute_codec_arguments = true;
-        for (size_t i = 0, size = func->arguments->children.size(); i < size; ++i)
+        for (size_t i = 0; i < codecs_list.size(); ++i)
         {
-            const ASTPtr & inner_codec_ast = func->arguments->children[i];
-            String codec_family_name;
-            ASTPtr codec_arguments;
-            if (const auto * family_name = inner_codec_ast->as<ASTIdentifier>())
-            {
-                codec_family_name = family_name->name();
-                codec_arguments = {};
-            }
-            else if (const auto * ast_func = inner_codec_ast->as<ASTFunction>())
-            {
-                codec_family_name = ast_func->name;
-                codec_arguments = ast_func->arguments;
-            }
-            else
-                throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "Unexpected AST element for compression codec");
-
-            /// Default codec replaced with current default codec which may depend on different
-            /// settings (and properties of data) in runtime.
-            CompressionCodecPtr result_codec;
-            if (codec_family_name == DEFAULT_CODEC_NAME)
-            {
-                if (codec_arguments != nullptr)
-                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                        "{} codec cannot have any arguments, it's just an alias for codec specified in config.xml", DEFAULT_CODEC_NAME);
-
-                result_codec = default_codec;
-                codecs_descriptions->children.emplace_back(make_intrusive<ASTIdentifier>(DEFAULT_CODEC_NAME));
-            }
-            else
-            {
-                if (column_type)
-                {
-                    CompressionCodecPtr prev_codec;
-                    ISerialization::StreamCallback callback = [&](const auto & substream_path)
-                    {
-                        assert(!substream_path.empty());
-                        if (ISerialization::isSpecialCompressionAllowed(substream_path))
-                        {
-                            const auto & last_type = substream_path.back().data.type;
-                            result_codec = getImpl(codec_family_name, codec_arguments, last_type.get());
-
-                            /// Case for column Tuple, which compressed with codec which depends on data type, like Delta.
-                            /// We cannot substitute parameters for such codecs.
-                            if (prev_codec && prev_codec->getHash() != result_codec->getHash())
-                                can_substitute_codec_arguments = false;
-                            prev_codec = result_codec;
-                        }
-                    };
-
-                    auto serialization = column_type->getDefaultSerialization();
-                    serialization->enumerateStreams(callback, column_type);
-
-                    if (!result_codec)
-                        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot find any substream with data type for type {}. It's a bug", column_type->getName());
-                }
-                else
-                {
-                    result_codec = getImpl(codec_family_name, codec_arguments, nullptr);
-                }
-
-                if (!allow_experimental_codecs && result_codec->isExperimental())
-                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
-                        "Codec {} is experimental and not meant to be used in production."
-                        " You can enable it with the 'allow_experimental_codecs' setting",
-                        codec_family_name);
-
-                codecs_descriptions->children.emplace_back(result_codec->getCodecDesc());
-            }
+            const auto & result_codec = codecs_list[i];
 
             with_compression_codec |= result_codec->isCompression();
             with_none_codec |= result_codec->isNone();
@@ -177,6 +131,9 @@ ASTPtr CompressionCodecFactory::validateCodecAndGetPreprocessedAST(
             if (result_codec->isEncryption())
                 encryption_codecs_pos.insert(i);
         }
+
+        /// Tuple columns may need per-element codec parameters; keep the original AST in that case.
+        bool can_substitute_codec_arguments = !column_type || !typeid_cast<const DataTypeTuple *>(column_type.get());
 
         String codec_description = codecs_descriptions->formatWithSecretsOneLine();
 

@@ -17,6 +17,8 @@ public:
 
     static std::vector<uint8_t> getCodecsBytesFromData(const char * source);
 
+    const Codecs & getNestedCodecs() const { return codecs; }
+
     void updateHash(SipHash & hash) const override;
 
 protected:
