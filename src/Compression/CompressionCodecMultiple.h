@@ -11,6 +11,8 @@ public:
     CompressionCodecMultiple() = default;   /// Need for CompressionFactory to register codec by method byte.
     explicit CompressionCodecMultiple(Codecs codecs_);
 
+    const Codecs & getCodecs() const { return codecs; }
+
     uint8_t getMethodByte() const override;
 
     UInt32 getMaxCompressedDataSize(UInt32 uncompressed_size) const override;

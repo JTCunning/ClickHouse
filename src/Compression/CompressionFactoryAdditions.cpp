@@ -6,6 +6,8 @@
 
 #include <Compression/CompressionFactory.h>
 
+#include <Compression/CompressionCodecMultiple.h>
+#include <Compression/CompressionInfo.h>
 #include <Compression/ICompressionCodec.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
@@ -19,6 +21,9 @@
 #include <DataTypes/DataTypeNested.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <Common/Exception.h>
+
+#include <set>
+#include <vector>
 
 
 namespace DB
@@ -81,6 +86,128 @@ ASTPtr CompressionCodecFactory::validateCodecAndGetPreprocessedAST(
 {
     if (const auto * func = ast->as<ASTFunction>())
     {
+        /// For a plain column type, validate the full `CODEC(...)` with `get()` so codec chains that are not
+        /// registered as standalone families (e.g. `VarInt` immediately after `DoubleDelta`) resolve correctly.
+        /// The per-element `getImpl()` loop below resolves each codec name in isolation and fails for `VarInt`.
+        if (func->name == "CODEC" && column_type && column_type.get() && !column_type->isTuple() && !column_type->isArray()
+            && !column_type->isMap() && !typeid_cast<const DataTypeNested *>(column_type.get()))
+        {
+            CompressionCodecPtr combined = get(ast, column_type.get());
+
+            std::vector<CompressionCodecPtr> flat_codecs;
+            if (combined->getMethodByte() == static_cast<uint8_t>(CompressionMethodByte::Multiple))
+            {
+                const auto & multi = static_cast<const CompressionCodecMultiple &>(*combined);
+                for (const auto & c : multi.getCodecs())
+                    flat_codecs.push_back(c);
+            }
+            else
+                flat_codecs.push_back(combined);
+
+            if (!allow_experimental_codecs)
+            {
+                for (const auto & c : flat_codecs)
+                {
+                    if (c->isExperimental())
+                        throw Exception(
+                            ErrorCodes::BAD_ARGUMENTS,
+                            "Codec {} is experimental and not meant to be used in production."
+                            " You can enable it with the 'allow_experimental_codecs' setting",
+                            c->getCodecDesc()->formatForErrorMessage());
+                }
+            }
+
+            ASTPtr codecs_descriptions = make_intrusive<ASTExpressionList>();
+            for (const auto & result_codec : flat_codecs)
+                codecs_descriptions->children.push_back(result_codec->getCodecDesc());
+
+            bool with_compression_codec = false;
+            bool with_none_codec = false;
+            std::optional<size_t> first_generic_compression_codec_pos;
+            std::optional<size_t> first_delta_codec_pos;
+            std::optional<size_t> last_floating_point_time_series_codec_pos;
+            std::set<size_t> encryption_codecs_pos;
+
+            for (size_t i = 0; i < flat_codecs.size(); ++i)
+            {
+                const auto & result_codec = flat_codecs[i];
+                with_compression_codec |= result_codec->isCompression();
+                with_none_codec |= result_codec->isNone();
+
+                if (result_codec->isGenericCompression() && !first_generic_compression_codec_pos.has_value())
+                    first_generic_compression_codec_pos = i;
+
+                if (result_codec->isDeltaCompression() && !first_delta_codec_pos.has_value())
+                    first_delta_codec_pos = i;
+
+                if (result_codec->isFloatingPointTimeSeriesCodec())
+                    last_floating_point_time_series_codec_pos = i;
+
+                if (result_codec->isEncryption())
+                    encryption_codecs_pos.insert(i);
+            }
+
+            const bool can_substitute_codec_arguments = true;
+
+            String codec_description = codecs_descriptions->formatWithSecretsOneLine();
+
+            if (sanity_check)
+            {
+                if (codecs_descriptions->children.size() > 1 && with_none_codec)
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "It does not make sense to have codec NONE along with other compression codecs: {}. "
+                        "(Note: you can enable setting 'allow_suspicious_codecs' to skip this check).",
+                        codec_description);
+
+                if (!with_compression_codec && !with_none_codec && encryption_codecs_pos.size() != codecs_descriptions->children.size())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "Compression codec {} does not compress anything. "
+                        "You may want to add generic compression algorithm after other transformations, like: {}, LZ4. "
+                        "(Note: you can enable setting 'allow_suspicious_codecs' to skip this check).",
+                        codec_description, codec_description);
+
+                if (!encryption_codecs_pos.empty() &&
+                    *encryption_codecs_pos.begin() != codecs_descriptions->children.size() - encryption_codecs_pos.size())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "The combination of compression codecs {} is meaningless, "
+                        "because it does not make sense to apply any non-post-processing codecs after "
+                        "post-processing ones. (Note: you can enable setting 'allow_suspicious_codecs' "
+                        "to skip this check).", codec_description);
+
+                if (last_floating_point_time_series_codec_pos.has_value()
+                        && column_type && !innerDataTypeIsFloat(column_type))
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "The combination of compression codecs {} is meaningless,"
+                        " because it does not make sense to apply a floating-point time series codec to non-floating-point columns"
+                        " (Note: you can enable setting 'allow_suspicious_codecs' to skip this check).", codec_description);
+
+                if (first_delta_codec_pos.has_value() && last_floating_point_time_series_codec_pos.has_value()
+                    && (*first_delta_codec_pos < *last_floating_point_time_series_codec_pos))
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "The combination of compression codecs {} is meaningless,"
+                        " because floating point time series codecs do delta compression implicitly by themselves."
+                        " (Note: you can enable setting 'allow_suspicious_codecs' to skip this check).", codec_description);
+
+                if (first_generic_compression_codec_pos &&
+                    *first_generic_compression_codec_pos != codecs_descriptions->children.size() - 1 - encryption_codecs_pos.size())
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "The combination of compression codecs {} is meaningless, "
+                        "because it does not make sense to apply any transformations after generic "
+                        "compression algorithm. (Note: you can enable setting 'allow_suspicious_codecs' "
+                        "to skip this check).", codec_description);
+            }
+
+            if (can_substitute_codec_arguments)
+            {
+                boost::intrusive_ptr<ASTFunction> result = make_intrusive<ASTFunction>();
+                result->name = "CODEC";
+                result->arguments = codecs_descriptions;
+                return result;
+            }
+
+            return ast;
+        }
+
         ASTPtr codecs_descriptions = make_intrusive<ASTExpressionList>();
 
         bool with_compression_codec = false;
