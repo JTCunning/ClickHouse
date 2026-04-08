@@ -80,7 +80,7 @@ bool innerDataTypeIsFloat(const DataTypePtr & type)
 ASTPtr CompressionCodecFactory::validateCodecAndGetPreprocessedAST(
     const ASTPtr & ast, const DataTypePtr & column_type, bool sanity_check, bool allow_experimental_codecs) const
 {
-    if (const auto * func = ast->as<ASTFunction>())
+    if (ast->as<ASTFunction>())
     {
         ASTPtr codecs_descriptions = make_intrusive<ASTExpressionList>();
 
