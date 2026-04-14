@@ -4,15 +4,18 @@
 #if USE_PROMETHEUS_PROTOBUFS
 
 #include <algorithm>
+#include <string_view>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnMap.h>
 #include <Columns/ColumnTuple.h>
+#include <Columns/ColumnsNumber.h>
 #include <Core/Field.h>
 #include <Core/DecimalFunctions.h>
 #include <Common/logger_useful.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <Storages/TimeSeries/TimeSeriesColumnsValidator.h>
+#include <Storages/TimeSeries/TimeSeriesMetricLocality.h>
 #include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Interpreters/Context.h>
@@ -196,11 +199,14 @@ namespace
     };
 
     /// Converts time series from the protobuf format to prepared blocks for inserting into target tables.
+    /// \param data_target_physical_columns Columns of the physical DATA target table. When it has no \c metric_locality_id
+    ///        (e.g. external MergeTree created before locality was introduced), the data block omits that column so INSERT matches the table.
     BlocksToInsert toBlocks(const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series,
                             const ContextPtr & context,
                             const StorageID & time_series_storage_id,
                             const StorageInMemoryMetadata & time_series_storage_metadata,
-                            const TimeSeriesSettings & time_series_settings)
+                            const TimeSeriesSettings & time_series_settings,
+                            const ColumnsDescription & data_target_physical_columns)
     {
         size_t num_tags_rows = time_series.size();
 
@@ -243,9 +249,21 @@ namespace
 
         /// Create columns.
 
+        TimeSeriesColumnsValidator validator{time_series_storage_id, time_series_settings};
+
+        const bool data_table_has_metric_locality_id = data_target_physical_columns.has(TimeSeriesColumnNames::MetricLocalityId);
+
+        /// Column "metric_locality_id" (only if the physical DATA table stores it).
+        ColumnUInt32 * metric_locality_column = nullptr;
+        if (data_table_has_metric_locality_id)
+        {
+            const auto & metric_locality_description = get_column_description(TimeSeriesColumnNames::MetricLocalityId);
+            validator.validateColumnForMetricLocalityId(metric_locality_description);
+            metric_locality_column = &typeid_cast<ColumnUInt32 &>(make_column_for_data_block(metric_locality_description));
+        }
+
         /// Column "id".
         const auto & id_description = get_column_description(TimeSeriesColumnNames::ID);
-        TimeSeriesColumnsValidator validator{time_series_storage_id, time_series_settings};
         validator.validateColumnForID(id_description);
         auto & id_column_in_data_table = make_column_for_data_block(id_description);
 
@@ -399,6 +417,16 @@ namespace
                 continue;
 
             id_column_in_data_table.insertManyFrom(id_column_in_tags_table, current_row_in_tags, element.samples_size());
+
+            if (metric_locality_column)
+            {
+                auto metric_name_ref = metric_name_column.getDataAt(current_row_in_tags);
+                UInt32 locality = timeSeriesMetricLocalityIdFromMetricName(
+                    std::string_view(metric_name_ref.data(), metric_name_ref.size()));
+                for (Int32 s = 0; s < element.samples_size(); ++s)
+                    metric_locality_column->insertValue(locality);
+            }
+
             for (const auto & sample : element.samples())
             {
                 timestamp_column.insert(scaleTimestamp(sample.timestamp(), timestamp_scale));
@@ -582,7 +610,16 @@ void PrometheusRemoteWriteProtocol::writeTimeSeries(const google::protobuf::Repe
     auto time_series_storage_metadata = time_series_storage->getInMemoryMetadataPtr(getContext(), false);
     const auto & time_series_settings = time_series_storage->getStorageSettings();
 
-    auto blocks = toBlocks(time_series, getContext(), time_series_storage_id, *time_series_storage_metadata, time_series_settings);
+    auto data_target_table = time_series_storage->getTargetTable(ViewTarget::Data, getContext());
+    const auto & data_target_physical_columns = data_target_table->getInMemoryMetadataPtr(getContext(), false)->columns;
+
+    auto blocks = toBlocks(
+        time_series,
+        getContext(),
+        time_series_storage_id,
+        *time_series_storage_metadata,
+        time_series_settings,
+        data_target_physical_columns);
     insertToTargetTables(std::move(blocks), *time_series_storage, getContext(), log.get());
 
     LOG_TRACE(log, "{}: {} time series written",
