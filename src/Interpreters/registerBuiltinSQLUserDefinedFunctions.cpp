@@ -20,6 +20,7 @@ namespace Setting
 
 namespace ErrorCodes
 {
+    extern const int BAD_ARGUMENTS;
     extern const int LOGICAL_ERROR;
 }
 
@@ -27,16 +28,13 @@ void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context)
 {
     static constexpr const char * locality_function_name = "timeSeriesMetricLocalityId";
 
-    if (UserDefinedSQLFunctionFactory::instance().has(locality_function_name))
-        return;
-
     /// Same semantics as `timeSeriesMetricLocalityIdFromMetricName` in `TimeSeriesMetricLocality.h`
     /// and as the SQL expression `toUInt32(sipHash64(metric_name))`.
     const String query = "CREATE OR REPLACE FUNCTION timeSeriesMetricLocalityId AS x -> toUInt32(sipHash64(x))";
 
     const auto & settings = context->getSettingsRef();
     ParserCreateFunctionQuery parser;
-    ASTPtr ast = parseQuery(
+    ASTPtr expected_ast = parseQuery(
         parser,
         query.data(),
         query.data() + query.size(),
@@ -45,11 +43,44 @@ void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context)
         settings[Setting::max_parser_depth],
         settings[Setting::max_parser_backtracks]);
 
-    if (!ast->as<ASTCreateSQLFunctionQuery>())
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected AST for builtin UDF: {}", ast->formatForLogging());
+    if (!expected_ast->as<ASTCreateSQLFunctionQuery>())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected AST for builtin UDF: {}", expected_ast->formatForLogging());
+
+    if (UserDefinedSQLFunctionFactory::instance().has(locality_function_name))
+    {
+        ASTPtr existing_ast = UserDefinedSQLFunctionFactory::instance().tryGet(locality_function_name);
+        if (!existing_ast)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "{} is registered but could not be loaded", locality_function_name);
+
+        const auto * existing_create = existing_ast->as<ASTCreateSQLFunctionQuery>();
+        if (!existing_create)
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "Existing function {} must be a SQL UDF with definition `x -> toUInt32(sipHash64(x))` "
+                "(TimeSeries metric locality compatibility). Found a non-SQL function with the same name.",
+                locality_function_name);
+
+        ASTPtr normalized_expected = normalizeCreateFunctionQuery(*expected_ast, context);
+        ASTPtr normalized_existing = normalizeCreateFunctionQuery(*existing_ast, context);
+
+        const auto * expected_q = normalized_expected->as<ASTCreateSQLFunctionQuery>();
+        const auto * existing_q = normalized_existing->as<ASTCreateSQLFunctionQuery>();
+        if (!expected_q || !existing_q || !expected_q->function_core || !existing_q->function_core)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected AST for SQL function {}", locality_function_name);
+
+        if (expected_q->function_core->getTreeHash(/* ignore_aliases= */ true)
+            != existing_q->function_core->getTreeHash(/* ignore_aliases= */ true))
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "The SQL user-defined function {} must be exactly `x -> toUInt32(sipHash64(x))` "
+                "(TimeSeries metric locality). Drop it or replace it with that definition.",
+                locality_function_name);
+
+        return;
+    }
 
     UserDefinedSQLFunctionFactory::instance().registerFunction(
-        context, locality_function_name, ast, /* throw_if_exists */ false, /* replace_if_exists */ true);
+        context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ true);
 }
 
 }
