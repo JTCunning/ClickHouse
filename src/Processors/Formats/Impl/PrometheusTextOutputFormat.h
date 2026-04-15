@@ -33,6 +33,7 @@ protected:
         std::optional<size_t> type;
         std::optional<size_t> labels;
         std::optional<size_t> timestamp;
+        std::optional<size_t> unit;
     };
 
     /// One metric can be represented by multiple rows (e.g. containing different labels).
@@ -51,8 +52,15 @@ protected:
         String name;
         String help;
         String type;
+        String unit;
         std::vector<RowValue> values;
     };
+
+    /// OpenMetrics may emit `# UNIT` between `# TYPE` and sample lines.
+    virtual void writeAdditionalFamilyMetadata() {}
+
+    /// When true, serialize timestamp whenever the column is present and non-NULL (including zero).
+    virtual bool useOpenMetricsTimestampRules() const { return false; }
 
     /// Input rows should be grouped by the same metric.
     void write(const Columns & columns, size_t row_num) override;

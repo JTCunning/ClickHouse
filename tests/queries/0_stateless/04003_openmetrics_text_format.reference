@@ -1,0 +1,12 @@
+m 1
+
+# EOF
+
+# HELP m h
+# TYPE m gauge
+# UNIT m u
+m{x="y"} 2 100
+
+# EOF
+
+x	42	help_text	counter	{}	999	by_1
