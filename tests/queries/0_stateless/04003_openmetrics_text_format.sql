@@ -51,3 +51,6 @@ SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 2 ex
 -- Reject empty metric name and duplicate label keys (invalid exposition text).
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('{k="v"} 1', char(10))); -- { serverError INCORRECT_DATA }
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m{a="1",a="2"} 1', char(10))); -- { serverError INCORRECT_DATA }
+
+-- Reject malformed float sample tokens (no partial parse, e.g. 1abc must not become 1).
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1abc', char(10))); -- { serverError INCORRECT_DATA }

@@ -203,7 +203,7 @@ void insertFloatFromPrometheusText(IColumn & column, const String & token)
     else
     {
         ReadBufferFromString buf(token);
-        if (!tryReadFloatText(v, buf))
+        if (!tryReadFloatText(v, buf) || !buf.eof())
             throw Exception(ErrorCodes::INCORRECT_DATA, "Cannot parse float value '{}' in OpenMetrics format", token);
     }
     assert_cast<ColumnFloat64 &>(column).insert(v);
