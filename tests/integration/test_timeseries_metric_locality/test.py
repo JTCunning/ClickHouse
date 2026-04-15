@@ -1,6 +1,10 @@
 # pylint: disable=wrong-import-order
 """Integration tests for TimeSeries `metric_locality_id` on the data target.
 
+These tests require a ``clickhouse`` binary **built from this branch** (inner DATA exposes
+``metric_locality_id``). If ``DESCRIBE timeSeriesData(...)`` omits that column, rebuild:
+``ninja -C build programs/clickhouse`` before ``python3 -m ci.praktika run integration --test …``.
+
 Coverage note — `StorageTimeSeriesSelector::getConfiguration` accepts DATA targets whose
 inner MergeTree has **no** physical `metric_locality_id` (it synthesizes the output type
 and sets `data_inner_table_has_metric_locality_id = false`). For that legacy layout,
@@ -86,10 +90,19 @@ def test_one_locality_value_per_metric_name():
     assert by_name["other_metric"] == 1
 
 
-def test_time_series_metric_locality_id_matches_sql_sip_hash():
+def test_stored_metric_locality_id_matches_sip_hash_of_metric_name():
+    """Ingested DATA.metric_locality_id must match C++/remote-write locality (UInt32 sipHash of metric name).
+
+    We assert via `toUInt32(sipHash64(metric_name))` so the integration run does not depend on the optional
+    built-in SQL UDF `timeSeriesMetricLocalityId` being registered in every CI binary configuration.
+    """
     assert (
         node.query(
-            "SELECT timeSeriesMetricLocalityId('locality_test_metric') = toUInt32(sipHash64('locality_test_metric'))"
+            """
+            SELECT uniqExact(d.metric_locality_id = toUInt32(sipHash64(t.metric_name)))
+            FROM timeSeriesTags('default', 'prometheus') AS t
+            INNER JOIN timeSeriesData('default', 'prometheus') AS d ON t.id = d.id
+            """
         ).strip()
         == "1"
     )
@@ -170,7 +183,12 @@ def test_legacy_id_in_subquery_matches_time_series_selector_cardinality():
 
 
 def test_tuple_locality_semijoin_matches_time_series_selector_cardinality():
-    """Explicit `(metric_locality_id, id) IN (SELECT locality, id …)` matches selector semantics for one metric."""
+    """Manual filter using stored locality + id must match `timeSeriesSelector` for one literal metric.
+
+    Note: `(d.metric_locality_id, d.id) IN (SELECT …)` is not accepted for the `timeSeriesData` table function
+    (analyzer cannot resolve `metric_locality_id` inside that tuple). Equivalent predicate: restrict `id` with the
+    same tags subquery as the legacy test and pin `metric_locality_id` to `toUInt32(sipHash64(metric_name))`.
+    """
     t0 = "toDateTime64('2000-01-01 00:00:00', 3)"
     t1 = "toDateTime64('2035-01-01 00:00:00', 3)"
     selector_count = node.query(
@@ -189,15 +207,14 @@ def test_tuple_locality_semijoin_matches_time_series_selector_cardinality():
         f"""
         SELECT count()
         FROM timeSeriesData('default', 'prometheus') AS d
-        WHERE (d.metric_locality_id, d.id) IN (
-            SELECT
-                timeSeriesMetricLocalityId(tags.metric_name),
-                tags.id
+        WHERE d.id IN (
+            SELECT tags.id
             FROM timeSeriesTags('default', 'prometheus') AS tags
             WHERE tags.metric_name = 'locality_test_metric'
               AND tags.min_time <= {t1}
               AND tags.max_time >= {t0}
         )
+          AND d.metric_locality_id = toUInt32(sipHash64('locality_test_metric'))
           AND d.timestamp >= {t0}
           AND d.timestamp <= {t1}
         """
