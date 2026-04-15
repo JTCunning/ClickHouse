@@ -50,8 +50,24 @@ ASTPtr parseCanonicalTimeSeriesMetricLocalityIdCreateQuery(const ContextPtr & co
         settings[Setting::max_parser_backtracks]);
 }
 
-/// Register the canonical UDF if missing; if present, require normalized \c function_core AST to match exactly
-/// (same as built-in `x -> toUInt32(sipHash64(x))`) or throw \c BAD_ARGUMENTS.
+/// At server startup: register canonical UDF only if the name is free. Do not validate an existing definition
+/// (user may own `timeSeriesMetricLocalityId` for non-TimeSeries use); strict checks run when TimeSeries runs
+/// (`ensureTimeSeriesMetricLocalityIdUserDefinedFunction`).
+void registerTimeSeriesMetricLocalityIdIfAbsent(ContextMutablePtr context)
+{
+    ASTPtr expected_ast = parseCanonicalTimeSeriesMetricLocalityIdCreateQuery(context);
+    if (!expected_ast->as<ASTCreateSQLFunctionQuery>())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected AST for builtin UDF: {}", expected_ast->formatForLogging());
+
+    if (UserDefinedSQLFunctionFactory::instance().has(locality_function_name))
+        return;
+
+    UserDefinedSQLFunctionFactory::instance().registerFunction(
+        context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ true);
+}
+
+/// When TimeSeries query paths run: register if missing; if present, require normalized \c function_core AST to
+/// match the canonical `x -> toUInt32(sipHash64(x))` or throw \c BAD_ARGUMENTS.
 void registerOrValidateTimeSeriesMetricLocalityId(ContextMutablePtr context)
 {
     ASTPtr expected_ast = parseCanonicalTimeSeriesMetricLocalityIdCreateQuery(context);
@@ -101,7 +117,7 @@ void ensureTimeSeriesMetricLocalityIdUserDefinedFunction(ContextMutablePtr conte
 
 void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context)
 {
-    registerOrValidateTimeSeriesMetricLocalityId(std::move(context));
+    registerTimeSeriesMetricLocalityIdIfAbsent(std::move(context));
 }
 
 }
