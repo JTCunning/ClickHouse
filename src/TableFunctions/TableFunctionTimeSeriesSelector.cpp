@@ -1,6 +1,5 @@
 #include <TableFunctions/TableFunctionTimeSeriesSelector.h>
 
-#include <DataTypes/DataTypesNumber.h>
 #include <Parsers/ASTFunction.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <TableFunctions/TableFunctionFactory.h>
@@ -29,7 +28,7 @@ void TableFunctionTimeSeriesSelector::parseArguments(const ASTPtr & ast_function
 ColumnsDescription TableFunctionTimeSeriesSelector::getActualTableStructure(ContextPtr /* context */, bool /* is_insert_query */) const
 {
     return ColumnsDescription({
-        {TimeSeriesColumnNames::MetricLocalityId, std::make_shared<DataTypeUInt32>()},
+        {TimeSeriesColumnNames::MetricLocalityId, config.metric_locality_id_data_type},
         {TimeSeriesColumnNames::ID, config.id_data_type},
         {TimeSeriesColumnNames::Timestamp, config.timestamp_data_type},
         {TimeSeriesColumnNames::Value, config.scalar_data_type}

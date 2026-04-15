@@ -1,13 +1,14 @@
 # pylint: disable=wrong-import-order
 """Integration tests for TimeSeries `metric_locality_id` on the data target.
 
-Coverage note — **historical inner data tables without** a physical `metric_locality_id`
-column are **not** exercised here: `timeSeriesSelector` currently requires that column in
-data-table metadata (`StorageTimeSeriesSelector::getConfiguration`). Simulating a true
-pre-upgrade data directory would need a dedicated attach/backup fixture or engine support
-for optional locality. The tests below still lock in **client/SQL forward compatibility**:
-queries that only use `id` + tags (the pattern from before tuple+locality semijoins) must
-remain equivalent to `timeSeriesSelector` when the column **is** present.
+Coverage note — `StorageTimeSeriesSelector::getConfiguration` accepts DATA targets whose
+inner MergeTree has **no** physical `metric_locality_id` (it synthesizes the output type
+and sets `data_inner_table_has_metric_locality_id = false`). For that legacy layout,
+`readImpl` keeps the historical `id IN (SELECT … FROM tags)` filter; the exposed
+`metric_locality_id` column is computed from a literal `__name__` when possible, and
+zero-filled otherwise. This file does **not** add integration coverage for that path;
+exercising it needs a fixture with an attached/legacy DATA schema. The tests below still
+lock in **client/SQL forward compatibility** when the column **is** present on disk.
 """
 import os
 import sys
