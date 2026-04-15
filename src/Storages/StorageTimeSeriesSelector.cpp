@@ -10,6 +10,7 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DatabaseCatalog.h>
+#include <Interpreters/registerBuiltinSQLUserDefinedFunctions.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Interpreters/evaluateConstantExpression.h>
@@ -50,6 +51,10 @@ namespace TimeSeriesSetting
 
 StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfiguration(ASTs & args, const ContextPtr & context)
 {
+    /// Enforce `timeSeriesMetricLocalityId` semantics only when this TimeSeries integration is used,
+    /// not at server startup (see `registerBuiltinSQLUserDefinedFunctions`).
+    ensureTimeSeriesMetricLocalityIdUserDefinedFunction(context->getGlobalContext());
+
     std::string_view function_name = "timeSeriesSelector";
 
     size_t min_num_args = 4;
