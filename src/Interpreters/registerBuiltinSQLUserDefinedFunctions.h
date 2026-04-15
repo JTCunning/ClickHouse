@@ -6,10 +6,8 @@
 namespace DB
 {
 
-/// Registers built-in SQL user-defined functions that replace what would otherwise be
-/// one-line native functions (e.g. `timeSeriesMetricLocalityId` as `toUInt32(sipHash64(x))`).
-/// Call after `UserDefinedSQLObjectsStorage::loadObjects()` so persisted UDFs take precedence
-/// when `registerBuiltinSQLUserDefinedFunctions` skips names that already exist.
+/// Hook for optional built-in SQL UDFs that must register after persisted user functions from disk.
+/// Native functions use `REGISTER_FUNCTION` instead. Call after `UserDefinedSQLObjectsStorage::loadObjects()`.
 void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context);
 
 }

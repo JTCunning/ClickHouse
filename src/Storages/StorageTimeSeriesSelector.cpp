@@ -3,6 +3,7 @@
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
 #include <Core/Field.h>
+#include <Parsers/ASTLiteral.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -45,6 +46,7 @@ namespace TimeSeriesSetting
 {
     extern const TimeSeriesSettingsMap tags_to_columns;
     extern const TimeSeriesSettingsBool filter_by_min_time_and_max_time;
+    extern const TimeSeriesSettingsBool allow_time_series_selector_regex_without_metric_locality_id;
 }
 
 StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfiguration(ASTs & args, const ContextPtr & context)
@@ -416,14 +418,22 @@ namespace
                     make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricLocalityId),
                     make_intrusive<ASTLiteral>(metric_locality_id_data_type->getName())));
             }
-            else
+            else if (synthetic_metric_name_for_locality_id.has_value())
             {
-                chassert(synthetic_metric_name_for_locality_id.has_value());
                 select_list.push_back(makeASTFunction(
                     "CAST",
                     makeASTFunction(
                         "timeSeriesMetricLocalityId",
                         make_intrusive<ASTLiteral>((*synthetic_metric_name_for_locality_id))),
+                    make_intrusive<ASTLiteral>(metric_locality_id_data_type->getName())));
+            }
+            else
+            {
+                /// Legacy DATA without `metric_locality_id` and non-literal `__name__`: cannot derive locality per row;
+                /// expose a zero column (see `allow_time_series_selector_regex_without_metric_locality_id`).
+                select_list.push_back(makeASTFunction(
+                    "CAST",
+                    make_intrusive<ASTLiteral>(Field{UInt64(0)}),
                     make_intrusive<ASTLiteral>(metric_locality_id_data_type->getName())));
             }
             select_list.back()->setAlias(TimeSeriesColumnNames::MetricLocalityId);
@@ -526,10 +536,12 @@ void StorageTimeSeriesSelector::readImpl(
     if (!config.data_inner_table_has_metric_locality_id)
     {
         synthetic_metric_name_for_locality_id = tryGetLiteralMetricNameForSyntheticLocality(matchers);
-        if (!synthetic_metric_name_for_locality_id)
+        if (!synthetic_metric_name_for_locality_id
+            && !time_series_settings[TimeSeriesSetting::allow_time_series_selector_regex_without_metric_locality_id])
             throw Exception(
                 ErrorCodes::BAD_ARGUMENTS,
                 "timeSeriesSelector requires a literal equality matcher for __name__ when the data table has no {} column "
+                "and allow_time_series_selector_regex_without_metric_locality_id is false "
                 "(e.g. __name__='http_requests_total'); regex or other matchers are not supported in that layout",
                 TimeSeriesColumnNames::MetricLocalityId);
     }
