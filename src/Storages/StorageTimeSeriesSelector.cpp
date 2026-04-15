@@ -46,7 +46,6 @@ namespace TimeSeriesSetting
 {
     extern const TimeSeriesSettingsMap tags_to_columns;
     extern const TimeSeriesSettingsBool filter_by_min_time_and_max_time;
-    extern const TimeSeriesSettingsBool allow_time_series_selector_regex_without_metric_locality_id;
 }
 
 StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfiguration(ASTs & args, const ContextPtr & context)
@@ -429,8 +428,8 @@ namespace
             }
             else
             {
-                /// Legacy DATA without `metric_locality_id` and non-literal `__name__`: cannot derive locality per row;
-                /// expose a zero column (see `allow_time_series_selector_regex_without_metric_locality_id`).
+                /// Physical DATA without `metric_locality_id` and non-literal `__name__`: cannot derive locality per row;
+                /// expose a zero column (filtering still uses `id IN (SELECT ... FROM tags)`).
                 select_list.push_back(makeASTFunction(
                     "CAST",
                     make_intrusive<ASTLiteral>(Field{UInt64(0)}),
@@ -532,19 +531,12 @@ void StorageTimeSeriesSelector::readImpl(
 
     auto column_name_by_tag_name = makeColumnNameByTagNameMap(time_series_settings);
 
+    /// When the physical DATA table has no `metric_locality_id` column, use legacy `id IN (tags subquery)` filtering.
+    /// If `__name__` is a single literal equality, we can still fill `metric_locality_id` via `timeSeriesMetricLocalityId(literal)`;
+    /// otherwise the result column is zero-filled (same layout as before locality existed on disk).
     std::optional<String> synthetic_metric_name_for_locality_id;
     if (!config.data_inner_table_has_metric_locality_id)
-    {
         synthetic_metric_name_for_locality_id = tryGetLiteralMetricNameForSyntheticLocality(matchers);
-        if (!synthetic_metric_name_for_locality_id
-            && !time_series_settings[TimeSeriesSetting::allow_time_series_selector_regex_without_metric_locality_id])
-            throw Exception(
-                ErrorCodes::BAD_ARGUMENTS,
-                "timeSeriesSelector requires a literal equality matcher for __name__ when the data table has no {} column "
-                "and allow_time_series_selector_regex_without_metric_locality_id is false "
-                "(e.g. __name__='http_requests_total'); regex or other matchers are not supported in that layout",
-                TimeSeriesColumnNames::MetricLocalityId);
-    }
 
     std::optional<DateTime64> min_time_to_filter_ids;
     std::optional<DateTime64> max_time_to_filter_ids;
