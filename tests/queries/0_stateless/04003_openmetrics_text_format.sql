@@ -47,3 +47,7 @@ FORMAT TSV;
 -- Reject trailing garbage after sample value / timestamp (no silent truncation).
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 abc', char(10))); -- { serverError INCORRECT_DATA }
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 2 extra', char(10))); -- { serverError INCORRECT_DATA }
+
+-- Reject empty metric name and duplicate label keys (invalid exposition text).
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('{k="v"} 1', char(10))); -- { serverError INCORRECT_DATA }
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m{a="1",a="2"} 1', char(10))); -- { serverError INCORRECT_DATA }

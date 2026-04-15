@@ -122,7 +122,9 @@ bool parseLabelSet(std::string_view s, size_t & pos, std::map<String, String> & 
         String value;
         if (!readQuotedLabelValue(s, pos, value))
             return false;
-        labels.emplace(std::move(key), std::move(value));
+        auto [it, inserted] = labels.emplace(std::move(key), std::move(value));
+        if (!inserted)
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Duplicate label name '{}' in OpenMetrics label set", it->first);
         skipAsciiSpaces(s, pos);
         if (pos < s.size() && s[pos] == ',')
         {
@@ -358,6 +360,9 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
         std::map<String, String> labels;
         if (!parseMetricDescriptor(sv, pos, stem, labels))
             throw Exception(ErrorCodes::INCORRECT_DATA, "Cannot parse labels in OpenMetrics line: {}", line);
+
+        if (stem.empty())
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Empty metric name in OpenMetrics line: {}", line);
 
         skipAsciiSpaces(sv, pos);
         String value_token;
