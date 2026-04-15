@@ -176,10 +176,17 @@ bool parseOptionalIntToken(std::string_view s, size_t & pos, String & out)
 
 void stripExemplarSuffix(std::string_view s, size_t & pos)
 {
-    /// OpenMetrics: ` # { ... } value` after optional timestamp.
+    /// OpenMetrics: optional exemplar / histogram metadata after `#` (rest of line is not a float sample).
     skipAsciiSpaces(s, pos);
-    if (pos + 1 < s.size() && s[pos] == ' ' && s[pos + 1] == '#')
+    if (pos < s.size() && s[pos] == '#')
         pos = s.size();
+}
+
+void checkMetricLineFullyConsumed(std::string_view s, size_t & pos, const String & line)
+{
+    skipAsciiSpaces(s, pos);
+    if (pos < s.size())
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Unexpected trailing data in OpenMetrics line: {}", line);
 }
 
 void insertFloatFromPrometheusText(IColumn & column, const String & token)
@@ -360,6 +367,7 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
         String ts_token;
         bool has_ts = parseOptionalIntToken(sv, pos, ts_token);
         stripExemplarSuffix(sv, pos);
+        checkMetricLineFullyConsumed(sv, pos, line);
 
         /// Resolve logical metric name (histogram/summary suffixes).
         String logical_name = stem;

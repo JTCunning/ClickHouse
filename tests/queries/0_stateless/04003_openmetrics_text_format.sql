@@ -43,3 +43,7 @@ FROM format(
     concat('quot{k="a', char(92), '"', 'b"} 1', char(10), '# EOF', char(10))
 )
 FORMAT TSV;
+
+-- Reject trailing garbage after sample value / timestamp (no silent truncation).
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 abc', char(10))); -- { serverError INCORRECT_DATA }
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 2 extra', char(10))); -- { serverError INCORRECT_DATA }
