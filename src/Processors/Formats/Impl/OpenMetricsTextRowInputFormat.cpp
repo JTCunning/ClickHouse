@@ -407,7 +407,11 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
         };
         applyStemSuffix();
 
-        const auto & fm = family_meta[logical_name];
+        /// Do not use operator[] here: it would insert an empty entry for every unseen metric name
+        /// (high-cardinality streams). Metadata comes only from # HELP / # TYPE / # UNIT lines.
+        static const FamilyMeta empty_family_meta;
+        auto meta_it = family_meta.find(logical_name);
+        const FamilyMeta & fm = (meta_it != family_meta.end()) ? meta_it->second : empty_family_meta;
 
         ext.read_columns.assign(columns.size(), 0);
 
