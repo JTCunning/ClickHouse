@@ -3,7 +3,6 @@
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
 #include <Core/Field.h>
-#include <Parsers/ASTLiteral.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypesNumber.h>

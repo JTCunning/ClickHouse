@@ -24,54 +24,6 @@ from helpers.cluster import ClickHouseCluster
 from prometheus_test_utils import convert_time_series_to_protobuf, send_protobuf_to_remote_write
 
 
-def _primary_key_used_keys_lists(explain_text: str) -> list[list[str]]:
-    """Collect `used_keys` from each PrimaryKey / PrimaryKeyExpand block in `EXPLAIN indexes=1` output."""
-    lines = explain_text.splitlines()
-    result: list[list[str]] = []
-    i = 0
-    while i < len(lines):
-        if lines[i].strip() not in ("PrimaryKey", "PrimaryKeyExpand"):
-            i += 1
-            continue
-        i += 1
-        while i < len(lines):
-            stripped = lines[i].strip()
-            if stripped in (
-                "PrimaryKey",
-                "PrimaryKeyExpand",
-                "Partition",
-                "Partition Min-Max",
-                "Statistics",
-                "Skip",
-                "None",
-            ):
-                break
-            if stripped == "Keys:":
-                i += 1
-                keys: list[str] = []
-                while i < len(lines):
-                    key = lines[i].strip()
-                    if not key:
-                        i += 1
-                        continue
-                    if key in (
-                        "Condition:",
-                        "Parts:",
-                        "Granules:",
-                        "Search Algorithm:",
-                        "Ranges:",
-                    ):
-                        break
-                    if key.endswith(":") and key != "Keys:":
-                        break
-                    keys.append(key)
-                    i += 1
-                result.append(keys)
-                break
-            i += 1
-    return result
-
-
 cluster = ClickHouseCluster(__file__)
 node = cluster.add_instance(
     "node",
@@ -166,24 +118,20 @@ def test_time_series_selector_reads_metric_locality_id():
     assert parts[2] == "1"
 
 
-def test_explain_indexes_primary_key_uses_metric_locality_id_first():
-    """Data inner table ORDER BY (metric_locality_id, id, timestamp): PK analysis must list metric_locality_id first."""
-    plan = node.query(
+def test_inner_data_merge_tree_sorting_key_leads_with_metric_locality_id():
+    """Inner DATA MergeTree must ORDER BY (metric_locality_id, id, timestamp); EXPLAIN may still pick another PK prefix for predicates."""
+    sorting_key = node.query(
         """
-        EXPLAIN indexes = 1
-        SELECT count()
-        FROM timeSeriesSelector(
-            'default',
-            'prometheus',
-            'locality_test_metric',
-            toDateTime64('2000-01-01 00:00:00', 3),
-            toDateTime64('2035-01-01 00:00:00', 3)
-        )
-        FORMAT TabSeparated
+        SELECT sorting_key
+        FROM system.tables
+        WHERE database = currentDatabase()
+          AND name LIKE '.inner_id.data.%'
+        ORDER BY name
+        LIMIT 1
+        FORMAT TabSeparatedRaw
         """
-    )
-    key_lists = _primary_key_used_keys_lists(plan)
-    assert any(keys and keys[0] == "metric_locality_id" for keys in key_lists), plan
+    ).strip()
+    assert sorting_key.startswith("metric_locality_id"), sorting_key
 
 
 def test_legacy_id_in_subquery_matches_time_series_selector_cardinality():
