@@ -55,6 +55,7 @@ bool tryConsume(std::string_view s, size_t & pos, char c)
 }
 
 /// Read a Prometheus/OpenMetrics double-quoted string; `pos` at opening `"`.
+/// Escape sequences: `\\`, `\"`, `\n` (https://prometheus.io/docs/instrumenting/exposition_formats/).
 bool readQuotedLabelValue(std::string_view s, size_t & pos, String & out)
 {
     if (pos >= s.size() || s[pos] != '"')
@@ -63,19 +64,32 @@ bool readQuotedLabelValue(std::string_view s, size_t & pos, String & out)
     out.clear();
     while (pos < s.size())
     {
+        if (s[pos] == '"')
+        {
+            ++pos;
+            return true;
+        }
         if (s[pos] == '\\')
         {
             ++pos;
             if (pos >= s.size())
                 return false;
-            out.push_back(s[pos]);
+            switch (s[pos])
+            {
+                case '\\':
+                    out.push_back('\\');
+                    break;
+                case '"':
+                    out.push_back('"');
+                    break;
+                case 'n':
+                    out.push_back('\n');
+                    break;
+                default:
+                    return false;
+            }
             ++pos;
             continue;
-        }
-        if (s[pos] == '"')
-        {
-            ++pos;
-            return true;
         }
         out.push_back(s[pos]);
         ++pos;
@@ -124,11 +138,11 @@ bool parseLabelSet(std::string_view s, size_t & pos, std::map<String, String> & 
     }
 }
 
-/// `pos` at first char of metric stem (before `{` or space).
+/// `pos` at first char of metric stem (before `{`, ASCII space, or tab — whitespace before value).
 bool parseMetricDescriptor(std::string_view s, size_t & pos, String & stem, std::map<String, String> & labels)
 {
     size_t stem_start = pos;
-    while (pos < s.size() && s[pos] != '{' && s[pos] != ' ')
+    while (pos < s.size() && s[pos] != '{' && s[pos] != ' ' && s[pos] != '\t')
         ++pos;
     stem = String{s.substr(stem_start, pos - stem_start)};
     return parseLabelSet(s, pos, labels);
@@ -225,7 +239,7 @@ ColumnLoc buildColumnLoc(const Block & header)
 
 void insertMapLabels(IColumn & column, const std::map<String, String> & labels)
 {
-    Field map_field;
+    Field map_field = Map();
     Map & m = map_field.safeGet<Map>();
     for (const auto & [k, v] : labels)
         m.push_back(Tuple{k, v});
@@ -258,7 +272,9 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
     const auto & header = getPort().getHeader();
     ColumnLoc loc = buildColumnLoc(header);
 
-    ext.read_columns.assign(columns.size(), 0);
+    /// Like JSONEachRowRowInputFormat::checkEndOfData: if we return false with no row, leave read_columns
+    /// empty so IRowInputFormat does not treat all-zero read_columns as "missing values" (Code 7).
+    ext.read_columns.clear();
 
     while (!in->eof() && !saw_eof)
     {
@@ -380,6 +396,8 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
 
         const auto & fm = family_meta[logical_name];
 
+        ext.read_columns.assign(columns.size(), 0);
+
         if (loc.name)
         {
             assert_cast<ColumnString &>(*columns[*loc.name]).insertData(logical_name.data(), logical_name.size());
@@ -442,6 +460,7 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
         return true;
     }
 
+    ext.read_columns.clear();
     return false;
 }
 
