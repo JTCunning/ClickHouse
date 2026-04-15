@@ -6,8 +6,9 @@
 namespace DB
 {
 
-/// Hook for optional built-in SQL UDFs that must register after persisted user functions from disk.
-/// Native functions use `REGISTER_FUNCTION` instead. Call after `UserDefinedSQLObjectsStorage::loadObjects()`.
+/// Registers built-in SQL user-defined functions that must load after persisted user functions from disk
+/// (so stored UDFs take precedence when names already exist).
+/// Call after `UserDefinedSQLObjectsStorage::loadObjects()`.
 void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context);
 
 }
