@@ -50,8 +50,8 @@ namespace TimeSeriesSetting
 
 StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfiguration(ASTs & args, const ContextPtr & context)
 {
-    /// Enforce `timeSeriesMetricLocalityId` semantics only when this TimeSeries integration is used,
-    /// not at server startup (see `registerBuiltinSQLUserDefinedFunctions`).
+    /// Re-check `timeSeriesMetricLocalityId` matches the canonical UDF (also enforced at server startup in
+    /// `registerBuiltinSQLUserDefinedFunctions`) so runtime `CREATE OR REPLACE FUNCTION` cannot diverge mid-process.
     ensureTimeSeriesMetricLocalityIdUserDefinedFunction(context->getGlobalContext());
 
     std::string_view function_name = "timeSeriesSelector";

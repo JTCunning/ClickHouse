@@ -50,22 +50,9 @@ ASTPtr parseCanonicalTimeSeriesMetricLocalityIdCreateQuery(const ContextPtr & co
         settings[Setting::max_parser_backtracks]);
 }
 
-/// When absent, register the canonical definition. When present, do nothing (startup must not fail
-/// on a user-owned name; TimeSeries enforces semantics later via \c ensureTimeSeriesMetricLocalityIdUserDefinedFunction).
-void registerTimeSeriesMetricLocalityIdIfAbsent(ContextMutablePtr context)
-{
-    ASTPtr expected_ast = parseCanonicalTimeSeriesMetricLocalityIdCreateQuery(context);
-    if (!expected_ast->as<ASTCreateSQLFunctionQuery>())
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected AST for builtin UDF: {}", expected_ast->formatForLogging());
-
-    if (UserDefinedSQLFunctionFactory::instance().has(locality_function_name))
-        return;
-
-    UserDefinedSQLFunctionFactory::instance().registerFunction(
-        context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ true);
-}
-
-void ensureTimeSeriesMetricLocalityIdUserDefinedFunctionImpl(ContextMutablePtr context)
+/// Register the canonical UDF if missing; if present, require normalized \c function_core AST to match exactly
+/// (same as built-in `x -> toUInt32(sipHash64(x))`) or throw \c BAD_ARGUMENTS.
+void registerOrValidateTimeSeriesMetricLocalityId(ContextMutablePtr context)
 {
     ASTPtr expected_ast = parseCanonicalTimeSeriesMetricLocalityIdCreateQuery(context);
     if (!expected_ast->as<ASTCreateSQLFunctionQuery>())
@@ -109,12 +96,12 @@ void ensureTimeSeriesMetricLocalityIdUserDefinedFunctionImpl(ContextMutablePtr c
 
 void ensureTimeSeriesMetricLocalityIdUserDefinedFunction(ContextMutablePtr context)
 {
-    ensureTimeSeriesMetricLocalityIdUserDefinedFunctionImpl(std::move(context));
+    registerOrValidateTimeSeriesMetricLocalityId(std::move(context));
 }
 
 void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context)
 {
-    registerTimeSeriesMetricLocalityIdIfAbsent(std::move(context));
+    registerOrValidateTimeSeriesMetricLocalityId(std::move(context));
 }
 
 }
