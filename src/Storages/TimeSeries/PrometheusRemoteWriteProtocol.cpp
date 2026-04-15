@@ -7,6 +7,7 @@
 #include <string_view>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnMap.h>
+#include <Columns/ColumnNullable.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
 #include <Core/Field.h>
@@ -46,6 +47,7 @@ namespace ErrorCodes
 {
     extern const int ILLEGAL_TIME_SERIES_TAGS;
     extern const int ILLEGAL_COLUMN;
+    extern const int LOGICAL_ERROR;
 }
 
 
@@ -254,12 +256,13 @@ namespace
         const bool data_table_has_metric_locality_id = data_target_physical_columns.has(TimeSeriesColumnNames::MetricLocalityId);
 
         /// Column "metric_locality_id" (only if the physical DATA table stores it).
-        ColumnUInt32 * metric_locality_column = nullptr;
+        /// May be plain \c UInt32 or \c Nullable(UInt32) for external DATA targets — \c createColumn matches metadata.
+        IColumn * metric_locality_column = nullptr;
         if (data_table_has_metric_locality_id)
         {
             const auto & metric_locality_description = get_column_description(TimeSeriesColumnNames::MetricLocalityId);
             validator.validateColumnForMetricLocalityId(metric_locality_description);
-            metric_locality_column = &typeid_cast<ColumnUInt32 &>(make_column_for_data_block(metric_locality_description));
+            metric_locality_column = &make_column_for_data_block(metric_locality_description);
         }
 
         /// Column "id".
@@ -423,8 +426,23 @@ namespace
                 auto metric_name_ref = metric_name_column.getDataAt(current_row_in_tags);
                 UInt32 locality = timeSeriesMetricLocalityIdFromMetricName(
                     std::string_view(metric_name_ref.data(), metric_name_ref.size()));
-                for (Int32 s = 0; s < element.samples_size(); ++s)
-                    metric_locality_column->insertValue(locality);
+                if (auto * plain = typeid_cast<ColumnUInt32 *>(metric_locality_column))
+                {
+                    for (Int32 s = 0; s < element.samples_size(); ++s)
+                        plain->insertValue(locality);
+                }
+                else if (auto * nullable = typeid_cast<ColumnNullable *>(metric_locality_column))
+                {
+                    const Field value{UInt64(locality)};
+                    for (Int32 s = 0; s < element.samples_size(); ++s)
+                        nullable->insert(value);
+                }
+                else
+                    throw Exception(
+                        ErrorCodes::LOGICAL_ERROR,
+                        "Unexpected column type for {}: {}",
+                        TimeSeriesColumnNames::MetricLocalityId,
+                        metric_locality_column->getName());
             }
 
             for (const auto & sample : element.samples())
