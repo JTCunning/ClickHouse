@@ -54,3 +54,6 @@ SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m{a="1",
 
 -- Reject malformed float sample tokens (no partial parse, e.g. 1abc must not become 1).
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1abc', char(10))); -- { serverError INCORRECT_DATA }
+
+-- Reject trailing payload after logical end (# EOF).
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('# EOF', char(10), 'm 1', char(10))); -- { serverError INCORRECT_DATA }

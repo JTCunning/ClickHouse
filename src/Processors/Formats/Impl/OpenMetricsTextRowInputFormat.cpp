@@ -255,6 +255,30 @@ void insertMapLabels(IColumn & column, const std::map<String, String> & labels)
     column.insert(map_field);
 }
 
+bool isBlankAsciiLine(const String & line)
+{
+    for (char c : line)
+        if (c != ' ' && c != '\t')
+            return false;
+    return true;
+}
+
+/// After `# EOF`, the exposition stream is logically finished; reject trailing payload.
+void throwIfNonBlankAfterEOF(ReadBuffer & buf)
+{
+    while (!buf.eof())
+    {
+        String tail_line;
+        readStringUntilNewlineInto(tail_line, buf);
+        if (!buf.eof())
+            buf.ignore();
+        if (!tail_line.empty() && tail_line.back() == '\r')
+            tail_line.pop_back();
+        if (!tail_line.empty() && !isBlankAsciiLine(tail_line))
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Unexpected data after # EOF in OpenMetrics input");
+    }
+}
+
 }
 
 OpenMetricsTextRowInputFormat::OpenMetricsTextRowInputFormat(
@@ -302,6 +326,7 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
         {
             if (line == "# EOF" || (line.starts_with("# EOF") && (line.size() == 5 || line[5] == ' ' || line[5] == '\t')))
             {
+                throwIfNonBlankAfterEOF(*in);
                 saw_eof = true;
                 continue;
             }
