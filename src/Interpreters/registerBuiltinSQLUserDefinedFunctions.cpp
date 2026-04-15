@@ -1,7 +1,9 @@
 #include <Interpreters/registerBuiltinSQLUserDefinedFunctions.h>
 
 #include <Core/Settings.h>
+#include <Functions/UserDefined/UserDefinedExecutableFunctionFactory.h>
 #include <Functions/UserDefined/UserDefinedSQLFunctionFactory.h>
+#include <Functions/UserDefined/UserDefinedWebAssembly.h>
 #include <Interpreters/Context.h>
 #include <Parsers/ASTCreateSQLFunctionQuery.h>
 #include <Parsers/ParserCreateFunctionQuery.h>
@@ -27,6 +29,15 @@ namespace ErrorCodes
 namespace
 {
 constexpr const char * locality_function_name = "timeSeriesMetricLocalityId";
+
+bool timeSeriesMetricLocalityIdNameTakenByNonSqlUserDefinedFunction(const ContextPtr & context)
+{
+    if (UserDefinedWebAssemblyFunctionFactory::instance().has(locality_function_name))
+        return true;
+    if (UserDefinedExecutableFunctionFactory::instance().has(locality_function_name, context))
+        return true;
+    return false;
+}
 
 const String & canonicalTimeSeriesMetricLocalityIdCreateQuery()
 {
@@ -62,8 +73,12 @@ void registerTimeSeriesMetricLocalityIdIfAbsent(ContextMutablePtr context)
     if (UserDefinedSQLFunctionFactory::instance().has(locality_function_name))
         return;
 
+    /// Do not use replace_if_exists: it can drop a WASM UDF with the same name (see UserDefinedSQLFunctionFactory::registerFunction).
+    if (timeSeriesMetricLocalityIdNameTakenByNonSqlUserDefinedFunction(context))
+        return;
+
     UserDefinedSQLFunctionFactory::instance().registerFunction(
-        context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ true);
+        context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ false);
 }
 
 /// When TimeSeries query paths run: register if missing; if present, require normalized \c function_core AST to
@@ -76,8 +91,16 @@ void registerOrValidateTimeSeriesMetricLocalityId(ContextMutablePtr context)
 
     if (!UserDefinedSQLFunctionFactory::instance().has(locality_function_name))
     {
+        if (timeSeriesMetricLocalityIdNameTakenByNonSqlUserDefinedFunction(context))
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "TimeSeries requires the SQL user-defined function {} with definition `x -> toUInt32(sipHash64(x))`, "
+                "but a WebAssembly or executable user-defined function with that name already exists. "
+                "Drop or rename the conflicting function.",
+                locality_function_name);
+
         UserDefinedSQLFunctionFactory::instance().registerFunction(
-            context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ true);
+            context, locality_function_name, expected_ast, /* throw_if_exists */ false, /* replace_if_exists */ false);
         return;
     }
 

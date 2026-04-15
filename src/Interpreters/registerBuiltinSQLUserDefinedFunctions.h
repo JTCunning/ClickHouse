@@ -9,9 +9,10 @@ namespace DB
 /// Registers built-in SQL user-defined functions that must load after persisted user functions from disk.
 /// Call after `UserDefinedSQLObjectsStorage::loadObjects()`.
 ///
-/// For `timeSeriesMetricLocalityId`: registers the canonical definition **only if the name is unused**, so
-/// existing persisted UDFs keep precedence and server startup stays backward-compatible. Strict validation of a
-/// conflicting definition is deferred to `ensureTimeSeriesMetricLocalityIdUserDefinedFunction` (TimeSeries paths).
+/// For `timeSeriesMetricLocalityId`: registers the canonical SQL definition **only if the name is unused** (no SQL,
+/// WebAssembly, or executable UDF already registered under that name). Does not use replacement registration, so a
+/// same-name WASM UDF is never dropped at startup. Strict validation of a conflicting SQL definition is deferred to
+/// `ensureTimeSeriesMetricLocalityIdUserDefinedFunction` (TimeSeries paths).
 void registerBuiltinSQLUserDefinedFunctions(ContextMutablePtr context);
 
 /// Ensures `timeSeriesMetricLocalityId` matches the canonical body when TimeSeries runs (e.g. `timeSeriesSelector`):
