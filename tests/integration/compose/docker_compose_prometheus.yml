@@ -64,7 +64,8 @@ services:
       exec /bin/prometheus --config.file="/etc/prometheus/prometheus.yml" --storage.tsdb.path="/prometheus" --web.listen-address="0.0.0.0:${PROMETHEUS_READER_PORT}" --enable-feature=promql-experimental-functions &> /var/log/prometheus/prometheus.log
       '
     expose:
-      - ${PROMETHEUS_READER_PORT}
+      # Default port avoids "empty string specified for ports" when reader is disabled (Compose v5+).
+      - "${PROMETHEUS_READER_PORT:-1}"
     healthcheck:
       test: |
         /bin/sh -c '

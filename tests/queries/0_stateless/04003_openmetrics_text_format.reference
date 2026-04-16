@@ -1,15 +1,14 @@
-m 1
+http_requests_total 1
 
 # EOF
-# HELP m h
-# TYPE m gauge
-# UNIT m u
-m{x="y"} 2 100
+# HELP http_requests_total Total number of HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{method="GET",status="200"} 2 100
 
 # EOF
-x	42	help_text	counter	{}	999	by_1
-tabbed	7			{}	\N	
-esc	1			{'k':'a\nb'}	\N	
-quot	1			{'k':'a"b'}	\N	
-requests_sum	1			{}	\N	
-h	5	help	histogram	{'sum':''}	\N	
+demo_jobs_processed_total	42	Number of completed batch jobs	counter	{}	999	seconds
+ingress_http_requests_total	7			{}	\N	
+demo_log_lines_total	1			{'k':'a\nb'}	\N	
+demo_error_messages_total	1			{'k':'a"b'}	\N	
+http_requests_total_sum	1			{}	\N	
+http_request_duration_seconds	5	help	histogram	{'sum':''}	\N	

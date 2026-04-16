@@ -1,7 +1,7 @@
-SELECT 'm' AS name, 1. AS value, '' AS help, '' AS type, CAST(map(), 'Map(String, String)') AS labels, CAST(NULL AS Nullable(Int64)) AS timestamp, '' AS unit
+SELECT 'http_requests_total' AS name, 1. AS value, '' AS help, '' AS type, CAST(map(), 'Map(String, String)') AS labels, CAST(NULL AS Nullable(Int64)) AS timestamp, '' AS unit
 FORMAT OpenMetrics;
 
-SELECT 'm' AS name, 2. AS value, 'h' AS help, 'gauge' AS type, map('x', 'y') AS labels, CAST(100 AS Nullable(Int64)) AS timestamp, 'u' AS unit
+SELECT 'http_requests_total' AS name, 2. AS value, 'Total number of HTTP requests' AS help, 'counter' AS type, map('method', 'GET', 'status', '200') AS labels, CAST(100 AS Nullable(Int64)) AS timestamp, '' AS unit
 FORMAT OpenMetrics;
 
 SELECT *
@@ -9,10 +9,10 @@ FROM format(
     OpenMetrics,
     'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
 $$
-# HELP x help_text
-# TYPE x counter
-# UNIT x by_1
-x 42 999
+# HELP demo_jobs_processed_total Number of completed batch jobs
+# TYPE demo_jobs_processed_total counter
+# UNIT demo_jobs_processed_total seconds
+demo_jobs_processed_total 42 999
 # EOF
 $$
 )
@@ -23,7 +23,7 @@ SELECT *
 FROM format(
     OpenMetrics,
     'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
-    concat('tabbed', char(9), '7', char(10), '# EOF', char(10))
+    concat('ingress_http_requests_total', char(9), '7', char(10), '# EOF', char(10))
 )
 FORMAT TSV;
 
@@ -32,7 +32,7 @@ SELECT *
 FROM format(
     OpenMetrics,
     'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
-    concat('esc{k="a', char(92), 'n', 'b"} 1', char(10), '# EOF', char(10))
+    concat('demo_log_lines_total{k="a', char(92), 'n', 'b"} 1', char(10), '# EOF', char(10))
 )
 FORMAT TSV;
 
@@ -40,7 +40,7 @@ SELECT *
 FROM format(
     OpenMetrics,
     'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
-    concat('quot{k="a', char(92), '"', 'b"} 1', char(10), '# EOF', char(10))
+    concat('demo_error_messages_total{k="a', char(92), '"', 'b"} 1', char(10), '# EOF', char(10))
 )
 FORMAT TSV;
 
@@ -76,7 +76,7 @@ SELECT *
 FROM format(
     OpenMetrics,
     'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
-    concat('# HELP requests help\n', '# TYPE requests counter\n', 'requests_sum 1\n', '# EOF\n')
+    concat('# HELP http_requests_total help\n', '# TYPE http_requests_total counter\n', 'http_requests_total_sum 1\n', '# EOF\n')
 )
 FORMAT TSV;
 
@@ -85,6 +85,6 @@ SELECT *
 FROM format(
     OpenMetrics,
     'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
-    concat('# HELP h help\n', '# TYPE h histogram\n', 'h_sum 5\n', '# EOF\n')
+    concat('# HELP http_request_duration_seconds help\n', '# TYPE http_request_duration_seconds histogram\n', 'http_request_duration_seconds_sum 5\n', '# EOF\n')
 )
 FORMAT TSV;

@@ -365,3 +365,31 @@ def value_close_to(value1, value2, eps):
         return math.isinf(value2) and (value1 > 0) == (value2 > 0)
     else:
         return math.isnan(value2)
+
+
+def strip_openmetrics_only_lines(text: str) -> str:
+    """Drop OpenMetrics-only lines so the remainder matches FORMAT Prometheus for the same SELECT."""
+    lines = []
+    for line in text.split("\n"):
+        if line == "# EOF" or line.startswith("# UNIT "):
+            continue
+        lines.append(line)
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def normalize_exposition_newlines(text: str) -> str:
+    """Single trailing newline; Prometheus may emit an extra blank line after the last sample."""
+    return text.rstrip() + "\n"
+
+
+def assert_prometheus_openmetrics_exposition_equivalent(
+    prometheus_text: str, openmetrics_text: str
+) -> None:
+    """
+    FORMAT OpenMetrics adds # UNIT when unit is non-empty and always ends with # EOF;
+    sample lines for the same row set must match FORMAT Prometheus after stripping those.
+    """
+    assert openmetrics_text.rstrip().endswith("# EOF")
+    assert normalize_exposition_newlines(
+        strip_openmetrics_only_lines(openmetrics_text)
+    ) == normalize_exposition_newlines(prometheus_text)
