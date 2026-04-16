@@ -11,6 +11,7 @@
 #include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/IDataType.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Formats/FormatFactory.h>
 #include <IO/ReadBufferFromString.h>
@@ -29,6 +30,7 @@ namespace DB
 
 namespace ErrorCodes
 {
+extern const int BAD_ARGUMENTS;
 extern const int INCORRECT_DATA;
 extern const int INCORRECT_QUERY;
 }
@@ -227,6 +229,41 @@ struct ColumnLoc
     std::optional<size_t> unit;
 };
 
+bool isDataTypeMapString(const DataTypePtr & type)
+{
+    if (!isMap(type))
+        return false;
+    const auto * type_map = assert_cast<const DataTypeMap *>(type.get());
+    return isStringOrFixedString(type_map->getKeyType()) && isStringOrFixedString(type_map->getValueType());
+}
+
+bool isOpenMetricsValueType(const DataTypePtr & type)
+{
+    return WhichDataType(removeNullable(type)).isFloat64();
+}
+
+bool isOpenMetricsTimestampType(const DataTypePtr & type)
+{
+    if (type->isNullable())
+    {
+        const auto * nullable = assert_cast<const DataTypeNullable *>(type.get());
+        return WhichDataType(nullable->getNestedType()).isInt64();
+    }
+    return WhichDataType(type).isInt64();
+}
+
+void checkColumnType(const Block & header, const String & col_name, bool (*pred)(const DataTypePtr &))
+{
+    const auto & col = header.getByName(col_name);
+    if (!pred(col.type))
+        throw Exception(
+            ErrorCodes::BAD_ARGUMENTS,
+            "Illegal type '{}' of column '{}' for input format '{}'",
+            col.type->getName(),
+            col_name,
+            FORMAT_NAME);
+}
+
 ColumnLoc buildColumnLoc(const Block & header)
 {
     ColumnLoc loc;
@@ -250,6 +287,20 @@ ColumnLoc buildColumnLoc(const Block & header)
     }
     if (!loc.name || !loc.value)
         throw Exception(ErrorCodes::INCORRECT_QUERY, "Format '{}' requires 'name' and 'value' columns", FORMAT_NAME);
+
+    checkColumnType(header, "name", isStringOrFixedString);
+    checkColumnType(header, "value", isOpenMetricsValueType);
+    if (loc.help)
+        checkColumnType(header, "help", isStringOrFixedString);
+    if (loc.type)
+        checkColumnType(header, "type", isStringOrFixedString);
+    if (loc.labels)
+        checkColumnType(header, "labels", isDataTypeMapString);
+    if (loc.timestamp)
+        checkColumnType(header, "timestamp", isOpenMetricsTimestampType);
+    if (loc.unit)
+        checkColumnType(header, "unit", isStringOrFixedString);
+
     return loc;
 }
 

@@ -60,3 +60,6 @@ SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('# EOF', 
 
 -- Reject malformed timestamp token (`-` without digits) even when the schema has no timestamp column.
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 -', char(10))); -- { serverError INCORRECT_DATA }
+
+-- Reject incompatible declared column types (validated up front like Prometheus output format).
+SELECT * FROM format(OpenMetrics, 'name String, value Float64, help UInt64', concat('x 1', char(10))); -- { serverError BAD_ARGUMENTS }
