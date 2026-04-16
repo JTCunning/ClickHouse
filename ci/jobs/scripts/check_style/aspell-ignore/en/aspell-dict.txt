@@ -1005,6 +1005,7 @@ OpenAI
 OpenCelliD
 OpenFileForRead
 OpenFileForWrite
+OpenMetrics
 OpenRouter
 OpenSSL
 OpenSUSE
