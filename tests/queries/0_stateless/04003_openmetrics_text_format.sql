@@ -63,3 +63,21 @@ SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 -', 
 
 -- Reject incompatible declared column types (validated up front like Prometheus output format).
 SELECT * FROM format(OpenMetrics, 'name String, value Float64, help UInt64', concat('x 1', char(10))); -- { serverError BAD_ARGUMENTS }
+
+-- Do not fold `..._sum` / `..._count` into the base name unless # TYPE is histogram or summary (counter/gauge can legitimately use those suffixes).
+SELECT *
+FROM format(
+    OpenMetrics,
+    'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
+    concat('# HELP requests help\n', '# TYPE requests counter\n', 'requests_sum 1\n', '# EOF\n')
+)
+FORMAT TSV;
+
+-- Histogram/summary `_sum` still maps to the family with synthetic `sum` label.
+SELECT *
+FROM format(
+    OpenMetrics,
+    'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
+    concat('# HELP h help\n', '# TYPE h histogram\n', 'h_sum 5\n', '# EOF\n')
+)
+FORMAT TSV;

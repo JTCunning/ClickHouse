@@ -11,3 +11,5 @@ x	42	help_text	counter	{}	999	by_1
 tabbed	7			{}	\N	
 esc	1			{'k':'a\nb'}	\N	
 quot	1			{'k':'a"b'}	\N	
+requests_sum	1			{}	\N	
+h	5	help	histogram	{'sum':''}	\N	

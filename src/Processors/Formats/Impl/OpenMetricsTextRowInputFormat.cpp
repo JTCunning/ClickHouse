@@ -467,7 +467,8 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
             else if (stem.ends_with("_sum") && stem.size() > 4)
             {
                 String base{stem.substr(0, stem.size() - 4)};
-                if (family_meta.contains(base))
+                auto it = family_meta.find(base);
+                if (it != family_meta.end() && (it->second.type == "histogram" || it->second.type == "summary"))
                 {
                     logical_name = base;
                     labels["sum"] = "";
@@ -476,7 +477,8 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
             else if (stem.ends_with("_count") && stem.size() > 6)
             {
                 String base{stem.substr(0, stem.size() - 6)};
-                if (family_meta.contains(base))
+                auto it = family_meta.find(base);
+                if (it != family_meta.end() && (it->second.type == "histogram" || it->second.type == "summary"))
                 {
                     logical_name = base;
                     labels["count"] = "";
