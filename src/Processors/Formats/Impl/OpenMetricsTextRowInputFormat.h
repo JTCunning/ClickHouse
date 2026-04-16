@@ -3,11 +3,13 @@
 #include <Processors/Formats/IRowInputFormat.h>
 #include <Processors/Formats/ISchemaReader.h>
 
+#include <optional>
 #include <unordered_map>
 
 namespace DB
 {
 
+class Block;
 class ReadBuffer;
 
 /// Parses OpenMetrics text (and common Prometheus text exposition).
@@ -23,6 +25,19 @@ private:
     bool readRow(MutableColumns & columns, RowReadExtension & ext) override;
     void readPrefix() override;
 
+    struct ColumnLoc
+    {
+        std::optional<size_t> name;
+        std::optional<size_t> value;
+        std::optional<size_t> help;
+        std::optional<size_t> type;
+        std::optional<size_t> labels;
+        std::optional<size_t> timestamp;
+        std::optional<size_t> unit;
+    };
+
+    static ColumnLoc buildColumnLoc(const Block & header);
+
     const FormatSettings format_settings;
 
     struct FamilyMeta
@@ -34,6 +49,8 @@ private:
 
     std::unordered_map<String, FamilyMeta> family_meta;
     bool saw_eof = false;
+    ColumnLoc column_loc;
+    bool column_loc_initialized = false;
 };
 
 class OpenMetricsTextSchemaReader : public IExternalSchemaReader

@@ -7,6 +7,7 @@
 #include <Common/Exception.h>
 #include <Common/StringUtils.h>
 #include <Common/assert_cast.h>
+#include <Core/Block.h>
 #include <Core/Field.h>
 #include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeNullable.h>
@@ -218,17 +219,6 @@ void insertFloatFromPrometheusText(IColumn & column, const String & token)
     assert_cast<ColumnFloat64 &>(column).insert(v);
 }
 
-struct ColumnLoc
-{
-    std::optional<size_t> name;
-    std::optional<size_t> value;
-    std::optional<size_t> help;
-    std::optional<size_t> type;
-    std::optional<size_t> labels;
-    std::optional<size_t> timestamp;
-    std::optional<size_t> unit;
-};
-
 bool isDataTypeMapString(const DataTypePtr & type)
 {
     if (!isMap(type))
@@ -262,46 +252,6 @@ void checkColumnType(const Block & header, const String & col_name, bool (*pred)
             col.type->getName(),
             col_name,
             FORMAT_NAME);
-}
-
-ColumnLoc buildColumnLoc(const Block & header)
-{
-    ColumnLoc loc;
-    for (size_t i = 0; i < header.columns(); ++i)
-    {
-        const auto & col = header.getByPosition(i).name;
-        if (col == "name")
-            loc.name = i;
-        else if (col == "value")
-            loc.value = i;
-        else if (col == "help")
-            loc.help = i;
-        else if (col == "type")
-            loc.type = i;
-        else if (col == "labels")
-            loc.labels = i;
-        else if (col == "timestamp")
-            loc.timestamp = i;
-        else if (col == "unit")
-            loc.unit = i;
-    }
-    if (!loc.name || !loc.value)
-        throw Exception(ErrorCodes::INCORRECT_QUERY, "Format '{}' requires 'name' and 'value' columns", FORMAT_NAME);
-
-    checkColumnType(header, "name", isStringOrFixedString);
-    checkColumnType(header, "value", isOpenMetricsValueType);
-    if (loc.help)
-        checkColumnType(header, "help", isStringOrFixedString);
-    if (loc.type)
-        checkColumnType(header, "type", isStringOrFixedString);
-    if (loc.labels)
-        checkColumnType(header, "labels", isDataTypeMapString);
-    if (loc.timestamp)
-        checkColumnType(header, "timestamp", isOpenMetricsTimestampType);
-    if (loc.unit)
-        checkColumnType(header, "unit", isStringOrFixedString);
-
-    return loc;
 }
 
 void insertMapLabels(IColumn & column, const std::map<String, String> & labels)
@@ -339,6 +289,46 @@ void throwIfNonBlankAfterEOF(ReadBuffer & buf)
 
 }
 
+OpenMetricsTextRowInputFormat::ColumnLoc OpenMetricsTextRowInputFormat::buildColumnLoc(const Block & header)
+{
+    ColumnLoc loc;
+    for (size_t i = 0; i < header.columns(); ++i)
+    {
+        const auto & col_name = header.getByPosition(i).name;
+        if (col_name == "name")
+            loc.name = i;
+        else if (col_name == "value")
+            loc.value = i;
+        else if (col_name == "help")
+            loc.help = i;
+        else if (col_name == "type")
+            loc.type = i;
+        else if (col_name == "labels")
+            loc.labels = i;
+        else if (col_name == "timestamp")
+            loc.timestamp = i;
+        else if (col_name == "unit")
+            loc.unit = i;
+    }
+    if (!loc.name || !loc.value)
+        throw Exception(ErrorCodes::INCORRECT_QUERY, "Format '{}' requires 'name' and 'value' columns", FORMAT_NAME);
+
+    checkColumnType(header, "name", isStringOrFixedString);
+    checkColumnType(header, "value", isOpenMetricsValueType);
+    if (loc.help)
+        checkColumnType(header, "help", isStringOrFixedString);
+    if (loc.type)
+        checkColumnType(header, "type", isStringOrFixedString);
+    if (loc.labels)
+        checkColumnType(header, "labels", isDataTypeMapString);
+    if (loc.timestamp)
+        checkColumnType(header, "timestamp", isOpenMetricsTimestampType);
+    if (loc.unit)
+        checkColumnType(header, "unit", isStringOrFixedString);
+
+    return loc;
+}
+
 OpenMetricsTextRowInputFormat::OpenMetricsTextRowInputFormat(
     SharedHeader header_, ReadBuffer & in_, Params params_, const FormatSettings & format_settings_)
     : IRowInputFormat(std::move(header_), in_, std::move(params_))
@@ -351,6 +341,7 @@ void OpenMetricsTextRowInputFormat::resetParser()
     IRowInputFormat::resetParser();
     family_meta.clear();
     saw_eof = false;
+    column_loc_initialized = false;
 }
 
 void OpenMetricsTextRowInputFormat::readPrefix()
@@ -360,8 +351,12 @@ void OpenMetricsTextRowInputFormat::readPrefix()
 
 bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExtension & ext)
 {
-    const auto & header = getPort().getHeader();
-    ColumnLoc loc = buildColumnLoc(header);
+    if (!column_loc_initialized)
+    {
+        column_loc = buildColumnLoc(getPort().getHeader());
+        column_loc_initialized = true;
+    }
+    const ColumnLoc & loc = column_loc;
 
     /// Like JSONEachRowRowInputFormat::checkEndOfData: if we return false with no row, leave read_columns
     /// empty so IRowInputFormat does not treat all-zero read_columns as "missing values" (Code 7).
