@@ -64,6 +64,10 @@ SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 -', 
 -- Reject incompatible declared column types (validated up front like Prometheus output format).
 SELECT * FROM format(OpenMetrics, 'name String, value Float64, help UInt64', concat('x 1', char(10))); -- { serverError BAD_ARGUMENTS }
 
+-- Schema must match insertion column types (non-nullable Float64; String not FixedString) — avoid release assert_cast UB.
+SELECT * FROM format(OpenMetrics, 'name String, value Nullable(Float64)', concat('x 1', char(10))); -- { serverError BAD_ARGUMENTS }
+SELECT * FROM format(OpenMetrics, 'name FixedString(16), value Float64', concat('x 1', char(10))); -- { serverError BAD_ARGUMENTS }
+
 -- Do not fold `..._sum` / `..._count` into the base name unless # TYPE is histogram or summary (counter/gauge can legitimately use those suffixes).
 SELECT *
 FROM format(

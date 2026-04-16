@@ -219,17 +219,27 @@ void insertFloatFromPrometheusText(IColumn & column, const String & token)
     assert_cast<ColumnFloat64 &>(column).insert(v);
 }
 
-bool isDataTypeMapString(const DataTypePtr & type)
+bool isDataTypeMapStringString(const DataTypePtr & type)
 {
     if (!isMap(type))
         return false;
     const auto * type_map = assert_cast<const DataTypeMap *>(type.get());
-    return isStringOrFixedString(type_map->getKeyType()) && isStringOrFixedString(type_map->getValueType());
+    const auto & kt = type_map->getKeyType();
+    const auto & vt = type_map->getValueType();
+    /// Insertion uses `ColumnMap` built from `Map(String, String)` materialization — require plain `String`, not
+    /// `FixedString` / nullable variants that would not match `assert_cast` targets in release builds.
+    return !kt->isNullable() && !vt->isNullable() && WhichDataType(kt).isString() && WhichDataType(vt).isString();
+}
+
+bool isOpenMetricsStringColumnType(const DataTypePtr & type)
+{
+    return !type->isNullable() && WhichDataType(type).isString();
 }
 
 bool isOpenMetricsValueType(const DataTypePtr & type)
 {
-    return WhichDataType(removeNullable(type)).isFloat64();
+    /// `insertFloatFromPrometheusText` always writes `ColumnFloat64`; reject `Nullable(Float64)` etc.
+    return !type->isNullable() && WhichDataType(type).isFloat64();
 }
 
 bool isOpenMetricsTimestampType(const DataTypePtr & type)
@@ -313,18 +323,18 @@ OpenMetricsTextRowInputFormat::ColumnLoc OpenMetricsTextRowInputFormat::buildCol
     if (!loc.name || !loc.value)
         throw Exception(ErrorCodes::INCORRECT_QUERY, "Format '{}' requires 'name' and 'value' columns", FORMAT_NAME);
 
-    checkColumnType(header, "name", isStringOrFixedString);
+    checkColumnType(header, "name", isOpenMetricsStringColumnType);
     checkColumnType(header, "value", isOpenMetricsValueType);
     if (loc.help)
-        checkColumnType(header, "help", isStringOrFixedString);
+        checkColumnType(header, "help", isOpenMetricsStringColumnType);
     if (loc.type)
-        checkColumnType(header, "type", isStringOrFixedString);
+        checkColumnType(header, "type", isOpenMetricsStringColumnType);
     if (loc.labels)
-        checkColumnType(header, "labels", isDataTypeMapString);
+        checkColumnType(header, "labels", isDataTypeMapStringString);
     if (loc.timestamp)
         checkColumnType(header, "timestamp", isOpenMetricsTimestampType);
     if (loc.unit)
-        checkColumnType(header, "unit", isStringOrFixedString);
+        checkColumnType(header, "unit", isOpenMetricsStringColumnType);
 
     return loc;
 }

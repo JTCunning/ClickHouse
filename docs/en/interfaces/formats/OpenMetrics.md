@@ -23,8 +23,8 @@ Use `FORMAT OpenMetrics` for input (`INSERT`, table functions such as `file()` a
 
 Columns follow the same logical model as [Prometheus](./Prometheus.md), extended with `unit`:
 
-- `name` ([String](/sql-reference/data-types/string.md)) and `value` (a floating-point type) are required.
-- Optional: `help` ([String](/sql-reference/data-types/string.md)), `type` ([String](/sql-reference/data-types/string.md)), `labels` ([Map(String, String)](/sql-reference/data-types/map.md)), `timestamp` ([Nullable(Int64)](/sql-reference/data-types/nullable.md) on input schema; a numeric type on output), and `unit` ([String](/sql-reference/data-types/string.md)).
+- `name` ([String](/sql-reference/data-types/string.md)) and `value` ([Float64](/sql-reference/data-types/float.md)) are required for input (not `Nullable`/`FixedString` where `String` is required; `value` must be non-nullable `Float64`).
+- Optional: `help`, `type`, and `unit` ([String](/sql-reference/data-types/string.md)), `labels` ([Map(String, String)](/sql-reference/data-types/map.md)), `timestamp` ([Nullable(Int64)](/sql-reference/data-types/nullable.md) on input schema; a numeric type on output).
 
 `type` should be one of `counter`, `gauge`, `histogram`, `summary`, `untyped`, or empty. Histogram and summary label rules follow the [Prometheus exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/).
 
