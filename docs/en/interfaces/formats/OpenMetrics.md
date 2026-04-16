@@ -39,7 +39,7 @@ Columns follow the same logical model as [Prometheus](./Prometheus.md), extended
 
 ### Input validation {#input-validation}
 
-Malformed exposition raises `INCORRECT_DATA`, including duplicate label keys, an empty metric name, float tokens that are not fully consumed, trailing characters after the value or timestamp on a sample line, and any non-blank content after `# EOF`.
+Malformed exposition raises `INCORRECT_DATA`, including duplicate label keys, an empty metric name, float tokens that are not fully consumed, trailing characters after the value or timestamp on a sample line, a `# EOF` line with extra non-whitespace on the same line, and any non-blank content after a valid `# EOF` line.
 
 ## Example usage {#example-usage}
 

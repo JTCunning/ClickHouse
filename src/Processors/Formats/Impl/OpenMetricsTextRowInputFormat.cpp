@@ -281,6 +281,20 @@ bool isBlankAsciiLine(const String & line)
     return true;
 }
 
+/// `# EOF` optionally followed only by ASCII space/tab on the same line (no other tokens).
+bool isOpenMetricsEofLine(const String & line)
+{
+    static constexpr std::string_view prefix = "# EOF";
+    if (!line.starts_with(prefix))
+        return false;
+    for (size_t i = prefix.size(); i < line.size(); ++i)
+    {
+        if (line[i] != ' ' && line[i] != '\t')
+            return false;
+    }
+    return true;
+}
+
 /// After `# EOF`, the exposition stream is logically finished; reject trailing payload.
 void throwIfNonBlankAfterEOF(ReadBuffer & buf)
 {
@@ -387,8 +401,10 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
 
         if (line.starts_with("#"))
         {
-            if (line == "# EOF" || (line.starts_with("# EOF") && (line.size() == 5 || line[5] == ' ' || line[5] == '\t')))
+            if (line.starts_with("# EOF"))
             {
+                if (!isOpenMetricsEofLine(line))
+                    throw Exception(ErrorCodes::INCORRECT_DATA, "Invalid # EOF line in OpenMetrics input");
                 throwIfNonBlankAfterEOF(*in);
                 saw_eof = true;
                 continue;
