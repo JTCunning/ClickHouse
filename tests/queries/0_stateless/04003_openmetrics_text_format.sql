@@ -57,3 +57,6 @@ SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1abc',
 
 -- Reject trailing payload after logical end (# EOF).
 SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('# EOF', char(10), 'm 1', char(10))); -- { serverError INCORRECT_DATA }
+
+-- Reject malformed timestamp token (`-` without digits) even when the schema has no timestamp column.
+SELECT * FROM format(OpenMetrics, 'name String, value Float64', concat('m 1 -', char(10))); -- { serverError INCORRECT_DATA }

@@ -165,13 +165,20 @@ bool parseOptionalIntToken(std::string_view s, size_t & pos, String & out)
     skipAsciiSpaces(s, pos);
     if (pos >= s.size())
         return false;
-    size_t start = pos;
+    const size_t start = pos;
     if (s[pos] == '-')
         ++pos;
+    const size_t digits_start = pos;
     while (pos < s.size() && isNumericASCII(s[pos]))
         ++pos;
-    if (pos == start)
+    if (pos == digits_start)
+    {
+        /// A lone `-` is not a valid integer timestamp (must have at least one digit). Reject even when
+        /// the result row schema omits `timestamp`, otherwise the stray token would be skipped silently.
+        if (s[start] == '-')
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Invalid timestamp token in OpenMetrics line");
         return false;
+    }
     out = String{s.substr(start, pos - start)};
     return true;
 }
