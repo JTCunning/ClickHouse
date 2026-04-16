@@ -88,3 +88,12 @@ FROM format(
     concat('# HELP http_request_duration_seconds help\n', '# TYPE http_request_duration_seconds histogram\n', 'http_request_duration_seconds_sum 5\n', '# EOF\n')
 )
 FORMAT TSV;
+
+-- `# TYPE` must not treat trailing spaces as part of the type token (histogram/summary normalization).
+SELECT *
+FROM format(
+    OpenMetrics,
+    'name String, value Float64, help String, type String, labels Map(String, String), timestamp Nullable(Int64), unit String',
+    concat('# HELP rpc_duration_seconds help\n', '# TYPE rpc_duration_seconds histogram   \n', 'rpc_duration_seconds_bucket{le="0.5"} 3\n', '# EOF\n')
+)
+FORMAT TSV;

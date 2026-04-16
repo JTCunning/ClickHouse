@@ -435,7 +435,11 @@ bool OpenMetricsTextRowInputFormat::readRow(MutableColumns & columns, RowReadExt
                     ++p;
                 String name{sv.substr(name_start, p - name_start)};
                 skipAsciiSpaces(sv, p);
-                String typ{sv.substr(p)};
+                /// Type is a single token (counter, gauge, histogram, summary, unknown); ignore trailing spaces.
+                size_t type_start = p;
+                while (p < sv.size() && sv[p] != ' ' && sv[p] != '\t')
+                    ++p;
+                String typ{sv.substr(type_start, p - type_start)};
                 family_meta[name].type = String(typ);
                 continue;
             }
