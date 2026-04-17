@@ -680,11 +680,13 @@ void PrometheusHTTPProtocolAPI::getLabels(
     auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
     auto tags_table_id = tags_table->getStorageID();
 
+    const UInt64 max_series = ts_settings[TimeSeriesSetting::prometheus_max_series];
     String query = fmt::format(
-        "SELECT arrayJoin(groupUniqArrayArray(mapKeys({}))) AS label_key FROM {}{}",
+        "SELECT label_key FROM (SELECT arrayJoin(groupUniqArrayArray(mapKeys({}))) AS label_key FROM {}{}) LIMIT {}",
         TimeSeriesColumnNames::Tags,
         tags_table_id.getFullTableName(),
-        where_clause);
+        where_clause,
+        max_series);
 
     LOG_TRACE(log, "Prometheus labels query: {}", query);
 
@@ -743,23 +745,26 @@ void PrometheusHTTPProtocolAPI::getLabelValues(
     auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
     auto tags_table_id = tags_table->getStorageID();
 
+    const UInt64 max_series = ts_settings[TimeSeriesSetting::prometheus_max_series];
     String query;
 
     if (label_name == "__name__")
     {
         query = fmt::format(
-            "SELECT DISTINCT {} AS label_value FROM {}{} ORDER BY label_value",
+            "SELECT label_value FROM (SELECT DISTINCT {} AS label_value FROM {}{}) ORDER BY label_value LIMIT {}",
             TimeSeriesColumnNames::MetricName,
             tags_table_id.getFullTableName(),
-            where_clause);
+            where_clause,
+            max_series);
     }
     else if (auto promoted_col = findColumnForTag(tags_to_columns_map, label_name))
     {
         query = fmt::format(
-            "SELECT DISTINCT {} AS label_value FROM {}{} ORDER BY label_value",
+            "SELECT label_value FROM (SELECT DISTINCT {} AS label_value FROM {}{}) ORDER BY label_value LIMIT {}",
             backQuoteIfNeed(*promoted_col),
             tags_table_id.getFullTableName(),
-            where_clause);
+            where_clause,
+            max_series);
     }
     else
     {
@@ -771,10 +776,11 @@ void PrometheusHTTPProtocolAPI::getLabelValues(
         else
             map_where = where_clause + fmt::format(" AND mapContains({}, {})", TimeSeriesColumnNames::Tags, key_lit);
         query = fmt::format(
-            "SELECT label_value FROM (SELECT arrayJoin(groupUniqArray({})) AS label_value FROM {}{}) ORDER BY label_value",
+            "SELECT label_value FROM (SELECT arrayJoin(groupUniqArray({})) AS label_value FROM {}{}) ORDER BY label_value LIMIT {}",
             map_access,
             tags_table_id.getFullTableName(),
-            map_where);
+            map_where,
+            max_series);
     }
 
     LOG_TRACE(log, "Prometheus label values query: {}", query);
