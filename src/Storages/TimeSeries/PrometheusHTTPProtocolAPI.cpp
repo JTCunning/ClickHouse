@@ -263,7 +263,8 @@ String buildMatchWhere(const std::vector<String> & match_params, const Map & tag
                     or_chain += " OR ";
                 or_chain += selector_predicates[i];
             }
-            top_parts.push_back(or_chain);
+            /// AND binds tighter than OR; wrap the union so we get `(match1 OR match2) AND time`, not `match1 OR (match2 AND time)`.
+            top_parts.push_back("(" + or_chain + ")");
         }
     }
     if (!time_predicate.empty())

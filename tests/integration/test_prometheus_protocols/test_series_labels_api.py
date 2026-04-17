@@ -157,6 +157,30 @@ def test_series_multiple_match_union():
     assert "http_requests_total" not in names
 
 
+def test_series_multiple_match_with_time_window():
+    """Union of match[] must AND with start/end. Without wrapping the OR chain, `a OR b AND time` wrongly keeps rows matching only `a` when `time` is false for them."""
+    union = get_json_from_api(
+        "/api/v1/series",
+        params=[
+            ("match[]", '{__name__="cpu_usage"}'),
+            ("match[]", '{__name__="memory_usage"}'),
+        ],
+    )
+    assert {e["__name__"] for e in union if "__name__" in e} == {"cpu_usage", "memory_usage"}
+
+    # Far-future window: no series overlaps; result must be empty. Buggy precedence would still return `cpu_usage` (first match[] without time).
+    data_empty = get_json_from_api(
+        "/api/v1/series",
+        params=[
+            ("match[]", '{__name__="cpu_usage"}'),
+            ("match[]", '{__name__="memory_usage"}'),
+            ("start", "1000000000"),
+            ("end", "1000000001"),
+        ],
+    )
+    assert data_empty == []
+
+
 def test_labels_multiple_match_union():
     """Repeated match[] on /labels unions label names from any matching series."""
     data = get_json_from_api(
