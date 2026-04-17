@@ -135,3 +135,24 @@ def test_labels_match_includes_promoted_label_when_present():
     assert "__name__" in data
     assert "host" in data
     assert "datacenter" in data
+
+
+def test_label_values_promoted_excludes_default_empty():
+    """`/api/v1/label/<promoted>/values` must NOT surface `""` for series that simply omit the label.
+
+    `disk_usage` was ingested without `host`, so the promoted `host_col` stores `''` (column default).
+    Prometheus treats missing == empty, so the response must include the real `host` values but not `""`.
+    """
+    data = get_json_from_api("/api/v1/label/host/values")
+    assert "" not in data, data
+    assert "server1" in data
+    assert "server2" in data
+
+
+def test_label_values_promoted_excludes_default_empty_with_match():
+    """Same contract under `match[]`: filtering to the no-host series must yield empty values, not [""]."""
+    data = get_json_from_api(
+        "/api/v1/label/host/values",
+        params=[("match[]", '{__name__="disk_usage"}')],
+    )
+    assert data == [], data

@@ -797,11 +797,19 @@ void PrometheusHTTPProtocolAPI::getLabelValues(
     }
     else if (auto promoted_col = findColumnForTag(tags_to_columns_map, label_name))
     {
+        /// A series without this promoted label is ingested as the column's default value (empty string for
+        /// String/LowCardinality(String)). There is no presence bit to distinguish that from an explicit empty
+        /// value, and Prometheus treats missing == empty, so excluding `''` is consistent with the documented
+        /// label-values contract and with `/labels`, which also gates promoted labels on `countIf(col != '') > 0`.
+        const auto col = backQuoteIfNeed(*promoted_col);
+        const String presence_predicate = fmt::format("{} != ''", col);
+        const String values_where
+            = where_clause.empty() ? " WHERE " + presence_predicate : where_clause + " AND " + presence_predicate;
         query = fmt::format(
             "SELECT label_value FROM (SELECT DISTINCT {} AS label_value FROM {}{}) ORDER BY label_value LIMIT {}",
-            backQuoteIfNeed(*promoted_col),
+            col,
             tags_table_id.getFullTableName(),
-            where_clause,
+            values_where,
             max_series);
     }
     else
