@@ -137,9 +137,19 @@ String predicateForMatcher(const Matcher & matcher, const Map & tags_to_columns)
 
     const auto key_lit = quoteString(matcher.label_name);
     const auto map_access = fmt::format("{}[{}]", tags_col_name, key_lit);
+    /// Prometheus treats a missing label as an empty string (same as NE/NRE branches below).
     switch (matcher.matcher_type)
     {
         case MatcherType::EQ:
+            if (matcher.label_value.empty())
+                return fmt::format(
+                    "(NOT mapContains({}, {})) OR (mapContains({}, {}) AND {} = {})",
+                    tags_col_name,
+                    key_lit,
+                    tags_col_name,
+                    key_lit,
+                    map_access,
+                    quoteString(matcher.label_value));
             return fmt::format(
                 "mapContains({}, {}) AND {} = {}", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
         case MatcherType::NE:
@@ -147,10 +157,26 @@ String predicateForMatcher(const Matcher & matcher, const Map & tags_to_columns)
                 "(NOT mapContains({}, {})) OR ({} != {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
         case MatcherType::RE:
             return fmt::format(
-                "mapContains({}, {}) AND match({}, {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
+                "((NOT mapContains({}, {})) AND match({}, {})) OR (mapContains({}, {}) AND match({}, {}))",
+                tags_col_name,
+                key_lit,
+                quoteString(""),
+                quoteString(matcher.label_value),
+                tags_col_name,
+                key_lit,
+                map_access,
+                quoteString(matcher.label_value));
         case MatcherType::NRE:
             return fmt::format(
-                "(NOT mapContains({}, {})) OR NOT match({}, {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
+                "((NOT mapContains({}, {})) AND NOT match({}, {})) OR (mapContains({}, {}) AND NOT match({}, {}))",
+                tags_col_name,
+                key_lit,
+                quoteString(""),
+                quoteString(matcher.label_value),
+                tags_col_name,
+                key_lit,
+                map_access,
+                quoteString(matcher.label_value));
     }
     UNREACHABLE();
 }

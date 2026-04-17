@@ -199,6 +199,39 @@ def test_series_with_promql_selector_regex_and_ne():
     assert "http_requests_total" in names
 
 
+def test_series_missing_label_matches_empty_eq():
+    """Prometheus: absent label is implicit ''; {zone=\"\"} matches series without zone."""
+    data = get_json_from_api(
+        "/api/v1/series",
+        params=[("match[]", '{zone=""}')],
+    )
+    assert isinstance(data, list)
+    names = {e["__name__"] for e in data if "__name__" in e}
+    assert "http_requests_total" in names
+
+
+def test_series_missing_label_matches_empty_regex():
+    """Absent label is ''; regex matches against empty (e.g. .*)."""
+    data = get_json_from_api(
+        "/api/v1/series",
+        params=[("match[]", '{zone=~".*"}')],
+    )
+    assert isinstance(data, list)
+    names = {e["__name__"] for e in data if "__name__" in e}
+    assert "http_requests_total" in names
+
+
+def test_series_non_empty_eq_excludes_missing_label():
+    """EQ to a non-empty value requires the key in the tag map."""
+    data = get_json_from_api(
+        "/api/v1/series",
+        params=[("match[]", '{zone="us-east"}')],
+    )
+    assert isinstance(data, list)
+    names = {e["__name__"] for e in data if "__name__" in e}
+    assert "http_requests_total" not in names
+
+
 def test_labels_with_match_selector():
     """labels endpoint narrows when match[] matches a subset of metrics."""
     data = get_json_from_api(
