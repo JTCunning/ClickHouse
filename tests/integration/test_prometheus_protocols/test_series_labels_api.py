@@ -131,6 +131,50 @@ def test_label_values_for_nonexistent_label():
     assert len(data) == 0
 
 
+def test_series_multiple_match_union():
+    """Repeated match[] is OR across selectors (Prometheus union semantics)."""
+    data = get_json_from_api(
+        "/api/v1/series",
+        params=[
+            ("match[]", '{__name__="cpu_usage"}'),
+            ("match[]", '{__name__="memory_usage"}'),
+        ],
+    )
+    assert isinstance(data, list)
+    names = {e["__name__"] for e in data if "__name__" in e}
+    assert names == {"cpu_usage", "memory_usage"}
+    assert "http_requests_total" not in names
+
+
+def test_labels_multiple_match_union():
+    """Repeated match[] on /labels unions label names from any matching series."""
+    data = get_json_from_api(
+        "/api/v1/labels",
+        params=[
+            ("match[]", '{__name__="cpu_usage"}'),
+            ("match[]", '{__name__="http_requests_total"}'),
+        ],
+    )
+    assert isinstance(data, list)
+    assert "__name__" in data
+    assert "method" in data
+    assert "datacenter" in data
+
+
+def test_label_values_name_multiple_match_union():
+    """Repeated match[] on /label/__name__/values restricts metric names to the union of selectors."""
+    data = get_json_from_api(
+        "/api/v1/label/__name__/values",
+        params=[
+            ("match[]", '{__name__="cpu_usage"}'),
+            ("match[]", '{__name__="memory_usage"}'),
+        ],
+    )
+    assert isinstance(data, list)
+    assert set(data) == {"cpu_usage", "memory_usage"}
+    assert "http_requests_total" not in data
+
+
 def test_series_with_promql_selector_host():
     """GET /api/v1/series with match[] selector filters by host."""
     data = get_json_from_api(

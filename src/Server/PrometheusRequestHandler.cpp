@@ -36,6 +36,7 @@
 #include <Storages/TimeSeries/PrometheusRemoteWriteProtocol.h>
 #include <Storages/TimeSeries/PrometheusHTTPProtocolAPI.h>
 
+#include <vector>
 
 namespace DB
 {
@@ -437,21 +438,21 @@ public:
             }
             else if (uri.starts_with("/api/v1/series"))
             {
-                String match = params->get("match[]", "");
+                std::vector<String> match_params = params->getAll("match[]");
                 String start = params->get("start", "");
                 String end = params->get("end", "");
 
                 /// TODO: Support limit=<number> optional parameter
 
-                protocol.getSeries(getOutputStream(response), match, start, end);
+                protocol.getSeries(getOutputStream(response), match_params, start, end);
             }
             else if (uri.starts_with("/api/v1/labels"))
             {
-                String match = params->get("match[]", "");
+                std::vector<String> match_params = params->getAll("match[]");
                 String start = params->get("start", "");
                 String end = params->get("end", "");
 
-                protocol.getLabels(getOutputStream(response), match, start, end);
+                protocol.getLabels(getOutputStream(response), match_params, start, end);
             }
             else if (path_without_query.find("/api/v1/label/") != String::npos && path_without_query.ends_with("/values"))
             {
@@ -460,11 +461,11 @@ public:
                 size_t end_pos = path_without_query.find("/values");
                 String label_name = path_without_query.substr(start_pos, end_pos - start_pos);
 
-                String match = params->get("match[]", "");
+                std::vector<String> match_params = params->getAll("match[]");
                 String start = params->get("start", "");
                 String end = params->get("end", "");
 
-                protocol.getLabelValues(getOutputStream(response), label_name, match, start, end);
+                protocol.getLabelValues(getOutputStream(response), label_name, match_params, start, end);
             }
             else
             {

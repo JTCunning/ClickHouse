@@ -1,5 +1,7 @@
 """Prometheus series/labels API with tags_to_columns (promoted tag columns)."""
 
+import urllib.parse
+
 import pytest
 import requests
 
@@ -41,6 +43,10 @@ def setup(request):
                 {"__name__": "cpu_usage", "datacenter": "us-east", "host": "server1"},
                 {1000: 0.5, 1015: 0.6, 1030: 0.7},
             ),
+            (
+                {"__name__": "memory_usage", "datacenter": "us-west", "host": "server2"},
+                {1000: 0.1, 1015: 0.2, 1030: 0.3},
+            ),
         ]
         protobuf = convert_time_series_to_protobuf(time_series)
         send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
@@ -71,3 +77,18 @@ def test_series_includes_host_from_promoted_column():
     entry = next(e for e in data if e.get("__name__") == "cpu_usage")
     assert entry.get("host") == "server1"
     assert entry.get("datacenter") == "us-east"
+
+
+def test_series_multiple_match_union_with_promoted_host_column():
+    params = [
+        ("match[]", '{__name__="cpu_usage"}'),
+        ("match[]", '{__name__="memory_usage"}'),
+    ]
+    url = f"http://{node.ip_address}:9093/api/v1/series?" + urllib.parse.urlencode(
+        params, doseq=True
+    )
+    response = requests.get(url)
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    names = {e["__name__"] for e in data if "__name__" in e}
+    assert names == {"cpu_usage", "memory_usage"}

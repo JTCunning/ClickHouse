@@ -44,12 +44,12 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsBool store_min_time_and_max_time;
     extern const TimeSeriesSettingsBool filter_by_min_time_and_max_time;
     extern const TimeSeriesSettingsMap tags_to_columns;
+    extern const TimeSeriesSettingsUInt64 prometheus_max_series;
 }
 
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
-    extern const int NOT_IMPLEMENTED;
 }
 
 namespace
@@ -189,18 +189,16 @@ String buildTimeOverlapWhere(const TimeSeriesSettings & settings, const String &
     return predicates;
 }
 
-String combineWhereClause(const MatcherList & matchers, const Map & tags_to_columns, const String & time_predicate)
+/// Predicate for matchers inside one PromQL instant selector (AND). Empty list matches all (`{}`).
+String predicateForMatcherList(const MatcherList & matchers, const Map & tags_to_columns)
 {
+    if (matchers.empty())
+        return "1";
+
     std::vector<String> parts;
     for (const auto & matcher : matchers)
         parts.push_back(predicateForMatcher(matcher, tags_to_columns));
-    if (!time_predicate.empty())
-        parts.push_back(time_predicate);
-
-    if (parts.empty())
-        return {};
-
-    String out = " WHERE ";
+    String out;
     for (size_t i = 0; i < parts.size(); ++i)
     {
         if (i)
@@ -210,7 +208,54 @@ String combineWhereClause(const MatcherList & matchers, const Map & tags_to_colu
     return out;
 }
 
-void writeJsonPairsFromTagsColumn(
+/// Repeated `match[]` query params are OR across selectors (Prometheus union semantics).
+String buildMatchWhere(const std::vector<String> & match_params, const Map & tags_to_columns, const String & time_predicate)
+{
+    std::vector<String> selector_predicates;
+    for (const auto & mp : match_params)
+    {
+        if (mp.empty())
+            continue;
+        MatcherList ml = parseMatchers(mp);
+        String p = predicateForMatcherList(ml, tags_to_columns);
+        chassert(!p.empty());
+        selector_predicates.push_back("(" + p + ")");
+    }
+
+    std::vector<String> top_parts;
+    if (!selector_predicates.empty())
+    {
+        if (selector_predicates.size() == 1)
+            top_parts.push_back(selector_predicates.front());
+        else
+        {
+            String or_chain;
+            for (size_t i = 0; i < selector_predicates.size(); ++i)
+            {
+                if (i)
+                    or_chain += " OR ";
+                or_chain += selector_predicates[i];
+            }
+            top_parts.push_back(or_chain);
+        }
+    }
+    if (!time_predicate.empty())
+        top_parts.push_back(time_predicate);
+
+    if (top_parts.empty())
+        return {};
+
+    String out = " WHERE ";
+    for (size_t i = 0; i < top_parts.size(); ++i)
+    {
+        if (i)
+            out += " AND ";
+        out += top_parts[i];
+    }
+    return out;
+}
+
+void writeJSONPairsFromTagsColumn(
     const ColumnPtr & tags_column,
     size_t row_index,
     WriteBuffer & response,
@@ -254,8 +299,6 @@ void writeJsonPairsFromTagsColumn(
         }
     }
 }
-
-static constexpr UInt64 DEFAULT_PROMETHEUS_MAX_SERIES = 100000;
 
 }
 
@@ -538,15 +581,15 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
 
 void PrometheusHTTPProtocolAPI::getSeries(
     WriteBuffer & response,
-    const String & match_param,
+    const std::vector<String> & match_params,
     const String & start_param,
     const String & end_param)
 {
     const auto & ts_settings = time_series_storage->getStorageSettings();
     const Map & tags_to_columns_map = ts_settings[TimeSeriesSetting::tags_to_columns];
-    const MatcherList matchers = parseMatchers(match_param);
     const String time_where = buildTimeOverlapWhere(ts_settings, start_param, end_param);
-    const String where_clause = combineWhereClause(matchers, tags_to_columns_map, time_where);
+    const String where_clause = buildMatchWhere(match_params, tags_to_columns_map, time_where);
+    const UInt64 max_series = ts_settings[TimeSeriesSetting::prometheus_max_series];
 
     auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
     auto tags_table_id = tags_table->getStorageID();
@@ -577,7 +620,7 @@ void PrometheusHTTPProtocolAPI::getSeries(
         select_expr,
         tags_table_id.getFullTableName(),
         where_clause,
-        DEFAULT_PROMETHEUS_MAX_SERIES);
+        max_series);
 
     LOG_TRACE(log, "Prometheus series query: {}", query);
 
@@ -615,7 +658,7 @@ void PrometheusHTTPProtocolAPI::getSeries(
                 writeJSONString(col->getDataAt(i), response, format_settings);
             }
 
-            writeJsonPairsFromTagsColumn(tags_col, i, response, format_settings);
+            writeJSONPairsFromTagsColumn(tags_col, i, response, format_settings);
             writeString("}", response);
         }
     }
@@ -625,15 +668,14 @@ void PrometheusHTTPProtocolAPI::getSeries(
 
 void PrometheusHTTPProtocolAPI::getLabels(
     WriteBuffer & response,
-    const String & match_param,
+    const std::vector<String> & match_params,
     const String & start_param,
     const String & end_param)
 {
     const auto & ts_settings = time_series_storage->getStorageSettings();
     const Map & tags_to_columns_map = ts_settings[TimeSeriesSetting::tags_to_columns];
-    const MatcherList matchers = parseMatchers(match_param);
     const String time_where = buildTimeOverlapWhere(ts_settings, start_param, end_param);
-    const String where_clause = combineWhereClause(matchers, tags_to_columns_map, time_where);
+    const String where_clause = buildMatchWhere(match_params, tags_to_columns_map, time_where);
 
     auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
     auto tags_table_id = tags_table->getStorageID();
@@ -689,15 +731,14 @@ void PrometheusHTTPProtocolAPI::getLabels(
 void PrometheusHTTPProtocolAPI::getLabelValues(
     WriteBuffer & response,
     const String & label_name,
-    const String & match_param,
+    const std::vector<String> & match_params,
     const String & start_param,
     const String & end_param)
 {
     const auto & ts_settings = time_series_storage->getStorageSettings();
     const Map & tags_to_columns_map = ts_settings[TimeSeriesSetting::tags_to_columns];
-    const MatcherList matchers = parseMatchers(match_param);
     const String time_where = buildTimeOverlapWhere(ts_settings, start_param, end_param);
-    const String where_clause = combineWhereClause(matchers, tags_to_columns_map, time_where);
+    const String where_clause = buildMatchWhere(match_params, tags_to_columns_map, time_where);
 
     auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
     auto tags_table_id = tags_table->getStorageID();
