@@ -154,6 +154,10 @@ String predicateForMatcher(const Matcher & matcher, const Map & tags_to_columns)
             return fmt::format(
                 "mapContains({}, {}) AND {} = {}", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
         case MatcherType::NE:
+            /// `{key!=""}` must exclude series without the label: Prometheus treats an absent label as the
+            /// empty string, so absent should NOT satisfy `!= ""`. Require key presence in that case.
+            if (matcher.label_value.empty())
+                return fmt::format("mapContains({}, {}) AND {} != {}", tags_col_name, key_lit, map_access, quoteString(""));
             return fmt::format(
                 "(NOT mapContains({}, {})) OR ({} != {})", tags_col_name, key_lit, map_access, quoteString(matcher.label_value));
         case MatcherType::RE:

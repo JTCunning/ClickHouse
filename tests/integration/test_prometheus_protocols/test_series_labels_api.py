@@ -48,6 +48,11 @@ def send_test_data():
             {"__name__": "with_empty_zone", "datacenter": "us-east", "host": "server1", "zone": ""},
             {1000: 1.0},
         ),
+        # Series with an explicit non-empty `zone` so `{zone!=""}` can be exercised meaningfully.
+        (
+            {"__name__": "rack_metric", "datacenter": "us-east", "zone": "us-east-1a"},
+            {1000: 0.5},
+        ),
     ]
     protobuf = convert_time_series_to_protobuf(time_series)
     send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
@@ -265,6 +270,48 @@ def test_series_non_empty_eq_excludes_missing_label():
     assert isinstance(data, list)
     names = {e["__name__"] for e in data if "__name__" in e}
     assert "http_requests_total" not in names
+
+
+def test_series_ne_empty_excludes_missing_and_explicit_empty():
+    """`{zone!=""}` must exclude series where `zone` is absent (Prometheus treats absent == empty)
+    and series where `zone` is explicitly empty. Only series with a non-empty `zone` survive."""
+    data = get_json_from_api(
+        "/api/v1/series",
+        params=[("match[]", '{zone!=""}')],
+    )
+    assert isinstance(data, list)
+    names = {e["__name__"] for e in data if "__name__" in e}
+    # Must include the only series with a non-empty zone.
+    assert names == {"rack_metric"}, names
+    # Sanity: the entry actually carries the non-empty zone value.
+    rack = next(e for e in data if e.get("__name__") == "rack_metric")
+    assert rack.get("zone") == "us-east-1a"
+
+
+def test_labels_ne_empty_includes_zone_only_for_non_empty_rows():
+    """`/api/v1/labels?match[]={zone!=""}` must derive labels from the matched (non-empty zone) rows
+    and not from series where `zone` is absent or explicitly empty."""
+    data = get_json_from_api(
+        "/api/v1/labels",
+        params=[("match[]", '{zone!=""}')],
+    )
+    assert "__name__" in data
+    assert "zone" in data
+    assert "datacenter" in data
+    # Labels not present on `rack_metric` (e.g. `host`, `method`, `status`) must not appear.
+    assert "host" not in data, data
+    assert "method" not in data, data
+
+
+def test_label_values_zone_ne_empty_excludes_empty_string():
+    """`/api/v1/label/zone/values?match[]={zone!=""}` must not surface `""` and must list
+    only the values from rows that actually carry a non-empty `zone`."""
+    data = get_json_from_api(
+        "/api/v1/label/zone/values",
+        params=[("match[]", '{zone!=""}')],
+    )
+    assert "" not in data, data
+    assert data == ["us-east-1a"], data
 
 
 def test_labels_with_match_selector():
