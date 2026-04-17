@@ -802,8 +802,9 @@ void PrometheusHTTPProtocolAPI::getLabelValues(
             map_where = fmt::format(" WHERE mapContains({}, {})", TimeSeriesColumnNames::Tags, key_lit);
         else
             map_where = where_clause + fmt::format(" AND mapContains({}, {})", TimeSeriesColumnNames::Tags, key_lit);
+        /// DISTINCT keeps empty-string label values; `arrayJoin` drops empty strings in ClickHouse.
         query = fmt::format(
-            "SELECT label_value FROM (SELECT arrayJoin(groupUniqArray({})) AS label_value FROM {}{}) ORDER BY label_value LIMIT {}",
+            "SELECT label_value FROM (SELECT DISTINCT {} AS label_value FROM {}{}) ORDER BY label_value LIMIT {}",
             map_access,
             tags_table_id.getFullTableName(),
             map_where,
@@ -830,8 +831,6 @@ void PrometheusHTTPProtocolAPI::getLabelValues(
         for (size_t i = 0; i < result_block.rows(); ++i)
         {
             auto value = value_col->getDataAt(i);
-            if (value.empty())
-                continue;
             if (!first)
                 writeString(",", response);
             first = false;

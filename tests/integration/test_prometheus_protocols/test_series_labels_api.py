@@ -44,6 +44,10 @@ def send_test_data():
             {"__name__": "http_requests_total", "host": "server1", "method": "GET", "status": "200"},
             {1000: 100, 1015: 150, 1030: 200},
         ),
+        (
+            {"__name__": "with_empty_zone", "datacenter": "us-east", "host": "server1", "zone": ""},
+            {1000: 1.0},
+        ),
     ]
     protobuf = convert_time_series_to_protobuf(time_series)
     send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
@@ -110,6 +114,13 @@ def test_label_values_for_datacenter():
     assert isinstance(data, list)
     assert "us-east" in data
     assert "us-west" in data
+
+
+def test_label_values_includes_empty_string():
+    """Prometheus: explicit empty label values must appear in /label/<name>/values."""
+    data = get_json_from_api("/api/v1/label/zone/values")
+    assert isinstance(data, list)
+    assert "" in data
 
 
 def test_series_returns_metric_labels():
