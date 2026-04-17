@@ -347,6 +347,53 @@ def test_time_window_params_smoke():
     assert isinstance(data, list)
 
 
+def test_label_values_percent_encoded_label_name():
+    """Label name in the URI may be percent-encoded (Prometheus allows label names that
+    include characters requiring escaping after custom remote-write or instrumentation).
+    The handler must URL-decode the segment before querying storage."""
+    # Ingest a series whose label name is `a/b` (a slash is unusual but allowed for this test).
+    time_series = [
+        (
+            {"__name__": "encoded_label_metric", "a/b": "v1"},
+            {2000: 1.0},
+        ),
+    ]
+    protobuf = convert_time_series_to_protobuf(time_series)
+    send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
+    assert_eq_with_retry(
+        node,
+        "SELECT count() > 0 FROM timeSeriesTags(prometheus) WHERE metric_name = 'encoded_label_metric'",
+        "1",
+    )
+
+    # Raw `/api/v1/label/a/b/values` is ambiguous; clients must percent-encode the `/`.
+    data = get_json_from_api("/api/v1/label/a%2Fb/values")
+    assert data == ["v1"], data
+
+
+def test_label_values_trailing_values_segment_not_confused_with_label_name():
+    """`find("/values")` returns the first occurrence; if the label name itself contains
+    `/values` the extraction truncates inside the label. Use the trailing `/values` as the
+    anchor (via `rfind` / size-based suffix strip) so the full label name is preserved."""
+    time_series = [
+        (
+            {"__name__": "tricky_label_metric", "foo/values_bar": "vv"},
+            {2000: 2.0},
+        ),
+    ]
+    protobuf = convert_time_series_to_protobuf(time_series)
+    send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
+    assert_eq_with_retry(
+        node,
+        "SELECT count() > 0 FROM timeSeriesTags(prometheus) WHERE metric_name = 'tricky_label_metric'",
+        "1",
+    )
+
+    # Percent-encode the embedded `/` so the server sees one label-name segment.
+    data = get_json_from_api("/api/v1/label/foo%2Fvalues_bar/values")
+    assert data == ["vv"], data
+
+
 def test_sql_injection_safe():
     """Malicious-looking label names and match[] must not break the server."""
     bad_label = "foo'; DROP TABLE x;--"

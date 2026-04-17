@@ -10,6 +10,7 @@
 #include <base/scope_guard.h>
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Net/HTTPResponse.h>
+#include <Poco/URI.h>
 #include <Common/logger_useful.h>
 #include <Common/setThreadName.h>
 #include "config.h"
@@ -457,9 +458,17 @@ public:
             else if (path_without_query.find("/api/v1/label/") != String::npos && path_without_query.ends_with("/values"))
             {
                 // Extract label name from URI: /api/v1/label/<name>/values
-                size_t start_pos = path_without_query.find("/api/v1/label/") + 14; // length of "/api/v1/label/"
-                size_t end_pos = path_without_query.find("/values");
-                String label_name = path_without_query.substr(start_pos, end_pos - start_pos);
+                static constexpr std::string_view label_prefix = "/api/v1/label/";
+                static constexpr std::string_view values_suffix = "/values";
+                /// Use the prefix/suffix anchors (not `find("/values")`, which returns the first match) so that
+                /// labels like `foo/values_bar` in `/api/v1/label/foo/values_bar/values` are not truncated.
+                const size_t start_pos = path_without_query.find(label_prefix) + label_prefix.size();
+                const size_t end_pos = path_without_query.size() - values_suffix.size();
+                String encoded_label_name = path_without_query.substr(start_pos, end_pos - start_pos);
+                /// Path segments may be percent-encoded (e.g. `job%2Fname`); decode before matching against
+                /// stored label names. `Poco::URI::decode` handles `%xx` and `+` consistently with Prometheus.
+                String label_name;
+                Poco::URI::decode(encoded_label_name, label_name);
 
                 std::vector<String> match_params = params->getAll("match[]");
                 String start = params->get("start", "");
