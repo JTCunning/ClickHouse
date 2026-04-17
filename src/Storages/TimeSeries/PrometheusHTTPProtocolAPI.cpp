@@ -680,10 +680,16 @@ void PrometheusHTTPProtocolAPI::getSeries(
             for (const auto & [tag_name, column_name] : promoted_tags)
             {
                 const auto & col = result_block.getByName(column_name).column;
+                const auto value = col->getDataAt(i);
+                /// Promoted columns store `''` for series that did not carry the label (column default).
+                /// There is no presence bit to distinguish absent from explicit-empty, and Prometheus
+                /// treats missing == empty, so do not synthesize the label in the response.
+                if (value.empty())
+                    continue;
                 writeString(",", response);
                 writeJSONString(std::string_view{tag_name}, response, format_settings);
                 writeString(":", response);
-                writeJSONString(col->getDataAt(i), response, format_settings);
+                writeJSONString(value, response, format_settings);
             }
 
             writeJSONPairsFromTagsColumn(tags_col, i, response, format_settings);

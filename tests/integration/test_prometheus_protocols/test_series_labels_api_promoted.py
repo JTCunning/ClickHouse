@@ -156,3 +156,19 @@ def test_label_values_promoted_excludes_default_empty_with_match():
         params=[("match[]", '{__name__="disk_usage"}')],
     )
     assert data == [], data
+
+
+def test_series_omits_promoted_label_when_absent_in_original_series():
+    """`/api/v1/series` must not synthesize promoted labels for series that did not carry them.
+
+    `disk_usage` was ingested without `host`; the promoted `host_col` stores `''` by default.
+    Prometheus treats missing == empty, so the series entry must omit the `host` key entirely
+    rather than emit `"host": ""`.
+    """
+    data = get_json_from_api("/api/v1/series")
+    disk_entry = next(e for e in data if e.get("__name__") == "disk_usage")
+    assert "host" not in disk_entry, disk_entry
+    assert disk_entry.get("datacenter") == "us-south"
+
+    cpu_entry = next(e for e in data if e.get("__name__") == "cpu_usage")
+    assert cpu_entry.get("host") == "server1"
