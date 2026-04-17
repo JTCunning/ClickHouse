@@ -709,9 +709,26 @@ void PrometheusHTTPProtocolAPI::getLabels(
     auto tags_table_id = tags_table->getStorageID();
 
     const UInt64 max_series = ts_settings[TimeSeriesSetting::prometheus_max_series];
+
+    /// Derive the label set from matched rows only; do not unconditionally add `__name__` or every promoted label
+    /// from `tags_to_columns`, because `match[]` may exclude all series or matched series may not carry every
+    /// promoted label.
+    String labels_expr = "if(count() > 0, ['__name__'], CAST([], 'Array(String)'))";
+    for (const auto & tag_name_and_column_name : tags_to_columns_map)
+    {
+        const auto & tuple = tag_name_and_column_name.safeGet<Tuple>();
+        const auto & tag_name = tuple.at(0).safeGet<String>();
+        const auto & column_name = tuple.at(1).safeGet<String>();
+        labels_expr += fmt::format(
+            ", if(countIf({} != '') > 0, [{}], CAST([], 'Array(String)'))",
+            backQuoteIfNeed(column_name),
+            quoteString(tag_name));
+    }
+    labels_expr += fmt::format(", groupUniqArrayArray(mapKeys({}))", TimeSeriesColumnNames::Tags);
+
     String query = fmt::format(
-        "SELECT label_key FROM (SELECT arrayJoin(groupUniqArrayArray(mapKeys({}))) AS label_key FROM {}{}) LIMIT {}",
-        TimeSeriesColumnNames::Tags,
+        "SELECT label_key FROM (SELECT arrayJoin(arrayDistinct(arrayConcat({}))) AS label_key FROM {}{}) LIMIT {}",
+        labels_expr,
         tags_table_id.getFullTableName(),
         where_clause,
         max_series);
@@ -724,13 +741,6 @@ void PrometheusHTTPProtocolAPI::getLabels(
     Block result_block;
 
     std::set<String> label_names;
-    label_names.insert("__name__");
-    for (const auto & tag_name_and_column_name : tags_to_columns_map)
-    {
-        const auto & tuple = tag_name_and_column_name.safeGet<Tuple>();
-        label_names.insert(tuple.at(0).safeGet<String>());
-    }
-
     while (executor.pull(result_block))
     {
         if (result_block.empty() || result_block.rows() == 0)

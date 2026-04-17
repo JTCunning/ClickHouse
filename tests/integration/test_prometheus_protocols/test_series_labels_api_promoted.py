@@ -20,8 +20,10 @@ node = cluster.add_instance(
 )
 
 
-def get_json_from_api(path):
+def get_json_from_api(path, params=None):
     url = f"http://{node.ip_address}:9093{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params, doseq=True)
     response = requests.get(url)
     assert response.status_code == 200, response.text
     data = response.json()
@@ -46,6 +48,12 @@ def setup(request):
             (
                 {"__name__": "memory_usage", "datacenter": "us-west", "host": "server2"},
                 {1000: 0.1, 1015: 0.2, 1030: 0.3},
+            ),
+            # Series with no `host` label -- the promoted column should be empty for these rows,
+            # and `/api/v1/labels?match[]={__name__="disk_usage"}` must NOT advertise `host`.
+            (
+                {"__name__": "disk_usage", "datacenter": "us-south"},
+                {1000: 0.9, 1015: 0.91, 1030: 0.92},
             ),
         ]
         protobuf = convert_time_series_to_protobuf(time_series)
@@ -92,3 +100,38 @@ def test_series_multiple_match_union_with_promoted_host_column():
     data = response.json()["data"]
     names = {e["__name__"] for e in data if "__name__" in e}
     assert names == {"cpu_usage", "memory_usage"}
+
+
+def test_labels_match_zero_rows_returns_empty():
+    """`/api/v1/labels?match[]=...` must derive labels from matched rows only:
+    when the selector matches no series, the response must be empty and must not
+    include `__name__` or any promoted label from `tags_to_columns`."""
+    data = get_json_from_api(
+        "/api/v1/labels",
+        params=[("match[]", '{__name__="does_not_exist"}')],
+    )
+    assert data == [], data
+
+
+def test_labels_match_excludes_promoted_label_when_absent_in_matched_rows():
+    """Promoted labels must only appear when at least one matched row carries them.
+    `disk_usage` was inserted without a `host` label, so its promoted `host_col`
+    is empty. Filtering to only `disk_usage` must omit `host` from /labels."""
+    data = get_json_from_api(
+        "/api/v1/labels",
+        params=[("match[]", '{__name__="disk_usage"}')],
+    )
+    assert "__name__" in data
+    assert "datacenter" in data
+    assert "host" not in data, data
+
+
+def test_labels_match_includes_promoted_label_when_present():
+    """Sanity check: when matched rows do carry the promoted label, /labels still includes it."""
+    data = get_json_from_api(
+        "/api/v1/labels",
+        params=[("match[]", '{__name__="cpu_usage"}')],
+    )
+    assert "__name__" in data
+    assert "host" in data
+    assert "datacenter" in data
