@@ -50,6 +50,7 @@ namespace TimeSeriesSetting
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
+    extern const int CANNOT_PARSE_PROMQL_QUERY;
 }
 
 namespace
@@ -79,24 +80,24 @@ MatcherList parseMatchers(const String & match_param)
     PrometheusQueryTree tree;
     String err;
     size_t err_pos = 0;
-    if (tree.tryParse(match_param, 3, &err, &err_pos))
-    {
-        const auto * root = tree.getRoot();
-        if (root && root->node_type == PrometheusQueryTree::NodeType::InstantSelector)
-        {
-            const auto * sel = typeid_cast<const PrometheusQueryTree::InstantSelector *>(root);
-            chassert(sel);
-            return sel->matchers;
-        }
-    }
+    if (!tree.tryParse(match_param, 3, &err, &err_pos))
+        throw Exception(
+            ErrorCodes::CANNOT_PARSE_PROMQL_QUERY,
+            "{} at position {} while parsing match[] selector: {}",
+            err,
+            err_pos,
+            match_param);
 
-    MatcherList fallback;
-    Matcher m;
-    m.label_name = "__name__";
-    m.label_value = match_param;
-    m.matcher_type = MatcherType::EQ;
-    fallback.push_back(std::move(m));
-    return fallback;
+    const auto * root = tree.getRoot();
+    if (!root || root->node_type != PrometheusQueryTree::NodeType::InstantSelector)
+        throw Exception(
+            ErrorCodes::CANNOT_PARSE_PROMQL_QUERY,
+            "match[] must be a metric name or label selector {{...}}, got a non-selector expression: {}",
+            match_param);
+
+    const auto * sel = typeid_cast<const PrometheusQueryTree::InstantSelector *>(root);
+    chassert(sel);
+    return sel->matchers;
 }
 
 String predicateForMatcher(const Matcher & matcher, const Map & tags_to_columns)

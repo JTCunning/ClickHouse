@@ -273,9 +273,11 @@ def test_sql_injection_safe():
     assert isinstance(data, list)
     assert data == []
 
-    data2 = get_json_from_api(
-        "/api/v1/series",
-        params=[("match[]", "foo' OR '1'='1")],
-    )
-    assert isinstance(data2, list)
+    # Invalid PromQL in match[] returns 400 bad_data (no silent fallback to __name__=...).
+    url = f"http://{node.ip_address}:9093/api/v1/series"
+    response = requests.get(url, params=[("match[]", "foo' OR '1'='1")])
+    assert response.status_code == 400, response.text
+    err = response.json()
+    assert err["status"] == "error"
+    assert err["errorType"] == "bad_data"
 
