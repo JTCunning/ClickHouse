@@ -32,16 +32,25 @@
 #include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
 #include <Core/Settings.h>
+#include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/PrometheusRemoteReadProtocol.h>
 #include <Storages/TimeSeries/PrometheusRemoteWriteProtocol.h>
 #include <Storages/TimeSeries/PrometheusHTTPProtocolAPI.h>
+#include <Storages/TimeSeries/TimeSeriesSettings.h>
+#include <Poco/URI.h>
 
 
 namespace DB
 {
 
+namespace TimeSeriesSetting
+{
+    extern const TimeSeriesSettingsBool prometheus_url_routing_enabled;
+}
+
 namespace ErrorCodes
 {
+    extern const int ACCESS_DENIED;
     extern const int BAD_ARGUMENTS;
     extern const int SUPPORT_IS_DISABLED;
     extern const int NOT_IMPLEMENTED;
@@ -222,6 +231,108 @@ protected:
         request_credentials.reset();
     }
 
+    /// Result of resolving a request to a target TimeSeries table and a relative protocol path.
+    struct DispatchInfo
+    {
+        /// The `(database, table)` pair to use for this request. Either copied from the handler
+        /// config (fixed-table mode) or parsed out of the URL after @c http_path_prefix
+        /// (dynamic-routing mode).
+        QualifiedTableName table_name;
+
+        /// The portion of the request path that follows @c http_path_prefix (and, in dynamic
+        /// routing mode, the database/table segments). Always begins with @c / . The query
+        /// string is stripped. Used by @c QueryAPIImpl to dispatch on `/api/v1/...`. In
+        /// fixed-table mode this is the full path of the request.
+        String relative_path;
+    };
+
+    /// Parses the request URI, applies the configured prefix and (optionally) extracts the
+    /// database/table segments. Throws @c BAD_ARGUMENTS (400) when dynamic routing is enabled but
+    /// the path does not contain the required segments. In practice the factory's URL filter
+    /// regex already rejects malformed URLs before they reach the handler, so this path is mainly
+    /// a belt-and-suspenders check for direct callers that bypass the filter.
+    DispatchInfo computeDispatchInfo(const HTTPServerRequest & request)
+    {
+        const String & uri = request.getURI();
+        std::string_view path = uri;
+        if (auto q = path.find('?'); q != std::string_view::npos)
+            path = path.substr(0, q);
+
+        if (!config().enable_table_name_url_routing)
+        {
+            return DispatchInfo{
+                .table_name = config().time_series_table_name,
+                .relative_path = String{path},
+            };
+        }
+
+        const String & prefix = config().http_path_prefix;
+        if (!prefix.empty())
+        {
+            if (!path.starts_with(prefix))
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Prometheus request URI {} does not start with the configured prefix {}", uri, prefix);
+            path.remove_prefix(prefix.size());
+        }
+
+        if (path.empty() || path.front() != '/')
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Prometheus request URI {} is missing the /<database>/<table>/<protocol-path> segments after the prefix", uri);
+        path.remove_prefix(1);
+
+        const auto first_slash = path.find('/');
+        if (first_slash == std::string_view::npos || first_slash == 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Prometheus request URI {} does not contain a /<database>/<table>/... segment after the prefix", uri);
+        std::string_view db_segment = path.substr(0, first_slash);
+        path.remove_prefix(first_slash + 1);
+
+        const auto second_slash = path.find('/');
+        if (second_slash == std::string_view::npos || second_slash == 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Prometheus request URI {} does not contain a /<table>/<protocol-path> segment after the database segment", uri);
+        std::string_view table_segment = path.substr(0, second_slash);
+        std::string_view rest = path.substr(second_slash);
+
+        QualifiedTableName resolved;
+        Poco::URI::decode(String{db_segment}, resolved.database);
+        Poco::URI::decode(String{table_segment}, resolved.table);
+        if (resolved.database.empty() || resolved.table.empty())
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Prometheus request URI {} contains an empty database or table segment after the prefix", uri);
+
+        return DispatchInfo{
+            .table_name = std::move(resolved),
+            .relative_path = String{rest},
+        };
+    }
+
+    /// Resolves the target TimeSeries storage and (when dynamic routing is on) enforces that the
+    /// table is opted in via the @c prometheus_url_routing_enabled table setting. Returns the
+    /// resolved storage so callers can pass it to the protocol implementations.
+    StoragePtr resolveAndAuthorizeTable(const DispatchInfo & dispatch)
+    {
+        auto storage = DatabaseCatalog::instance().getTable(StorageID{dispatch.table_name}, context);
+
+        if (!config().enable_table_name_url_routing)
+            return storage;
+
+        auto time_series = std::dynamic_pointer_cast<StorageTimeSeries>(storage);
+        if (!time_series)
+            throw Exception(ErrorCodes::ACCESS_DENIED,
+                "Prometheus URL-routed access is not allowed for storage {}: it is not a TimeSeries table",
+                storage->getStorageID().getNameForLogs());
+
+        if (!time_series->getStorageSettings()[TimeSeriesSetting::prometheus_url_routing_enabled])
+            throw Exception(ErrorCodes::ACCESS_DENIED,
+                "Prometheus URL-routed access is disabled for table {}: the TimeSeries setting "
+                "prometheus_url_routing_enabled is set to 0. Recreate the table without that "
+                "setting (or with prometheus_url_routing_enabled = 1) to allow URL-routed access",
+                storage->getStorageID().getNameForLogs());
+
+        return storage;
+    }
+
     const Settings & default_settings;
     std::unique_ptr<HTMLForm> params;
     std::unique_ptr<Session> session;
@@ -259,7 +370,8 @@ public:
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot parse WriteRequest");
         }
 
-        auto table = DatabaseCatalog::instance().getTable(StorageID{config().time_series_table_name}, context);
+        auto dispatch = computeDispatchInfo(request);
+        auto table = resolveAndAuthorizeTable(dispatch);
         PrometheusRemoteWriteProtocol protocol{table, context};
 
         if (write_request.timeseries_size())
@@ -295,7 +407,8 @@ public:
         checkHTTPHeader(request, "Content-Type", "application/x-protobuf");
         checkHTTPHeader(request, "Content-Encoding", "snappy");
 
-        auto table = DatabaseCatalog::instance().getTable(StorageID{config().time_series_table_name}, context);
+        auto dispatch = computeDispatchInfo(request);
+        auto table = resolveAndAuthorizeTable(dispatch);
         PrometheusRemoteReadProtocol protocol{table, context};
 
         prometheus::ReadRequest read_request;
@@ -361,24 +474,31 @@ public:
             return false;
 
         /// Some parameters (database, default_format, everything used in the code above) do not
-        /// belong to the Settings class.
-        static const NameSet reserved_param_names{"user", "password", "query", "time", "start", "end", "step"};
+        /// belong to the Settings class. The Prometheus HTTP API also defines a few well-known
+        /// query parameters (in particular @c match[] for series/labels endpoints) that must NOT
+        /// be applied as ClickHouse settings. Bracket-suffixed parameter names cannot be valid
+        /// settings anyway, but listing them here keeps the ignore-list explicit.
+        static const NameSet reserved_param_names{
+            "user", "password",
+            "query", "time", "start", "end", "step", "match[]", "limit", "timeout", "lookback_delta"};
         return !reserved_param_names.contains(name);
     }
 
     void handlingRequestWithContext(HTTPServerRequest & request, HTTPServerResponse & response) override
     {
-        auto table = DatabaseCatalog::instance().getTable(StorageID{config().time_series_table_name}, context);
+        auto dispatch = computeDispatchInfo(request);
+        auto table = resolveAndAuthorizeTable(dispatch);
         PrometheusHTTPProtocolAPI protocol{table, context};
 
-
         const String & uri = request.getURI();
-        LOG_DEBUG(log(), "Processing Query API request: method={}, uri={}", request.getMethod(), uri);
+        const String & path = dispatch.relative_path;
+        LOG_DEBUG(log(), "Processing Query API request: method={}, uri={}, relative_path={}",
+                  request.getMethod(), uri, path);
 
         response.setContentType("application/json");
         try
         {
-            if (uri.starts_with("/api/v1/query_range"))
+            if (path.starts_with("/api/v1/query_range"))
             {
                 String query = params->get("query", "");
                 String start = params->get("start", "");
@@ -402,7 +522,7 @@ public:
 
                 protocol.executePromQLQuery(getOutputStream(response), params);
             }
-            else if (uri.starts_with("/api/v1/query"))
+            else if (path.starts_with("/api/v1/query"))
             {
                 String query = params->get("query", "");
                 String time = params->get("time", "");
@@ -421,15 +541,15 @@ public:
 
                 protocol.executePromQLQuery(getOutputStream(response), params);
             }
-            else if (uri.starts_with("/api/v1/format_query"))
+            else if (path.starts_with("/api/v1/format_query"))
             {
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The format_query endpoint is not implemented");
             }
-            else if (uri.starts_with("/api/v1/parse_query"))
+            else if (path.starts_with("/api/v1/parse_query"))
             {
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The parse_query endpoint is not implemented");
             }
-            else if (uri.starts_with("/api/v1/series"))
+            else if (path.starts_with("/api/v1/series"))
             {
                 String match = params->get("match[]", "");
                 String start = params->get("start", "");
@@ -439,7 +559,7 @@ public:
 
                 protocol.getSeries(getOutputStream(response), match, start, end);
             }
-            else if (uri.starts_with("/api/v1/labels"))
+            else if (path.starts_with("/api/v1/labels"))
             {
                 String match = params->get("match[]", "");
                 String start = params->get("start", "");
@@ -447,12 +567,14 @@ public:
 
                 protocol.getLabels(getOutputStream(response), match, start, end);
             }
-            else if (uri.find("/api/v1/label/") != String::npos && uri.ends_with("/values"))
+            else if (path.find("/api/v1/label/") != String::npos && path.ends_with("/values"))
             {
-                // Extract label name from URI: /api/v1/label/<name>/values
-                size_t start_pos = uri.find("/api/v1/label/") + 14; // length of "/api/v1/label/"
-                size_t end_pos = uri.find("/values");
-                String label_name = uri.substr(start_pos, end_pos - start_pos);
+                // Extract label name from relative path: /api/v1/label/<name>/values
+                size_t start_pos = path.find("/api/v1/label/") + 14; // length of "/api/v1/label/"
+                size_t end_pos = path.rfind("/values");
+                String encoded_label_name = path.substr(start_pos, end_pos - start_pos);
+                String label_name;
+                Poco::URI::decode(encoded_label_name, label_name);
 
                 String match = params->get("match[]", "");
                 String start = params->get("start", "");
@@ -462,7 +584,8 @@ public:
             }
             else
             {
-                LOG_ERROR(log(), "No matching endpoint found for URI: {}, method: {}", uri, request.getMethod());
+                LOG_ERROR(log(), "No matching endpoint found for URI: {} (relative path: {}), method: {}",
+                          uri, path, request.getMethod());
                 response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
                 writeString(R"({"status":"error","errorType":"not_found","error":"API endpoint not found"})", getOutputStream(response));
             }

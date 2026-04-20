@@ -398,6 +398,12 @@ void addDefaultHandlersFactory(
 {
     addCommonDefaultHandlersFactory(factory, server, config);
 
+    /// Register the Prometheus dynamic-routing protocols *before* the catch-all dynamic query
+    /// handler so that `/<prefix>/<db>/<table>/...` requests are dispatched to the Prometheus
+    /// implementation. The filters here are very specific (anchored regex on the path) so this
+    /// only "steals" requests that are unambiguously aimed at the Prometheus protocol surface.
+    addPrometheusProtocolsToHTTPDefaults(factory, server, config, async_metrics);
+
     auto dynamic_creator = [&server] () -> std::unique_ptr<DynamicQueryHandler>
     {
         return std::make_unique<DynamicQueryHandler>(server, HTTPHandlerConnectionConfig{}, "query");

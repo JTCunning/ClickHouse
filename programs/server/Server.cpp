@@ -3,6 +3,7 @@
 #include <Common/QueryScope.h>
 
 #include <memory>
+#include <mutex>
 #include <Interpreters/ClientInfo.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -3644,6 +3645,25 @@ void Server::createServers(
             port_name = "prometheus.port";
 
             const char * handler_name = server_settings[ServerSetting::prometheus_keeper_metrics_only] ? "KeeperPrometheusHandler-factory" : "PrometheusHandler-factory";
+
+            /// The dedicated `<prometheus><port>` listener is kept for back-compat with
+            /// fixed-table `<prometheus><handlers>` configurations, but new deployments should
+            /// use the auto-mounted `/<prefix>/<db>/<table>/...` routes on the main HTTP port
+            /// (configurable via `<prometheus><http_path_prefix>`, default `/time-series`).
+            /// Use a `call_once` so the warning is emitted only the first time we start the
+            /// listener for this process even if the servers are reloaded.
+            {
+                static std::once_flag prometheus_dedicated_port_deprecation_warning;
+                std::call_once(prometheus_dedicated_port_deprecation_warning, [this, handler_name] {
+                    LOG_WARNING(&logger(),
+                        "The dedicated <prometheus><port> listener (handler: {}) is deprecated. "
+                        "Prefer the auto-mounted Prometheus protocols on the main HTTP port at "
+                        "/<prometheus.http_path_prefix>/<database>/<table>/... "
+                        "(default prefix: /time-series). All TimeSeries tables are opted in by "
+                        "default; set prometheus_url_routing_enabled = 0 on a table to opt it out.",
+                        handler_name);
+                });
+            }
 
             createServer(config, listen_host, port_name, listen_try, start_servers, servers, [&](UInt16 port) -> ProtocolServerAdapter
             {

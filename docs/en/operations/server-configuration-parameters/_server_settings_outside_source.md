@@ -1292,6 +1292,27 @@ Settings:
 
 - `endpoint` – HTTP endpoint for scraping metrics by prometheus server. Start from '/'.
 - `port` – Port for `endpoint`.
+
+  :::warning Deprecated
+  The dedicated `<port>` listener is deprecated. The Prometheus protocol handlers
+  (`remote_write`, `remote_read`, and the Query API) are now auto-mounted on the main
+  `<http_port>` under the `<http_path_prefix>` (default `/time-series`); see below. The
+  dedicated listener still works for back-compat with existing fixed-table `<handlers>`
+  configurations and will continue to do so, but ClickHouse logs a startup warning the
+  first time it binds the dedicated port.
+  :::
+
+- `http_path_prefix` – URL prefix used to auto-mount the Prometheus `remote_write`,
+  `remote_read`, and Query API handlers on the main `<http_port>`. Defaults to
+  `/time-series`. The full request URL is then
+  `http://<host>:<http_port>/<http_path_prefix>/<database>/<table>/<protocol-path>`,
+  where `<database>` and `<table>` are taken from the URL itself (dynamic routing).
+  Set to an empty string to opt out of the auto-mount entirely. The target table must
+  be a `TimeSeries` engine table; URL-routed access is on by default for every
+  `TimeSeries` table and can be disabled per table by setting
+  `prometheus_url_routing_enabled = 0` at `CREATE TABLE` time
+  (see [TimeSeries](../../engines/table-engines/integrations/time-series.md)). When
+  disabled, the request is rejected with HTTP 403.
 - `metrics` – Expose metrics from the [system.metrics](/operations/system-tables/metrics) table.
 - `events` – Expose metrics from the [system.events](/operations/system-tables/events) table.
 - `asynchronous_metrics` – Expose current metrics values from the [system.asynchronous_metrics](/operations/system-tables/asynchronous_metrics) table.
@@ -1321,6 +1342,40 @@ Check (replace `127.0.0.1` with the IP addr or hostname of your ClickHouse serve
 ```bash
 curl 127.0.0.1:9363/metrics
 ```
+
+**Example with the auto-mount on the main HTTP port (recommended)**
+
+```xml
+<clickhouse>
+    <listen_host>0.0.0.0</listen_host>
+    <http_port>8123</http_port>
+    <prometheus>
+        <!-- /metrics still served on the dedicated port (optional, deprecated). -->
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+        <errors>true</errors>
+
+        <!-- Auto-mount remote_write/remote_read/query_api on the main HTTP port. -->
+        <http_path_prefix>/time-series</http_path_prefix>
+    </prometheus>
+</clickhouse>
+```
+
+With this configuration, given any `TimeSeries` table `mydb.metrics` (URL routing is
+on by default), Prometheus can be pointed at:
+
+```yaml
+remote_write:
+  - url: http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/write
+remote_read:
+  - url: http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/read
+```
+
+Grafana can use the same prefix as a Prometheus data source URL of
+`http://127.0.0.1:8123/time-series/mydb/metrics`.
 
 ## query_log {#query_log}
 

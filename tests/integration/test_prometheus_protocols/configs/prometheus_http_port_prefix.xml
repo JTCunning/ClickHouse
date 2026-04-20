@@ -1,0 +1,6 @@
+<clickhouse>
+    <!-- Custom URL prefix for the auto-mount on the main HTTP port. -->
+    <prometheus>
+        <http_path_prefix>/grafana/prom</http_path_prefix>
+    </prometheus>
+</clickhouse>

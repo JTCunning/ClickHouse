@@ -12,6 +12,7 @@ namespace DB
 class IServer;
 class HTTPRequestHandlerFactory;
 using HTTPRequestHandlerFactoryPtr = std::shared_ptr<HTTPRequestHandlerFactory>;
+class HTTPRequestHandlerFactoryMain;
 class AsynchronousMetrics;
 
 /// Makes a handler factory to handle prometheus protocols.
@@ -59,42 +60,44 @@ HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactory(
     const AsynchronousMetrics & asynchronous_metrics,
     const String & name);
 
-/// Makes a HTTP handler factory to handle requests for prometheus metrics for a HTTP rule in the <http_handlers> section.
-/// Expects a configuration like this:
+/// Makes a HTTP handler factory to handle Prometheus protocol requests for a HTTP rule in the
+/// @c http_handlers section. The HTTP-port mount is dynamic-routing-only: the target TimeSeries
+/// table is parsed from the URL path segments after the user-configured @c url filter, so
+/// @c table and @c database must NOT be specified in the handler config (the factory will reject
+/// the rule otherwise). The @c expose_metrics handler type is also rejected here -- it is
+/// auto-mounted at @c /metrics by the top-level @c prometheus block. Expects a configuration
+/// like this:
 ///
+/// @code{.xml}
 /// <http_port>8123</http_port>
 /// <http_handlers>
-///     <my_rule_1>
-///         <url>/metrics</url>
-///         <handler>
-///             <type>prometheus</type>
-///             <metrics>true</metrics>
-///             <asynchronous_metrics>true</asynchronous_metrics>
-///             <events>true</events>
-///             <errors>true</errors>
-///         </handler>
-///     </my_rule_1>
 ///     <my_rule2>
-///         <url>/write</url>
+///         <url>regex:^/foo/[^/]+/[^/]+/write$</url>
+///         <methods>POST</methods>
 ///         <handler>
 ///             <type>remote_write</type>
-///             <table>db.time_series_table_name</table>
+///             <http_path_prefix>/foo</http_path_prefix>
 ///         </handler>
 ///     </my_rule2>
-///     <my_rule3>
-///         <url>/read</url>
-///         <handler>
-///             <type>remote_read</type>
-///             <table>db.time_series_table_name</table>
-///         </handler>
-///     </my_rule3>
 /// </http_handlers>
+/// @endcode
 HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactoryForHTTPRule(
     IServer & server,
     const Poco::Util::AbstractConfiguration & config,
     const String & config_prefix, /// path to "http_handlers.my_handler_1"
     const AsynchronousMetrics & asynchronous_metrics,
     std::unordered_map<String, String> & common_headers);
+
+/// Auto-mounts the three dynamic-routing Prometheus protocol rules (remote_write, remote_read,
+/// query_api) on @p factory under the prefix configured by @c prometheus.http_path_prefix
+/// (default @c /time-series). No-op when @c prometheus is not configured or the prefix is empty.
+/// @c expose_metrics is NOT registered here -- that has its own @c /metrics auto-mount via
+/// createPrometheusHandlerFactoryForHTTPRuleDefaults().
+void addPrometheusProtocolsToHTTPDefaults(
+    HTTPRequestHandlerFactoryMain & factory,
+    IServer & server,
+    const Poco::Util::AbstractConfiguration & config,
+    const AsynchronousMetrics & async_metrics);
 
 /// Makes a HTTP Handler factory to handle requests for prometheus metrics as a part of the default HTTP rule in the <http_handlers> section.
 /// Expects a configuration like this:

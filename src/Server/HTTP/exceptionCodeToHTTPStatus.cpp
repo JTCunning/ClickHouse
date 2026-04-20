@@ -60,6 +60,7 @@ namespace ErrorCodes
     extern const int REQUIRED_PASSWORD;
     extern const int AUTHENTICATION_FAILED;
     extern const int SET_NON_GRANTED_ROLE;
+    extern const int ACCESS_DENIED;
 
     extern const int HTTP_LENGTH_REQUIRED;
 
@@ -76,7 +77,8 @@ Poco::Net::HTTPResponse::HTTPStatus exceptionCodeToHTTPStatus(int exception_code
         return HTTPResponse::HTTP_UNAUTHORIZED;
     }
     if (exception_code == ErrorCodes::UNKNOWN_USER || exception_code == ErrorCodes::WRONG_PASSWORD
-        || exception_code == ErrorCodes::AUTHENTICATION_FAILED || exception_code == ErrorCodes::SET_NON_GRANTED_ROLE)
+        || exception_code == ErrorCodes::AUTHENTICATION_FAILED || exception_code == ErrorCodes::SET_NON_GRANTED_ROLE
+        || exception_code == ErrorCodes::ACCESS_DENIED)
     {
         return HTTPResponse::HTTP_FORBIDDEN;
     }

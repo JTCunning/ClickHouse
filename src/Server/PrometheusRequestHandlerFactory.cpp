@@ -6,6 +6,10 @@
 #include <Server/PrometheusMetricsWriter.h>
 #include <Server/PrometheusRequestHandler.h>
 #include <Server/PrometheusRequestHandlerConfig.h>
+#include <Common/StringUtils.h>
+#include <Common/re2.h>
+
+#include <Poco/Net/HTTPRequest.h>
 
 
 namespace DB
@@ -13,6 +17,7 @@ namespace DB
 
 namespace ErrorCodes
 {
+    extern const int INVALID_CONFIG_PARAMETER;
     extern const int UNKNOWN_ELEMENT_IN_CONFIG;
 }
 
@@ -225,6 +230,135 @@ HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactory(
 }
 
 
+namespace
+{
+    /// Rejects fixed-table config fields (@c table / @c database) that have no meaning when the
+    /// handler is mounted under @c http_handlers -- that mount is dynamic-routing-only.
+    void rejectFixedTableKeysForHTTPRule(const Poco::Util::AbstractConfiguration & config, const String & handler_prefix)
+    {
+        for (const auto & key : {"table", "database"})
+        {
+            if (config.has(handler_prefix + "." + key))
+                throw Exception(
+                    ErrorCodes::INVALID_CONFIG_PARAMETER,
+                    "Prometheus handler under <http_handlers> cannot specify <{}>: dynamic routing is the only supported mode here. "
+                    "The target table is resolved from the URL path segments. Remove <{}> from {}.",
+                    key, key, handler_prefix);
+        }
+    }
+
+    /// Parses a `<prometheus>`-style handler configuration block intended for use under
+    /// `<http_handlers>`. Only `remote_write`, `remote_read`, `query_api` are accepted; the parsed
+    /// config has `enable_table_name_url_routing = true` and `time_series_table_name` left empty.
+    PrometheusRequestHandlerConfig parseHTTPRuleHandlerConfig(
+        const Poco::Util::AbstractConfiguration & config, const String & handler_prefix)
+    {
+        const String type = config.getString(handler_prefix + ".type");
+
+        if (type == "expose_metrics")
+            throw Exception(
+                ErrorCodes::INVALID_CONFIG_PARAMETER,
+                "Prometheus handler type 'expose_metrics' is not supported under <http_handlers>. "
+                "Use the top-level <prometheus> block (which auto-mounts /metrics on the HTTP port) instead.");
+
+        PrometheusRequestHandlerConfig res;
+        if (type == "remote_write")
+            res.type = PrometheusRequestHandlerConfig::Type::RemoteWrite;
+        else if (type == "remote_read")
+            res.type = PrometheusRequestHandlerConfig::Type::RemoteRead;
+        else if (type == "query_api")
+            res.type = PrometheusRequestHandlerConfig::Type::QueryAPI;
+        else
+            throw Exception(
+                ErrorCodes::UNKNOWN_ELEMENT_IN_CONFIG,
+                "Unknown type {} is specified in the configuration for a prometheus protocol", type);
+
+        rejectFixedTableKeysForHTTPRule(config, handler_prefix);
+
+        res.enable_table_name_url_routing = true;
+        res.http_path_prefix = config.getString(handler_prefix + ".http_path_prefix", "");
+        parseCommonConfig(config, res);
+
+        if ((res.type == PrometheusRequestHandlerConfig::Type::RemoteRead
+                || res.type == PrometheusRequestHandlerConfig::Type::QueryAPI)
+            && config.has(handler_prefix + ".user"))
+        {
+            AlwaysAllowCredentials credentials(config.getString(handler_prefix + ".user"));
+            res.connection_config.credentials.emplace(credentials);
+        }
+
+        return res;
+    }
+
+    /// Compiles `regex_pattern` into a filter that matches the request URL path (query string
+    /// stripped) anchored at both ends.
+    auto regexPathFilter(const String & regex_pattern)
+    {
+        auto compiled = std::make_shared<const re2::RE2>(regex_pattern);
+        if (!compiled->ok())
+            throw Exception(
+                ErrorCodes::INVALID_CONFIG_PARAMETER,
+                "Cannot compile regex {} for prometheus URL filter: {}",
+                regex_pattern, compiled->error());
+
+        return [compiled](const HTTPServerRequest & request)
+        {
+            const auto & uri = request.getURI();
+            const auto question = uri.find('?');
+            std::string_view path = (question == String::npos) ? std::string_view{uri} : std::string_view{uri.data(), question};
+            return compiled->Match({path.data(), path.size()}, 0, path.size(), re2::RE2::ANCHOR_BOTH, nullptr, 0);
+        };
+    }
+
+    /// Returns a method-list filter equivalent to @c methods in @c http_handlers.
+    auto methodsListFilter(std::vector<String> methods_in)
+    {
+        return [methods = std::move(methods_in)](const HTTPServerRequest & request)
+        {
+            return std::find(methods.begin(), methods.end(), request.getMethod()) != methods.end();
+        };
+    }
+
+    /// Adds the three dynamic-routing rules (RemoteWrite, RemoteRead, QueryAPI) to `factory`,
+    /// matching `^<prefix>/[^/]+/[^/]+/<protocol-suffix>$`.
+    void addDynamicRoutingRules(
+        HTTPRequestHandlerFactoryMain & factory,
+        IServer & server,
+        const AsynchronousMetrics & async_metrics,
+        const String & prefix)
+    {
+        auto add_rule = [&](PrometheusRequestHandlerConfig::Type type,
+                            const String & path_suffix_regex,
+                            std::vector<String> allowed_methods)
+        {
+            PrometheusRequestHandlerConfig parsed_config;
+            parsed_config.type = type;
+            parsed_config.enable_table_name_url_routing = true;
+            parsed_config.http_path_prefix = prefix;
+            parsed_config.is_stacktrace_enabled = true;
+
+            auto handler = createPrometheusHandlerFactoryFromConfig(server, async_metrics, parsed_config, /* for_keeper= */ false);
+            chassert(handler);
+            handler->addFilter(regexPathFilter("^" + prefix + "/[^/]+/[^/]+" + path_suffix_regex + "$"));
+            handler->addFilter(methodsListFilter(std::move(allowed_methods)));
+            factory.addHandler(std::move(handler));
+        };
+
+        add_rule(PrometheusRequestHandlerConfig::Type::RemoteWrite, "/write",
+                 {Poco::Net::HTTPRequest::HTTP_POST});
+        /// The Prometheus remote-read spec uses POST, but the original ClickHouse server has
+        /// historically also accepted GET on the dedicated port (see
+        /// @c get_response_to_remote_read in the integration tests). Accept both for back-compat.
+        add_rule(PrometheusRequestHandlerConfig::Type::RemoteRead, "/read",
+                 {Poco::Net::HTTPRequest::HTTP_POST, Poco::Net::HTTPRequest::HTTP_GET});
+        add_rule(PrometheusRequestHandlerConfig::Type::QueryAPI,
+                 "/api/v1/(query|query_range|series|labels|label/[^/]+/values|metadata)",
+                 {Poco::Net::HTTPRequest::HTTP_GET, Poco::Net::HTTPRequest::HTTP_POST,
+                  Poco::Net::HTTPRequest::HTTP_OPTIONS, Poco::Net::HTTPRequest::HTTP_HEAD});
+    }
+}
+
+
 HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactoryForHTTPRule(
     IServer & server,
     const Poco::Util::AbstractConfiguration & config,
@@ -234,11 +368,37 @@ HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactoryForHTTPRule(
 {
     auto headers = parseHTTPResponseHeadersWithCommons(config, config_prefix, common_headers);
 
-    auto parsed_config = parseExposeMetricsConfig(config, config_prefix + ".handler");
+    auto parsed_config = parseHTTPRuleHandlerConfig(config, config_prefix + ".handler");
     auto handler = createPrometheusHandlerFactoryFromConfig(server, asynchronous_metrics, parsed_config, /* for_keeper= */ false, headers);
     chassert(handler);  /// `handler` can't be nullptr here because `for_keeper` is false.
     handler->addFiltersFromConfig(config, config_prefix);
     return handler;
+}
+
+
+void addPrometheusProtocolsToHTTPDefaults(
+    HTTPRequestHandlerFactoryMain & factory,
+    IServer & server,
+    const Poco::Util::AbstractConfiguration & config,
+    const AsynchronousMetrics & async_metrics)
+{
+    /// Auto-mounting only makes sense when the user has a `<prometheus>` block; otherwise we
+    /// don't want to reserve any URL space at all.
+    if (!config.has("prometheus"))
+        return;
+
+    /// An empty value for `<http_path_prefix>` is the explicit opt-out for the auto-mount.
+    String prefix = config.getString("prometheus.http_path_prefix", "/time-series");
+    if (prefix.empty())
+        return;
+
+    /// Normalize: ensure a single leading slash and no trailing slash.
+    while (prefix.size() > 1 && prefix.back() == '/')
+        prefix.pop_back();
+    if (prefix.front() != '/')
+        prefix.insert(prefix.begin(), '/');
+
+    addDynamicRoutingRules(factory, server, async_metrics, prefix);
 }
 
 
