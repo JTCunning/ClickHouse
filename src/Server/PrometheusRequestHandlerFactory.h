@@ -61,12 +61,20 @@ HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactory(
     const String & name);
 
 /// Makes a HTTP handler factory to handle Prometheus protocol requests for a HTTP rule in the
-/// @c http_handlers section. The HTTP-port mount is dynamic-routing-only: the target TimeSeries
-/// table is parsed from the URL path segments after the user-configured @c url filter, so
-/// @c table and @c database must NOT be specified in the handler config (the factory will reject
-/// the rule otherwise). The @c expose_metrics handler type is also rejected here -- it is
-/// auto-mounted at @c /metrics by the top-level @c prometheus block. Expects a configuration
-/// like this:
+/// @c http_handlers section. Two handler shapes are supported here:
+///
+///   - The legacy @c <type>prometheus</type> shape continues to work: it serves the same
+///     expose-metrics handler the historical code did, with @c metrics / @c events / etc.
+///     toggles read from the same handler block. This keeps existing user configurations
+///     working unchanged. @c expose_metrics is accepted as an equivalent spelling.
+///
+///   - The new explicit handler types @c prometheus_remote_write / @c prometheus_remote_read /
+///     @c prometheus_query_api enable dynamic-routing-only mode: the target TimeSeries table is
+///     parsed from the URL path segments after the user-configured @c url filter, so @c table
+///     and @c database must NOT be specified on the handler (the factory will reject the rule
+///     otherwise).
+///
+/// Example dynamic-routing rule:
 ///
 /// @code{.xml}
 /// <http_port>8123</http_port>
@@ -75,7 +83,7 @@ HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactory(
 ///         <url>regex:^/foo/[^/]+/[^/]+/write$</url>
 ///         <methods>POST</methods>
 ///         <handler>
-///             <type>remote_write</type>
+///             <type>prometheus_remote_write</type>
 ///             <http_path_prefix>/foo</http_path_prefix>
 ///         </handler>
 ///     </my_rule2>

@@ -1,0 +1,43 @@
+<clickhouse>
+    <!--
+        Back-compat coverage for explicit `<http_handlers>` rules:
+
+        1. `<type>prometheus</type>` in an http_handlers rule must keep working as the legacy
+           expose-metrics handler (matches the integration coverage in
+           `tests/integration/test_http_handlers_config/test_prometheus_handler`). It is mounted
+           at `/test_prometheus_legacy` here and gated by a custom request header.
+
+        2. The new explicit `<type>prometheus_remote_write</type>` handler can be mounted
+           manually too, and the (database, table) pair is still resolved from the URL path
+           (dynamic routing is the only supported mode for the new handler types).
+
+        We also disable the auto-mount on this node by setting an empty `<http_path_prefix>`,
+        so the only Prometheus surface on the HTTP port comes from the explicit rules below.
+    -->
+    <http_handlers>
+        <rule>
+            <methods>GET</methods>
+            <headers><X-Test>legacy-metrics</X-Test></headers>
+            <url>/test_prometheus_legacy</url>
+            <handler>
+                <type>prometheus</type>
+                <metrics>true</metrics>
+                <events>true</events>
+                <asynchronous_metrics>true</asynchronous_metrics>
+                <errors>true</errors>
+            </handler>
+        </rule>
+        <rule>
+            <methods>POST</methods>
+            <url>regex:^/explicit/[^/]+/[^/]+/write$</url>
+            <handler>
+                <type>prometheus_remote_write</type>
+                <http_path_prefix>/explicit</http_path_prefix>
+            </handler>
+        </rule>
+    </http_handlers>
+
+    <prometheus>
+        <http_path_prefix></http_path_prefix>
+    </prometheus>
+</clickhouse>

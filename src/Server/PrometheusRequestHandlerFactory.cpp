@@ -248,25 +248,39 @@ namespace
     }
 
     /// Parses a `<prometheus>`-style handler configuration block intended for use under
-    /// `<http_handlers>`. Only `remote_write`, `remote_read`, `query_api` are accepted; the parsed
-    /// config has `enable_table_name_url_routing = true` and `time_series_table_name` left empty.
+    /// `<http_handlers>`.
+    ///
+    /// Two shapes are accepted:
+    ///   - Legacy `<type>prometheus</type>` (the historical handler type wired up by
+    ///     @c HTTPHandlerFactory) is kept as-is and behaves exactly like the old code: the handler
+    ///     exposes metrics, with the @c metrics / @c events / @c asynchronous_metrics / @c errors
+    ///     toggles read from the same handler block. @c expose_metrics is accepted as an
+    ///     equivalent spelling (matches the dedicated-port @c <prometheus.handlers> grammar).
+    ///   - New explicit handler types @c prometheus_remote_write / @c prometheus_remote_read /
+    ///     @c prometheus_query_api enable the dynamic-routing-only mode: the parsed config has
+    ///     @c enable_table_name_url_routing set to true, @c time_series_table_name left empty,
+    ///     and the @c (database, table) pair is later resolved from the URL path.
     PrometheusRequestHandlerConfig parseHTTPRuleHandlerConfig(
         const Poco::Util::AbstractConfiguration & config, const String & handler_prefix)
     {
         const String type = config.getString(handler_prefix + ".type");
 
-        if (type == "expose_metrics")
-            throw Exception(
-                ErrorCodes::INVALID_CONFIG_PARAMETER,
-                "Prometheus handler type 'expose_metrics' is not supported under <http_handlers>. "
-                "Use the top-level <prometheus> block (which auto-mounts /metrics on the HTTP port) instead.");
+        /// Backward-compatible expose-metrics shape under @c <http_handlers>. Historically the
+        /// inner @c <type> value here was just the dispatcher's marker and the handler block was
+        /// always parsed as expose-metrics; preserve that behavior so existing deployments keep
+        /// working.
+        if (type == "prometheus" || type == "expose_metrics")
+        {
+            auto res = parseExposeMetricsConfig(config, handler_prefix);
+            return res;
+        }
 
         PrometheusRequestHandlerConfig res;
-        if (type == "remote_write")
+        if (type == "prometheus_remote_write")
             res.type = PrometheusRequestHandlerConfig::Type::RemoteWrite;
-        else if (type == "remote_read")
+        else if (type == "prometheus_remote_read")
             res.type = PrometheusRequestHandlerConfig::Type::RemoteRead;
-        else if (type == "query_api")
+        else if (type == "prometheus_query_api")
             res.type = PrometheusRequestHandlerConfig::Type::QueryAPI;
         else
             throw Exception(
@@ -320,13 +334,16 @@ namespace
     }
 
     /// Adds the three dynamic-routing rules (RemoteWrite, RemoteRead, QueryAPI) to `factory`,
-    /// matching `^<prefix>/[^/]+/[^/]+/<protocol-suffix>$`.
+    /// matching `^<prefix>/[^/]+/[^/]+/<protocol-suffix>$`. @c prefix is treated as a literal URL
+    /// prefix and is regex-escaped before being interpolated into the route filter.
     void addDynamicRoutingRules(
         HTTPRequestHandlerFactoryMain & factory,
         IServer & server,
         const AsynchronousMetrics & async_metrics,
         const String & prefix)
     {
+        const std::string escaped_prefix = re2::RE2::QuoteMeta(std::string_view{prefix});
+
         auto add_rule = [&](PrometheusRequestHandlerConfig::Type type,
                             const String & path_suffix_regex,
                             std::vector<String> allowed_methods)
@@ -339,7 +356,7 @@ namespace
 
             auto handler = createPrometheusHandlerFactoryFromConfig(server, async_metrics, parsed_config, /* for_keeper= */ false);
             chassert(handler);
-            handler->addFilter(regexPathFilter("^" + prefix + "/[^/]+/[^/]+" + path_suffix_regex + "$"));
+            handler->addFilter(regexPathFilter("^" + escaped_prefix + "/[^/]+/[^/]+" + path_suffix_regex + "$"));
             handler->addFilter(methodsListFilter(std::move(allowed_methods)));
             factory.addHandler(std::move(handler));
         };

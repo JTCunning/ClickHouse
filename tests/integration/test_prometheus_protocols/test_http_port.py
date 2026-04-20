@@ -12,6 +12,11 @@ Covers:
 - The expose_metrics endpoint is NOT reachable through the prefix (still served at /metrics).
 - Backward-compatible behavior of the dedicated <port> listener: the existing fixed-table
   config keeps working and a deprecation warning is logged at startup.
+- Backward-compatible behavior of `<http_handlers><handler><type>prometheus</type>...`:
+  the legacy expose-metrics shape continues to load and serve metrics on its custom URL,
+  and an explicit `<type>remote_write</type>` rule can be mounted alongside it.
+- Regex metacharacters in `<http_path_prefix>` (e.g. `.`, `+`) are treated literally rather
+  than as regex wildcards (regression coverage for the route-filter escaping fix).
 """
 
 import http
@@ -57,10 +62,28 @@ node_legacy = cluster.add_instance(
     user_configs=["configs/allow_experimental_time_series_table.xml"],
 )
 
+# Node 4: prefix containing regex metacharacters (`.` and `+`). The route-filter escaping fix
+# means these characters must be treated literally.
+node_regex_prefix = cluster.add_instance(
+    "node_regex_prefix",
+    main_configs=["configs/prometheus_http_port_regex_prefix.xml"],
+    user_configs=["configs/allow_experimental_time_series_table.xml"],
+)
+
+# Node 5: explicit `<http_handlers>` rules covering both the legacy `<type>prometheus</type>`
+# (expose-metrics) shape and the new `<type>remote_write</type>` dynamic-routing shape, with the
+# auto-mount on the HTTP port disabled via an empty prefix.
+node_http_handlers = cluster.add_instance(
+    "node_http_handlers",
+    main_configs=["configs/prometheus_http_handlers_rule.xml"],
+    user_configs=["configs/allow_experimental_time_series_table.xml"],
+)
+
 
 HTTP_PORT = 8123  # ClickHouseCluster's default for this image.
 DEFAULT_PREFIX = "/time-series"
 CUSTOM_PREFIX = "/grafana/prom"
+REGEX_PREFIX = "/v1.0/prom+ts"
 
 
 def _set_up_table(node, db, table):
@@ -314,3 +337,96 @@ def test_dedicated_port_emits_deprecation_warning():
         "Expected a deprecation warning about the dedicated <prometheus><port> listener "
         "in the server log of node_legacy"
     )
+
+
+# -----------------------------------------------------------------------------
+# Back-compat: <http_handlers><handler><type>prometheus</type>...</handler></http_handlers>
+# -----------------------------------------------------------------------------
+
+def test_http_handlers_prometheus_type_legacy_metrics():
+    """The legacy `<type>prometheus</type>` shape under `<http_handlers>` keeps working as the
+    old expose-metrics handler. This mirrors `test_http_handlers_config/test_prometheus_handler`,
+    which the AI Review flagged as broken by the new parser before the back-compat fix."""
+    base = f"http://{node_http_handlers.ip_address}:{HTTP_PORT}"
+
+    # Wrong header -> the rule's filter rejects the request, so it falls through to a 404.
+    response = requests.get(
+        f"{base}/test_prometheus_legacy", headers={"X-Test": "wrong"}
+    )
+    assert response.status_code == http.HTTPStatus.NOT_FOUND
+
+    # Wrong method -> same: the GET-only rule does not match a POST.
+    response = requests.post(
+        f"{base}/test_prometheus_legacy", headers={"X-Test": "legacy-metrics"}
+    )
+    assert response.status_code == http.HTTPStatus.NOT_FOUND
+
+    # Happy path: the legacy expose-metrics handler is invoked and returns Prometheus-format
+    # metrics text.
+    response = requests.get(
+        f"{base}/test_prometheus_legacy", headers={"X-Test": "legacy-metrics"}
+    )
+    assert response.status_code == http.HTTPStatus.OK
+    assert b"ClickHouseProfileEvents_Query" in response.content
+
+
+def test_http_handlers_explicit_remote_write_dynamic_routing():
+    """A user can mount the new `<type>remote_write</type>` handler explicitly under
+    `<http_handlers>` and dynamic routing still resolves the (database, table) pair from the URL."""
+    db, table, metric = "default", "ts_explicit", "explicit_metric"
+    _set_up_table(node_http_handlers, db, table)
+
+    payload = convert_time_series_to_protobuf(
+        [({"__name__": metric}, {1700006000: 4.2})]
+    )
+    response = get_response_to_remote_write(
+        node_http_handlers.ip_address, HTTP_PORT,
+        f"/explicit/{db}/{table}/write", payload,
+    )
+    assert response.status_code == http.HTTPStatus.NO_CONTENT
+
+    rows = int(node_http_handlers.query(
+        f"SELECT count() FROM timeSeriesData({db}.{table})"))
+    assert rows >= 1
+
+
+def test_http_handlers_auto_mount_opted_out():
+    """An empty `<http_path_prefix>` opts the HTTP-port auto-mount out entirely. Hitting the
+    default `/time-series/...` URL on this node must NOT route to a Prometheus handler."""
+    payload = convert_time_series_to_protobuf(
+        [({"__name__": "negative_auto"}, {1700006100: 1.0})]
+    )
+    response = get_response_to_remote_write(
+        node_http_handlers.ip_address, HTTP_PORT,
+        f"{DEFAULT_PREFIX}/default/ts_explicit/write", payload,
+    )
+    assert response.status_code == http.HTTPStatus.NOT_FOUND
+
+
+# -----------------------------------------------------------------------------
+# Regex metacharacters in <http_path_prefix> are treated literally (escaping fix).
+# -----------------------------------------------------------------------------
+
+def test_regex_prefix_literal_match():
+    """`<http_path_prefix>/v1.0/prom+ts</http_path_prefix>` must be treated as a literal URL
+    fragment. Writes through the literal URL succeed."""
+    db, table, metric = "default", "ts_regex_prefix", "regex_prefix_metric"
+    _set_up_table(node_regex_prefix, db, table)
+    _send_one_sample(node_regex_prefix, REGEX_PREFIX, db, table, metric, 1700007000, 5.5)
+    rows = int(node_regex_prefix.query(
+        f"SELECT count() FROM timeSeriesData({db}.{table})"))
+    assert rows >= 1
+
+
+def test_regex_prefix_does_not_match_as_regex():
+    """A path that would only match if `.` and `+` were interpreted as regex metacharacters
+    (e.g. `.` -> any char, `+` -> one-or-more) must NOT route to the prometheus handler.
+    `/v1x0/promXXts/.../write` is one such would-be regex match for `/v1.0/prom+ts/...`."""
+    payload = convert_time_series_to_protobuf(
+        [({"__name__": "negative"}, {1700007100: 1.0})]
+    )
+    response = get_response_to_remote_write(
+        node_regex_prefix.ip_address, HTTP_PORT,
+        "/v1x0/promXXts/default/ts_regex_prefix/write", payload,
+    )
+    assert response.status_code == http.HTTPStatus.NOT_FOUND

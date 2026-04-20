@@ -1,0 +1,11 @@
+<clickhouse>
+    <!--
+        Regression coverage for regex-metacharacter handling in `prometheus.http_path_prefix`.
+        The prefix below contains `.` and `+`, which are regex metacharacters; the auto-mount
+        must treat the prefix as a literal URL fragment (regex-escape it), so only the literal
+        URL `/v1.0/prom+ts/...` matches and `/v1x0/promXts/...` does NOT.
+    -->
+    <prometheus>
+        <http_path_prefix>/v1.0/prom+ts</http_path_prefix>
+    </prometheus>
+</clickhouse>

@@ -1313,6 +1313,12 @@ Settings:
   `prometheus_url_routing_enabled = 0` at `CREATE TABLE` time
   (see [TimeSeries](../../engines/table-engines/integrations/time-series.md)). When
   disabled, the request is rejected with HTTP 403.
+
+  The dynamic-routing protocol handlers can also be mounted manually under
+  [`<http_handlers>`](#http_handlers) using the explicit handler types
+  `prometheus_remote_write`, `prometheus_remote_read`, and `prometheus_query_api`. The legacy
+  `<type>prometheus</type>` handler in `<http_handlers>` is unchanged and still serves the
+  expose-metrics protocol on its configured URL.
 - `metrics` – Expose metrics from the [system.metrics](/operations/system-tables/metrics) table.
 - `events` – Expose metrics from the [system.events](/operations/system-tables/events) table.
 - `asynchronous_metrics` – Expose current metrics values from the [system.asynchronous_metrics](/operations/system-tables/asynchronous_metrics) table.
