@@ -1,0 +1,14 @@
+<clickhouse>
+    <!--
+        Auto-mount on the HTTP port with stack traces explicitly disabled.
+        Regression coverage for: <prometheus><enable_stacktrace>false</enable_stacktrace>
+        must be honored by the auto-mounted dynamic-routing handlers (remote_write,
+        remote_read, query_api), not just by the dedicated <port> listener and
+        explicit <http_handlers> rules. Previously the auto-mount path hard-coded
+        is_stacktrace_enabled=true and silently leaked stack traces in error
+        responses when the operator had asked for them to be suppressed.
+    -->
+    <prometheus>
+        <enable_stacktrace>false</enable_stacktrace>
+    </prometheus>
+</clickhouse>

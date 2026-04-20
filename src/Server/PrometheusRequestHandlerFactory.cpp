@@ -365,6 +365,7 @@ namespace
     void addDynamicRoutingRules(
         HTTPRequestHandlerFactoryMain & factory,
         IServer & server,
+        const Poco::Util::AbstractConfiguration & config,
         const AsynchronousMetrics & async_metrics,
         const String & prefix)
     {
@@ -378,7 +379,11 @@ namespace
             parsed_config.type = type;
             parsed_config.enable_table_name_url_routing = true;
             parsed_config.http_path_prefix = prefix;
-            parsed_config.is_stacktrace_enabled = true;
+            /// Pull the shared `<prometheus>` toggles (currently @c enable_stacktrace, with the
+            /// historical default of @c true) so the auto-mounted handlers behave the same as the
+            /// dedicated-port and explicit-`<http_handlers>` paths instead of always force-enabling
+            /// stack traces in HTTP error bodies.
+            parseCommonConfig(config, parsed_config);
 
             auto handler = createPrometheusHandlerFactoryFromConfig(server, async_metrics, parsed_config, /* for_keeper= */ false);
             chassert(handler);
@@ -441,7 +446,7 @@ void addPrometheusProtocolsToHTTPDefaults(
     String prefix = normalizeHTTPPathPrefix(
         config.getString("prometheus.http_path_prefix", "/time-series"));
 
-    addDynamicRoutingRules(factory, server, async_metrics, prefix);
+    addDynamicRoutingRules(factory, server, config, async_metrics, prefix);
 }
 
 

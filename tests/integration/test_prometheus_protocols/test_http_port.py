@@ -89,6 +89,16 @@ node_root_prefix = cluster.add_instance(
     user_configs=["configs/allow_experimental_time_series_table.xml"],
 )
 
+# Node 7: auto-mount with `<prometheus><enable_stacktrace>false</enable_stacktrace>`. The
+# auto-mounted dynamic-routing handlers must thread that setting through `parseCommonConfig`
+# and suppress stack traces in error bodies when the client requests them via `?stacktrace=1`,
+# matching the behavior of the dedicated <port> listener and explicit <http_handlers> rules.
+node_no_stacktrace = cluster.add_instance(
+    "node_no_stacktrace",
+    main_configs=["configs/prometheus_http_port_no_stacktrace.xml"],
+    user_configs=["configs/allow_experimental_time_series_table.xml"],
+)
+
 
 HTTP_PORT = 8123  # ClickHouseCluster's default for this image.
 DEFAULT_PREFIX = "/time-series"
@@ -579,3 +589,65 @@ def test_root_prefix_query_api_single_slash():
 # they would have returned 404 against the buggy regex `^//[^/]+/[^/]+/...$`. We don't add a
 # negative assertion against `//<db>/<table>/...` here because Poco's HTTP layer normalizes
 # repeated slashes in the URI before it reaches the route filter.
+
+
+# -----------------------------------------------------------------------------
+# `<prometheus><enable_stacktrace>` is honored by the auto-mounted handlers.
+# -----------------------------------------------------------------------------
+
+def _trigger_remote_write_error_with_stacktrace_param(node, prefix):
+    """Sends a remote_write to a non-existent table with `?stacktrace=1`. The
+    request is routed through the dynamic-routing handler and fails inside
+    `resolveAndAuthorizeTable`, which exercises the outer `catch (...)` in
+    `PrometheusRequestHandler::handleRequest` that consults `send_stacktrace`.
+    Returns the response body so the caller can grep it for `Stack trace:`.
+    Uses the shared helper so we get the right Content-Encoding/snappy framing,
+    then appends the `?stacktrace=1` query parameter via the path argument.
+    """
+    payload = convert_time_series_to_protobuf(
+        [({"__name__": "no_such_metric"}, {1700009000: 1.0})]
+    )
+    response = get_response_to_remote_write(
+        node.ip_address, HTTP_PORT,
+        f"{prefix}/default/__no_such_table__/write?stacktrace=1",
+        payload,
+    )
+    # Either UNKNOWN_TABLE or ACCESS_DENIED, both surface through the same
+    # `catch (...)` path -- we only care that the body content is governed by
+    # the server-side stacktrace toggle.
+    assert response.status_code >= 400, (
+        f"expected an error response, got {response.status_code}: {response.text}"
+    )
+    return response.text
+
+
+def test_auto_mount_honors_enable_stacktrace_false():
+    """When `<prometheus><enable_stacktrace>false</enable_stacktrace>` is set, the
+    auto-mounted dynamic-routing handlers must NOT include a C++ stack trace in error
+    responses, even when the client passes `?stacktrace=1`. This proves the auto-mount
+    threads the setting through `parseCommonConfig` instead of hard-coding `true`."""
+    body = _trigger_remote_write_error_with_stacktrace_param(
+        node_no_stacktrace, DEFAULT_PREFIX
+    )
+    # Server-side message format: when stacktraces are suppressed, the body is just
+    # `Code: N. DB::Exception: ... (NAME)` with no "Stack trace ..." follow-up.
+    assert "Stack trace" not in body, (
+        "auto-mounted handler leaked a stack trace despite "
+        "<enable_stacktrace>false</enable_stacktrace>: " + body
+    )
+
+
+def test_auto_mount_default_enable_stacktrace_true():
+    """Positive control for the regression test above: with the default config (no
+    `<enable_stacktrace>` override, which means `true`), the same error response WILL
+    contain a stack trace when the client asks for one. If this assertion fails the
+    test above is meaningless -- we wouldn't be exercising the toggle at all."""
+    body = _trigger_remote_write_error_with_stacktrace_param(
+        node_default, DEFAULT_PREFIX
+    )
+    # Server emits "Stack trace (when copying this message, always include the lines below):"
+    # when stacktraces are enabled and the client sets ?stacktrace=1.
+    assert "Stack trace" in body, (
+        "expected default config to surface a stack trace when ?stacktrace=1, "
+        "but got: " + body
+    )
