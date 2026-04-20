@@ -17,6 +17,8 @@ Covers:
   and an explicit `<type>remote_write</type>` rule can be mounted alongside it.
 - Regex metacharacters in `<http_path_prefix>` (e.g. `.`, `+`) are treated literally rather
   than as regex wildcards (regression coverage for the route-filter escaping fix).
+- Root mount (`<http_path_prefix>/</http_path_prefix>`) routes URLs with a single leading
+  slash (regression coverage for the `^//<db>/<table>/...` regex bug).
 """
 
 import http
@@ -71,11 +73,19 @@ node_regex_prefix = cluster.add_instance(
 )
 
 # Node 5: explicit `<http_handlers>` rules covering both the legacy `<type>prometheus</type>`
-# (expose-metrics) shape and the new `<type>remote_write</type>` dynamic-routing shape, with the
-# auto-mount on the HTTP port disabled via an empty prefix.
+# (expose-metrics) shape and the new `<type>prometheus_remote_write</type>` dynamic-routing
+# shape, with the auto-mount on the HTTP port disabled via an empty prefix.
 node_http_handlers = cluster.add_instance(
     "node_http_handlers",
     main_configs=["configs/prometheus_http_handlers_rule.xml"],
+    user_configs=["configs/allow_experimental_time_series_table.xml"],
+)
+
+# Node 6: root mount (`<http_path_prefix>/</http_path_prefix>`). The auto-mount must produce
+# routes that match `/<db>/<table>/...` with a single leading slash, NOT `//<db>/<table>/...`.
+node_root_prefix = cluster.add_instance(
+    "node_root_prefix",
+    main_configs=["configs/prometheus_http_port_root_prefix.xml"],
     user_configs=["configs/allow_experimental_time_series_table.xml"],
 )
 
@@ -371,7 +381,7 @@ def test_http_handlers_prometheus_type_legacy_metrics():
 
 
 def test_http_handlers_explicit_remote_write_dynamic_routing():
-    """A user can mount the new `<type>remote_write</type>` handler explicitly under
+    """A user can mount the new `<type>prometheus_remote_write</type>` handler explicitly under
     `<http_handlers>` and dynamic routing still resolves the (database, table) pair from the URL."""
     db, table, metric = "default", "ts_explicit", "explicit_metric"
     _set_up_table(node_http_handlers, db, table)
@@ -384,6 +394,30 @@ def test_http_handlers_explicit_remote_write_dynamic_routing():
         f"/explicit/{db}/{table}/write", payload,
     )
     assert response.status_code == http.HTTPStatus.NO_CONTENT
+
+    rows = int(node_http_handlers.query(
+        f"SELECT count() FROM timeSeriesData({db}.{table})"))
+    assert rows >= 1
+
+
+def test_http_handlers_explicit_remote_write_unnormalized_prefix():
+    """An explicit `<http_handlers>` rule that sets `<http_path_prefix>` WITHOUT a leading
+    slash (e.g. `bare` instead of `/bare`) must be normalized the same way as the auto-mount,
+    otherwise `computeDispatchInfo` would reject `/bare/db/table/write` with `BAD_ARGUMENTS`.
+    Regression coverage for the per-rule prefix normalization fix."""
+    db, table, metric = "default", "ts_bare", "bare_metric"
+    _set_up_table(node_http_handlers, db, table)
+
+    payload = convert_time_series_to_protobuf(
+        [({"__name__": metric}, {1700006050: 5.5})]
+    )
+    response = get_response_to_remote_write(
+        node_http_handlers.ip_address, HTTP_PORT,
+        f"/bare/{db}/{table}/write", payload,
+    )
+    assert response.status_code == http.HTTPStatus.NO_CONTENT, (
+        f"unexpected status {response.status_code}: {response.text}"
+    )
 
     rows = int(node_http_handlers.query(
         f"SELECT count() FROM timeSeriesData({db}.{table})"))
@@ -430,3 +464,64 @@ def test_regex_prefix_does_not_match_as_regex():
         "/v1x0/promXXts/default/ts_regex_prefix/write", payload,
     )
     assert response.status_code == http.HTTPStatus.NOT_FOUND
+
+
+# -----------------------------------------------------------------------------
+# Root mount: `<http_path_prefix>/</http_path_prefix>` must route via a single leading slash.
+# -----------------------------------------------------------------------------
+
+def test_root_prefix_remote_write_single_slash():
+    """`http_path_prefix = "/"` routes `/db/table/write` (single leading slash)."""
+    db, table, metric = "default", "ts_root", "root_metric"
+    _set_up_table(node_root_prefix, db, table)
+    # Note: prefix passed as empty string to avoid building a `//db/...` URL.
+    _send_one_sample(node_root_prefix, "", db, table, metric, 1700008000, 6.5)
+    rows = int(node_root_prefix.query(
+        f"SELECT count() FROM timeSeriesData({db}.{table})"))
+    assert rows >= 1
+
+
+def test_root_prefix_remote_read_single_slash():
+    """`http_path_prefix = "/"` also routes `/db/table/read`."""
+    db, table, metric = "default", "ts_root_read", "rr_metric"
+    _set_up_table(node_root_prefix, db, table)
+    _send_one_sample(node_root_prefix, "", db, table, metric, 1700008100, 7.5)
+    read_request = convert_read_request_to_protobuf(
+        f"^{metric}$", 1700008099, 1700008101
+    )
+    response = get_response_to_remote_read(
+        node_root_prefix.ip_address, HTTP_PORT,
+        f"/{db}/{table}/read", read_request,
+    )
+    decoded = extract_protobuf_from_remote_read_response(response)
+    assert len(decoded.results) == 1
+    assert len(decoded.results[0].timeseries) >= 1
+
+
+def test_root_prefix_query_api_single_slash():
+    """`http_path_prefix = "/"` routes `/db/table/api/v1/query` (single leading slash) end-to-end,
+    and also routes the not-yet-implemented `/api/v1/labels` to our handler (proving it doesn't
+    fall through to DynamicQueryHandler)."""
+    db, table, metric = "default", "ts_root_api", "api_metric"
+    _set_up_table(node_root_prefix, db, table)
+    _send_one_sample(node_root_prefix, "", db, table, metric, 1700008200, 8.5)
+    base = f"http://{node_root_prefix.ip_address}:{HTTP_PORT}/{db}/{table}"
+
+    # Happy path through the implemented Query API endpoint.
+    instant = requests.get(f"{base}/api/v1/query?query={metric}&time=1700008200")
+    extract_data_from_http_api_response(instant)
+
+    # Routed to our handler (returns the well-formed not-implemented JSON, NOT a 404 from
+    # the catch-all DynamicQueryHandler).
+    labels = requests.get(f"{base}/api/v1/labels")
+    assert labels.status_code == http.HTTPStatus.BAD_REQUEST
+    body = labels.json()
+    assert body.get("errorType") == "bad_data"
+    assert "not implemented" in body.get("error", "").lower()
+
+
+# The previous bug required `//<db>/<table>/...` (an extra leading slash) on root mount, so
+# the positive single-slash tests above are sufficient regression coverage by themselves -
+# they would have returned 404 against the buggy regex `^//[^/]+/[^/]+/...$`. We don't add a
+# negative assertion against `//<db>/<table>/...` here because Poco's HTTP layer normalizes
+# repeated slashes in the URI before it reaches the route filter.

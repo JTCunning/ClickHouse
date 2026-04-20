@@ -11,6 +11,12 @@
            manually too, and the (database, table) pair is still resolved from the URL path
            (dynamic routing is the only supported mode for the new handler types).
 
+        3. A second explicit `<type>prometheus_remote_write</type>` rule uses a `<http_path_prefix>`
+           WITHOUT a leading slash (`bare`). The per-rule prefix must be normalized the same way
+           as the auto-mount path; otherwise `computeDispatchInfo` would reject `/bare/db/table/write`
+           with `BAD_ARGUMENTS` because the URI starts with `/` but `prefix.starts_with("bare")`
+           would be false.
+
         We also disable the auto-mount on this node by setting an empty `<http_path_prefix>`,
         so the only Prometheus surface on the HTTP port comes from the explicit rules below.
     -->
@@ -33,6 +39,14 @@
             <handler>
                 <type>prometheus_remote_write</type>
                 <http_path_prefix>/explicit</http_path_prefix>
+            </handler>
+        </rule>
+        <rule>
+            <methods>POST</methods>
+            <url>regex:^/bare/[^/]+/[^/]+/write$</url>
+            <handler>
+                <type>prometheus_remote_write</type>
+                <http_path_prefix>bare</http_path_prefix>
             </handler>
         </rule>
     </http_handlers>

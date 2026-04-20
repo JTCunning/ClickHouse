@@ -232,6 +232,28 @@ HTTPRequestHandlerFactoryPtr createPrometheusHandlerFactory(
 
 namespace
 {
+    /// Normalizes a user-supplied `http_path_prefix`:
+    ///   - empty stays empty (caller decides what that means);
+    ///   - missing leading '/' is added;
+    ///   - trailing '/' characters are trimmed;
+    ///   - the bare root prefix `/` is collapsed to empty so neither the route regex nor the
+    ///     handler-side path strip inserts an extra leading slash (which would require URLs
+    ///     like `//db/table/write`).
+    /// This is shared between the auto-mount path (`addPrometheusProtocolsToHTTPDefaults`) and
+    /// the per-rule `<http_handlers>` path (`parseHTTPRuleHandlerConfig`) so they cannot drift.
+    String normalizeHTTPPathPrefix(String prefix)
+    {
+        if (prefix.empty())
+            return prefix;
+        while (prefix.size() > 1 && prefix.back() == '/')
+            prefix.pop_back();
+        if (prefix.front() != '/')
+            prefix.insert(prefix.begin(), '/');
+        if (prefix == "/")
+            prefix.clear();
+        return prefix;
+    }
+
     /// Rejects fixed-table config fields (@c table / @c database) that have no meaning when the
     /// handler is mounted under @c http_handlers -- that mount is dynamic-routing-only.
     void rejectFixedTableKeysForHTTPRule(const Poco::Util::AbstractConfiguration & config, const String & handler_prefix)
@@ -290,7 +312,11 @@ namespace
         rejectFixedTableKeysForHTTPRule(config, handler_prefix);
 
         res.enable_table_name_url_routing = true;
-        res.http_path_prefix = config.getString(handler_prefix + ".http_path_prefix", "");
+        /// Per-rule prefixes go through the same normalization as the auto-mount so that an
+        /// `<http_path_prefix>explicit</http_path_prefix>` (no leading slash) or a stray
+        /// trailing slash both line up with the request URI in `computeDispatchInfo`.
+        res.http_path_prefix = normalizeHTTPPathPrefix(
+            config.getString(handler_prefix + ".http_path_prefix", ""));
         parseCommonConfig(config, res);
 
         if ((res.type == PrometheusRequestHandlerConfig::Type::RemoteRead
@@ -405,15 +431,15 @@ void addPrometheusProtocolsToHTTPDefaults(
         return;
 
     /// An empty value for `<http_path_prefix>` is the explicit opt-out for the auto-mount.
-    String prefix = config.getString("prometheus.http_path_prefix", "/time-series");
-    if (prefix.empty())
+    /// The normalization step below would also collapse `/` to empty (root mount), but root
+    /// mount is a valid configuration we want to honor, so we have to distinguish "user did
+    /// not set the key" (use the default) from "user set the key to empty" (opt out) BEFORE
+    /// normalizing.
+    if (config.has("prometheus.http_path_prefix") && config.getString("prometheus.http_path_prefix").empty())
         return;
 
-    /// Normalize: ensure a single leading slash and no trailing slash.
-    while (prefix.size() > 1 && prefix.back() == '/')
-        prefix.pop_back();
-    if (prefix.front() != '/')
-        prefix.insert(prefix.begin(), '/');
+    String prefix = normalizeHTTPPathPrefix(
+        config.getString("prometheus.http_path_prefix", "/time-series"));
 
     addDynamicRoutingRules(factory, server, async_metrics, prefix);
 }
