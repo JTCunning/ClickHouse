@@ -1380,9 +1380,11 @@ remote_read:
   - url: http://127.0.0.1:8123/time-series/mydb/metrics/read
 ```
 
-Prometheus Query API endpoints are available under the same prefix at
-`http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/{query,query_range,series,labels,...}`,
-which is also the URL Grafana should use as the Prometheus data source.
+Prometheus Query API endpoints are available under the same prefix
+(`http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/...`), with paths such as `query`,
+`query_range`, `series`, `labels`, and `label/<name>/values` (where `<name>` is a label
+name). The same URL prefix (`http://127.0.0.1:8123/time-series/mydb/metrics`) is what
+Grafana should use as the Prometheus data source URL.
 
 ## query_log {#query_log}
 
