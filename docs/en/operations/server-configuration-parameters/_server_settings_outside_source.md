@@ -1297,7 +1297,7 @@ Settings:
   The dedicated `<port>` listener is deprecated. The Prometheus protocol handlers
   (`remote_write`, `remote_read`, and the Query API) are now auto-mounted on the main
   `<http_port>` under the `<http_path_prefix>` (default `/time-series`); see below. The
-  dedicated listener still works for back-compat with existing fixed-table `<handlers>`
+  dedicated listener still works for backward compatibility with existing fixed-table `<handlers>`
   configurations and will continue to do so, but ClickHouse logs a startup warning the
   first time it binds the dedicated port.
   :::
@@ -1375,13 +1375,14 @@ on by default), Prometheus can be pointed at:
 
 ```yaml
 remote_write:
-  - url: http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/write
+  - url: http://127.0.0.1:8123/time-series/mydb/metrics/write
 remote_read:
-  - url: http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/read
+  - url: http://127.0.0.1:8123/time-series/mydb/metrics/read
 ```
 
-Grafana can use the same prefix as a Prometheus data source URL of
-`http://127.0.0.1:8123/time-series/mydb/metrics`.
+Prometheus Query API endpoints are available under the same prefix at
+`http://127.0.0.1:8123/time-series/mydb/metrics/api/v1/{query,query_range,series,labels,...}`,
+which is also the URL Grafana should use as the Prometheus data source.
 
 ## query_log {#query_log}
 
