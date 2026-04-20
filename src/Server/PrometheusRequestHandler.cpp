@@ -473,13 +473,21 @@ public:
         if (name.empty())
             return false;
 
-        /// Some parameters (database, default_format, everything used in the code above) do not
-        /// belong to the Settings class. The Prometheus HTTP API also defines a few well-known
-        /// query parameters (in particular @c match[] for series/labels endpoints) that must NOT
-        /// be applied as ClickHouse settings. Bracket-suffixed parameter names cannot be valid
-        /// settings anyway, but listing them here keeps the ignore-list explicit.
+        /// Reserved-parameter set is the union of:
+        ///   1. The base set (handled specially in @c makeContext / authentication, NOT settings):
+        ///      @c user, @c password, @c quota_key, @c stacktrace, @c role, @c query_id.
+        ///      Dropping any of these would let @c context->applySettingsChanges throw
+        ///      @c UNKNOWN_SETTING (HTTP 400) on otherwise valid HTTP query strings.
+        ///   2. Prometheus HTTP API parameters that have protocol-defined meaning and must not be
+        ///      reinterpreted as ClickHouse settings. @c match[] is the most important one (its
+        ///      bracket suffix would not be a valid setting name anyway, but listing it keeps the
+        ///      ignore-list explicit). The rest -- @c query, @c time, @c start, @c end, @c step,
+        ///      @c limit, @c timeout, @c lookback_delta -- are documented Prometheus query params
+        ///      that callers expect to flow to the protocol layer rather than ClickHouse settings.
         static const NameSet reserved_param_names{
-            "user", "password",
+            /// Base HTTP handler reserved params:
+            "user", "password", "quota_key", "stacktrace", "role", "query_id",
+            /// Prometheus HTTP API reserved params:
             "query", "time", "start", "end", "step", "match[]", "limit", "timeout", "lookback_delta"};
         return !reserved_param_names.contains(name);
     }

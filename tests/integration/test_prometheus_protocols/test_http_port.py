@@ -199,6 +199,60 @@ def test_query_api_default_prefix():
         assert "not implemented" in body.get("error", "").lower(), body
 
 
+def test_query_api_reserved_http_params_not_treated_as_settings():
+    """`QueryAPIImpl::isSettingLikeParameter` overrides the base reserved-params set.
+    The override MUST still preserve the base reserved names (`role`, `query_id`, `stacktrace`,
+    `quota_key`) so the request handler treats them as special HTTP params (consumed by
+    `makeContext` / authentication) rather than reinterpreting them as ClickHouse settings.
+    Dropping them would cause `applySettingsChanges` to throw `UNKNOWN_SETTING` and turn
+    valid Prometheus Query API requests into HTTP 400.
+
+    Test strategy:
+      - `query_id` and `stacktrace` are accepted by the HTTP layer with arbitrary values, so
+        we assert end-to-end success (HTTP 200, `status: success`).
+      - `role` and `quota_key` are also accepted by the HTTP layer but their values are
+        validated against the access-control system (unknown role -> UNKNOWN_ROLE etc.). We
+        assert only that the response is NOT `UNKNOWN_SETTING`, which proves the param was
+        recognized as reserved and routed away from `applySettingsChanges`. We use known-good
+        values where possible, and fall back to error-text inspection otherwise.
+    """
+    db, table, metric = "default", "ts_reserved", "reserved_metric"
+    _set_up_table(node_default, db, table)
+    _send_one_sample(node_default, DEFAULT_PREFIX, db, table, metric, 1700001500, 1.0)
+
+    base = f"http://{node_default.ip_address}:{HTTP_PORT}{DEFAULT_PREFIX}/{db}/{table}"
+
+    def url_for(endpoint, extra):
+        if endpoint == "query":
+            return (f"{base}/api/v1/query?query={metric}&time=1700001500&{extra}")
+        return (f"{base}/api/v1/query_range?query={metric}"
+                f"&start=1700001499&end=1700001501&step=1&{extra}")
+
+    # 1. `query_id` and `stacktrace`: end-to-end success.
+    for param_name, param_value in [("query_id", "prom-test-qid-1"), ("stacktrace", "1")]:
+        for endpoint in ["query", "query_range"]:
+            response = requests.get(url_for(endpoint, f"{param_name}={param_value}"))
+            assert response.status_code == http.HTTPStatus.OK, (
+                f"reserved HTTP param `{param_name}` on /api/v1/{endpoint} "
+                f"should not turn into an UNKNOWN_SETTING; got "
+                f"{response.status_code}: {response.text}"
+            )
+            extract_data_from_http_api_response(response)
+
+    # 2. `role` and `quota_key`: prove the regression specifically -- the response must not
+    # mention an UNKNOWN_SETTING error for the param name. (We deliberately do not assert a
+    # specific success/error code here because role/quota validation is environment-dependent.)
+    for param_name, param_value in [("role", "definitely-no-such-role"),
+                                     ("quota_key", "any-quota-key")]:
+        for endpoint in ["query", "query_range"]:
+            response = requests.get(url_for(endpoint, f"{param_name}={param_value}"))
+            text = response.text
+            assert "UNKNOWN_SETTING" not in text and "Unknown setting" not in text, (
+                f"reserved HTTP param `{param_name}` on /api/v1/{endpoint} was misinterpreted "
+                f"as a ClickHouse setting; response: {text}"
+            )
+
+
 # -----------------------------------------------------------------------------
 # Custom prefix.
 # -----------------------------------------------------------------------------
