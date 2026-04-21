@@ -379,12 +379,21 @@ public:
         /// Stream the response body straight to the HTTP output buffer.
         ///
         /// Correctness on errors is guaranteed jointly with PrometheusHTTPProtocolAPI:
-        /// `writeQueryResponse` performs the first `PullingPipelineExecutor::pull(...)`
-        /// before emitting any byte of the success envelope, so the dominant PromQL
-        /// failure mode (e.g. `timeSeriesFromGrid` over an empty aggregation) surfaces
-        /// here as an exception with the response stream still untouched. The catch
-        /// block below is then free to set an HTTP 4xx status and write a single,
-        /// well-formed JSON error document.
+        ///  - `writeQueryResponse` performs the first `PullingPipelineExecutor::pull(...)`
+        ///    before emitting any byte of the success envelope. The dominant PromQL
+        ///    failure mode (e.g. `timeSeriesFromGrid` over an empty aggregation) raises
+        ///    on that first pull, so the response stream is still untouched and the
+        ///    catch block below can emit a single well-formed structured-error JSON
+        ///    document with an HTTP 4xx status.
+        ///  - Late-stream exceptions (a throw from a *subsequent* pull, after some
+        ///    rows have already been written into the success envelope) MUST NOT cause
+        ///    a second JSON document to be appended to the response — that would
+        ///    regress to the `…"result":[…]…}{"status":"error",…}` concatenation that
+        ///    the original bug produced. We detect this case by checking whether any
+        ///    bytes have already been pushed into `body_buf` and re-throw, letting the
+        ///    outer `PrometheusRequestHandler::handleRequest` catch invoke
+        ///    `WriteBufferFromHTTPServerResponse::cancelWithException`, which aborts
+        ///    the chunked transfer at the network layer instead.
         ///
         /// We intentionally do NOT buffer the full payload in memory: large
         /// /api/v1/query_range responses (many series x many steps) would otherwise
@@ -484,18 +493,34 @@ public:
         }
         catch (const Exception & e)
         {
-            /// Reachable only when the throw happens before any byte was written into
-            /// `body_buf` — see the comment on the streaming contract above. In that
-            /// state the HTTP headers have not been committed yet, so we can safely
-            /// rewrite the status line and emit a clean error document.
-            response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
-            writeString(R"({"status":"error","errorType":"bad_data","error":)", body_buf);
-            /// JSON-escape the message: error text can legitimately contain quotes/backslashes
-            /// (it embeds SQL fragments), and raw interpolation would itself produce invalid JSON.
-            writeJSONString(e.message(), body_buf, formatSettings());
-            writeString(R"(})", body_buf);
+            /// Two distinct cases — see the streaming contract comment above:
+            ///   1. Pre-output: nothing has been pushed into `body_buf` yet. The HTTP
+            ///      headers have not been committed, so we can rewrite the status line
+            ///      and emit a single well-formed structured-error JSON document.
+            ///   2. Post-output: at least one byte of the success envelope (or row
+            ///      data) is already in flight. Writing a second JSON object would
+            ///      produce concatenated `…}{"status":"error",…}` output — the exact
+            ///      malformed shape this PR exists to prevent. Re-throw and let the
+            ///      outer handler abort the response via `cancelWithException`.
+            if (body_buf.count() == 0)
+            {
+                response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+                writeString(R"({"status":"error","errorType":"bad_data","error":)", body_buf);
+                /// JSON-escape the message: error text can legitimately contain quotes/backslashes
+                /// (it embeds SQL fragments), and raw interpolation would itself produce invalid JSON.
+                writeJSONString(e.message(), body_buf, formatSettings());
+                writeString(R"(})", body_buf);
 
-            LOG_ERROR(log(), "Error executing query: {}", e.displayText());
+                LOG_ERROR(log(), "Error executing query: {}", e.displayText());
+            }
+            else
+            {
+                LOG_ERROR(
+                    log(),
+                    "Late-stream error executing query (response will be truncated to keep wire format valid): {}",
+                    e.displayText());
+                throw;
+            }
         }
     }
 
