@@ -277,7 +277,12 @@ public:
             size_t values_base_offset = 0;
             if constexpr (with_values)
             {
-                values_base_offset = (*values_offsets)[i - 1];
+                /// `IColumn::Offsets` is a `PaddedPODArray<UInt64>` with reverse padding,
+                /// so `(*values_offsets)[-1] == 0` is well-defined (and is the convention
+                /// used by `ColumnArray::offsetAt` / `sizeAt`). We still guard `i == 0`
+                /// explicitly here to make the row-0 base offset obvious from the call
+                /// site without requiring the reader to know the PODArray invariant.
+                values_base_offset = (i == 0) ? 0 : (*values_offsets)[i - 1];
                 size_t num_values = (*values_offsets)[i] - values_base_offset;
                 /// An empty input array represents "no samples for this row" (e.g. when an
                 /// aggregation in the PromQL -> SQL pipeline produces no values for a given
