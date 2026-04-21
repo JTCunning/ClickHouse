@@ -14,7 +14,7 @@ Covers:
   config keeps working and a deprecation warning is logged at startup.
 - Backward-compatible behavior of `<http_handlers><handler><type>prometheus</type>...`:
   the legacy expose-metrics shape continues to load and serve metrics on its custom URL,
-  and an explicit `<type>remote_write</type>` rule can be mounted alongside it.
+  and an explicit `<type>prometheus_remote_write</type>` rule can be mounted alongside it.
 - Regex metacharacters in `<http_path_prefix>` (e.g. `.`, `+`) are treated literally rather
   than as regex wildcards (regression coverage for the route-filter escaping fix).
 - Root mount (`<http_path_prefix>/</http_path_prefix>`) routes URLs with a single leading
