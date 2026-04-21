@@ -376,6 +376,16 @@ public:
         LOG_DEBUG(log(), "Processing Query API request: method={}, uri={}", request.getMethod(), uri);
 
         response.setContentType("application/json");
+
+        /// Buffer the response body in memory before writing it to the HTTP output stream.
+        /// The downstream PromQL pipeline (e.g. timeSeriesFromGrid) can throw mid-stream after
+        /// the success envelope has already been emitted; if we wrote directly into
+        /// getOutputStream(response) the catch block below would concatenate a second
+        /// '{"status":"error",...}' object onto a still-open '..."result":[' array, producing
+        /// a body that no Prometheus client can parse. Buffering lets us discard the partial
+        /// success body on failure and emit a single, well-formed error document instead.
+        String body;
+        WriteBufferFromString body_buf(body);
         try
         {
             if (uri.starts_with("/api/v1/query_range"))
@@ -400,7 +410,7 @@ public:
                     .step_param = step,
                 };
 
-                protocol.executePromQLQuery(getOutputStream(response), params);
+                protocol.executePromQLQuery(body_buf, params);
             }
             else if (uri.starts_with("/api/v1/query"))
             {
@@ -419,7 +429,7 @@ public:
                     .step_param = "",
                 };
 
-                protocol.executePromQLQuery(getOutputStream(response), params);
+                protocol.executePromQLQuery(body_buf, params);
             }
             else if (uri.starts_with("/api/v1/format_query"))
             {
@@ -437,7 +447,7 @@ public:
 
                 /// TODO: Support limit=<number> optional parameter
 
-                protocol.getSeries(getOutputStream(response), match, start, end);
+                protocol.getSeries(body_buf, match, start, end);
             }
             else if (uri.starts_with("/api/v1/labels"))
             {
@@ -445,7 +455,7 @@ public:
                 String start = params->get("start", "");
                 String end = params->get("end", "");
 
-                protocol.getLabels(getOutputStream(response), match, start, end);
+                protocol.getLabels(body_buf, match, start, end);
             }
             else if (uri.find("/api/v1/label/") != String::npos && uri.ends_with("/values"))
             {
@@ -458,28 +468,42 @@ public:
                 String start = params->get("start", "");
                 String end = params->get("end", "");
 
-                protocol.getLabelValues(getOutputStream(response), label_name, match, start, end);
+                protocol.getLabelValues(body_buf, label_name, match, start, end);
             }
             else
             {
                 LOG_ERROR(log(), "No matching endpoint found for URI: {}, method: {}", uri, request.getMethod());
                 response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
-                writeString(R"({"status":"error","errorType":"not_found","error":"API endpoint not found"})", getOutputStream(response));
+                writeString(R"({"status":"error","errorType":"not_found","error":"API endpoint not found"})", body_buf);
             }
+
+            body_buf.finalize();
+            writeString(body, getOutputStream(response));
         }
         catch (const Exception & e)
         {
+            /// Discard any partial body written into body_buf above — the response stream has
+            /// not been touched yet, so we are free to set the status and emit a clean error.
             response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
             String error_str;
             WriteBufferFromString error_buf(error_str);
-            writeString(R"({"status":"error","errorType":"bad_data","error":")", error_buf);
-            writeString(e.message(), error_buf);
-            writeString(R"("})", error_buf);
+            writeString(R"({"status":"error","errorType":"bad_data","error":)", error_buf);
+            /// JSON-escape the message: error text can legitimately contain quotes/backslashes
+            /// (it embeds SQL fragments), and raw interpolation would itself produce invalid JSON.
+            writeJSONString(e.message(), error_buf, formatSettings());
+            writeString(R"(})", error_buf);
             error_buf.finalize();
             writeString(error_str, getOutputStream(response));
 
             LOG_ERROR(log(), "Error executing query: {}", e.displayText());
         }
+    }
+
+private:
+    static const FormatSettings & formatSettings()
+    {
+        static const FormatSettings settings;
+        return settings;
     }
 };
 

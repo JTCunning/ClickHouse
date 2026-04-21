@@ -25,3 +25,13 @@ SELECT timeSeriesFromGrid('2025-06-01 00:00:00'::DateTime64(3), '2025-06-01 00:0
 -- Wrong number of values
 SELECT timeSeriesFromGrid('2025-06-01 00:00:00'::DateTime64(3), '2025-06-01 00:01:30.000'::DateTime64(3), 30, [10, 20, 30]); -- {serverError BAD_ARGUMENTS}
 SELECT timeSeriesFromGrid('2025-06-01 00:00:00'::DateTime64(3), '2025-06-01 00:01:30.000'::DateTime64(3), 30, [10, 20, 30, 40, 50]); -- {serverError BAD_ARGUMENTS}
+
+-- Empty input array yields an empty per-row time series instead of throwing.
+-- Regression guard for /api/v1/query_range over an aggregation that produced zero samples
+-- (e.g. count(nonexistent_metric_name)).
+SELECT timeSeriesFromGrid('2025-06-01 00:00:00'::DateTime64(3), '2025-06-01 00:01:30.000'::DateTime64(3), 30, []::Array(Nullable(Float64)));
+SELECT timeSeriesFromGrid('2025-06-01 00:00:00'::DateTime64(3), '2025-06-01 00:01:30.000'::DateTime64(3), 30, []::Array(Float64));
+
+-- Per-row empty must not poison sibling rows in the same block.
+SELECT timeSeriesFromGrid('2025-06-01 00:00:00'::DateTime64(3), '2025-06-01 00:01:30.000'::DateTime64(3), 30, v)
+FROM (SELECT arrayJoin([[100., 200., 300., 400.], []::Array(Float64), [10., 20., 30., 40.]]) AS v);

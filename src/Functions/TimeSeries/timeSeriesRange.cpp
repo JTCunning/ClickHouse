@@ -274,11 +274,21 @@ public:
                 num_steps = (end_timestamp - start_timestamp) / step + 1;
             }
 
-            size_t values_base_offset;
+            size_t values_base_offset = 0;
             if constexpr (with_values)
             {
                 values_base_offset = (*values_offsets)[i - 1];
                 size_t num_values = (*values_offsets)[i] - values_base_offset;
+                /// An empty input array represents "no samples for this row" (e.g. when an
+                /// aggregation in the PromQL -> SQL pipeline produces no values for a given
+                /// group / scalar). Emit an empty per-row time series instead of throwing,
+                /// so that callers like the Prometheus query API see an empty matrix rather
+                /// than a server error mid-stream.
+                if (num_values == 0)
+                {
+                    res_offsets->insert(res_timestamps->size());
+                    continue;
+                }
                 if (num_values != num_steps)
                     throw Exception(ErrorCodes::BAD_ARGUMENTS, "Number of values ({}) doesn't match number of steps ({})", num_values, num_steps);
             }
@@ -351,6 +361,7 @@ Converts an array of values `[x1, x2, x3, ...]` to an array of tuples
 
 The current timestamp is increased by `step` until it becomes greater than `end_timestamp`
 If the number of the values doesn't match the number of the timestamps, the function throws an exception.
+An empty input array `[]` is treated as "no samples for this row" and yields an empty result `[]`.
 
 NULL values in `[x1, x2, x3, ...]` are skipped but the current timestamp is still incremented.
 For example, for `[value1, NULL, x2]` the function returns `[(start_timestamp, x1), (start_timestamp + 2 * step, x2)]`.

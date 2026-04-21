@@ -2739,3 +2739,39 @@ def test_aggregation_operators():
     #         ["[('__name__','foo'),('shape','triangle'),('size','m')]", "[('1970-01-01 00:02:00.000',80)]"],
     #     ],
     # )
+
+
+# Regression guard: /api/v1/query_range used to return a body that started with the success
+# envelope '{"status":"success","data":{"resultType":"matrix","result":[' and then, mid-stream,
+# appended a second '{"status":"error",...}' object, leaving the outer JSON unbalanced.
+# Aggregations over a non-existent metric (count/sum/avg/min/max) reliably hit the
+# timeSeriesFromGrid path that triggered this. The body MUST be parseable JSON in either
+# the success or the error case.
+def test_query_range_empty_aggregation_returns_valid_json():
+    aggregations = ["count", "sum", "avg", "min", "max"]
+    for agg in aggregations:
+        query = f"{agg}(nonexistent_metric_name)"
+        # 15-minute window with 15s step -> 61 grid points, matches the issue reproducer.
+        response = get_response_to_http_api_range_query(
+            node.ip_address, 9093, "/api/v1/query_range",
+            query, 1776792228, 1776793128, 15,
+        )
+        # The body must be a single, fully-formed JSON document. Pre-fix this raised
+        # json.JSONDecodeError because the outer '[' / '{' / '{' were left open.
+        body = json.loads(response.text)
+        status = body.get("status")
+        assert status in ("success", "error"), (
+            f"unexpected status {status!r} in response: {response.text!r}"
+        )
+        if status == "success":
+            assert body["data"]["resultType"] == "matrix"
+            # An aggregation over a non-existent metric has no input samples,
+            # so the matrix must be empty.
+            assert body["data"]["result"] == [], (
+                f"expected empty matrix for {query!r}, got {body['data']['result']!r}"
+            )
+        else:
+            # Structured-error envelope is also acceptable: errorType + error must be set.
+            assert "errorType" in body and "error" in body, (
+                f"error response missing fields: {response.text!r}"
+            )
