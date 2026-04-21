@@ -2780,15 +2780,26 @@ def test_query_range_empty_aggregation_returns_empty_matrix():
 # envelope or any other malformed body. We intentionally use a syntactically broken
 # PromQL expression so the failure is deterministic and reaches the handler before
 # query execution begins (i.e. before any byte of the success envelope can be written).
+#
+# The HTTP status assertion is intentional: handler regressions that keep a valid JSON
+# body shape but downgrade the status to 200 (or any non-4xx) would silently mask
+# parse-failure handling, so we lock both layers — status code AND envelope shape —
+# at once.
 def test_query_range_invalid_promql_returns_structured_error():
     response = get_response_to_http_api_range_query(
         node.ip_address, 9093, "/api/v1/query_range",
         "((", 1776792228, 1776793128, 15,
     )
+    assert response.status_code == 400, (
+        f"expected HTTP 400 for malformed PromQL, got {response.status_code}: {response.text!r}"
+    )
     body = json.loads(response.text)
     assert body.get("status") == "error", (
         f"expected status=error for malformed query, got {body!r}"
     )
-    assert "errorType" in body and "error" in body, (
-        f"structured-error envelope missing required fields: {body!r}"
+    assert body.get("errorType") == "bad_data", (
+        f"expected errorType=bad_data for malformed query, got {body!r}"
+    )
+    assert "error" in body, (
+        f"structured-error envelope missing 'error' field: {body!r}"
     )
