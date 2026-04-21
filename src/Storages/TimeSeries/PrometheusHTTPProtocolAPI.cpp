@@ -98,17 +98,36 @@ void PrometheusHTTPProtocolAPI::executePromQLQuery(
 void PrometheusHTTPProtocolAPI::writeQueryResponse(
     WriteBuffer & response, PullingPipelineExecutor & pulling_executor, PrometheusQueryResultType result_type)
 {
+    /// Pull the first block BEFORE emitting any byte of the success envelope.
+    ///
+    /// The PromQL -> SQL pipeline is lazy: errors raised by functions in the projection
+    /// (notably `timeSeriesFromGrid` on aggregations that produced zero samples) only
+    /// surface during `pulling_executor.pull(...)`. If we wrote the
+    /// `{"status":"success","data":{...,"result":[` envelope first and then threw, the
+    /// upstream HTTP catch block would have to either truncate mid-document or append
+    /// a second `{"status":"error",...}` object onto an already open array — both of
+    /// which produce a body no Prometheus client can parse.
+    ///
+    /// Doing the first pull first keeps the response stream untouched on a startup
+    /// failure (the dominant failure mode for this regression), so the handler can
+    /// still set HTTP 4xx and emit a single, well-formed error JSON document. Once
+    /// the first block is materialized we are confident enough in the pipeline to
+    /// commit the success envelope and stream remaining blocks directly to the
+    /// network buffer — no full-response buffering, no peak-memory amplification.
+    Block result_block;
+    bool has_data = pulling_executor.pull(result_block);
+
     writeQueryResponseHeader(response, result_type);
 
-    Block result_block;
     bool first = true;
-
-    while (pulling_executor.pull(result_block))
+    while (has_data)
     {
         if (result_block.rows() > 0)
-        {   writeQueryResponseBlock(response, result_type, result_block, first);
+        {
+            writeQueryResponseBlock(response, result_type, result_block, first);
             first = false;
         }
+        has_data = pulling_executor.pull(result_block);
     }
 
     writeQueryResponseFooter(response);

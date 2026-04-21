@@ -29,7 +29,6 @@
 #include <Server/HTTP/authenticateUserByHTTP.h>
 #include <Server/HTTP/checkHTTPHeader.h>
 #include <Server/HTTP/setReadOnlyIfHTTPMethodIdempotent.h>
-#include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
 #include <Core/Settings.h>
 #include <Storages/TimeSeries/PrometheusRemoteReadProtocol.h>
@@ -377,15 +376,21 @@ public:
 
         response.setContentType("application/json");
 
-        /// Buffer the response body in memory before writing it to the HTTP output stream.
-        /// The downstream PromQL pipeline (e.g. timeSeriesFromGrid) can throw mid-stream after
-        /// the success envelope has already been emitted; if we wrote directly into
-        /// getOutputStream(response) the catch block below would concatenate a second
-        /// '{"status":"error",...}' object onto a still-open '..."result":[' array, producing
-        /// a body that no Prometheus client can parse. Buffering lets us discard the partial
-        /// success body on failure and emit a single, well-formed error document instead.
-        String body;
-        WriteBufferFromString body_buf(body);
+        /// Stream the response body straight to the HTTP output buffer.
+        ///
+        /// Correctness on errors is guaranteed jointly with PrometheusHTTPProtocolAPI:
+        /// `writeQueryResponse` performs the first `PullingPipelineExecutor::pull(...)`
+        /// before emitting any byte of the success envelope, so the dominant PromQL
+        /// failure mode (e.g. `timeSeriesFromGrid` over an empty aggregation) surfaces
+        /// here as an exception with the response stream still untouched. The catch
+        /// block below is then free to set an HTTP 4xx status and write a single,
+        /// well-formed JSON error document.
+        ///
+        /// We intentionally do NOT buffer the full payload in memory: large
+        /// /api/v1/query_range responses (many series x many steps) would otherwise
+        /// be accumulated in RAM end-to-end, turning a network-streamed response
+        /// into avoidable peak-memory pressure under concurrency.
+        auto & body_buf = getOutputStream(response);
         try
         {
             if (uri.starts_with("/api/v1/query_range"))
@@ -476,24 +481,19 @@ public:
                 response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
                 writeString(R"({"status":"error","errorType":"not_found","error":"API endpoint not found"})", body_buf);
             }
-
-            body_buf.finalize();
-            writeString(body, getOutputStream(response));
         }
         catch (const Exception & e)
         {
-            /// Discard any partial body written into body_buf above — the response stream has
-            /// not been touched yet, so we are free to set the status and emit a clean error.
+            /// Reachable only when the throw happens before any byte was written into
+            /// `body_buf` — see the comment on the streaming contract above. In that
+            /// state the HTTP headers have not been committed yet, so we can safely
+            /// rewrite the status line and emit a clean error document.
             response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
-            String error_str;
-            WriteBufferFromString error_buf(error_str);
-            writeString(R"({"status":"error","errorType":"bad_data","error":)", error_buf);
+            writeString(R"({"status":"error","errorType":"bad_data","error":)", body_buf);
             /// JSON-escape the message: error text can legitimately contain quotes/backslashes
             /// (it embeds SQL fragments), and raw interpolation would itself produce invalid JSON.
-            writeJSONString(e.message(), error_buf, formatSettings());
-            writeString(R"(})", error_buf);
-            error_buf.finalize();
-            writeString(error_str, getOutputStream(response));
+            writeJSONString(e.message(), body_buf, formatSettings());
+            writeString(R"(})", body_buf);
 
             LOG_ERROR(log(), "Error executing query: {}", e.displayText());
         }
