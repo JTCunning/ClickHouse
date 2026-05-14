@@ -1,0 +1,26 @@
+<clickhouse>
+    <http_handlers>
+        <defaults/>
+        <rule>
+            <url>/api/v1/write</url>
+            <handler>
+                <type>prometheus</type>
+                <database>otherdb</database>
+            </handler>
+        </rule>
+        <rule>
+            <url>/api/v1/read</url>
+            <handler>
+                <type>prometheus</type>
+                <database>otherdb</database>
+            </handler>
+        </rule>
+        <rule>
+            <url>/api/v1/query</url>
+            <handler>
+                <type>prometheus</type>
+                <database>otherdb</database>
+            </handler>
+        </rule>
+    </http_handlers>
+</clickhouse>
