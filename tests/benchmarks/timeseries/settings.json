@@ -1,0 +1,6 @@
+{
+    "settings": {
+        "allow_experimental_time_series_table": 1,
+        "allow_experimental_time_series_aggregate_functions": 1
+    }
+}
