@@ -74,6 +74,10 @@ SELECT 'quantileExactWeighted cross-function merge',
     quantilesExactWeightedMerge(0.5)(state)
 FROM (SELECT quantileExactWeightedState(0.5)(number, 1) AS state FROM numbers(5));
 
+SELECT 'quantileExponentialHistogram cross-function merge',
+    arrayMap(x -> round(x, 6), quantilesExponentialHistogramMerge(3, 0.5)(state))
+FROM (SELECT quantileExponentialHistogramState(3, 0.5)(toInt64(number), toUInt64(1)) AS state FROM numbers(5));
+
 SELECT 'quantileGK cross-function merge',
     quantilesGKMerge(100, 0.5)(state)
 FROM (SELECT quantileGKState(100, 0.5)(number) AS state FROM numbers(5));

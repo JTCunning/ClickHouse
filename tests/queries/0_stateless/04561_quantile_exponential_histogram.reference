@@ -1,0 +1,31 @@
+quantiles from pre-bucketed rows
+30.5	423.97	788.83
+plural form computes the same levels in one pass
+[30.5,423.97,788.83]
+errors stay within the schema-3 bucket width (~9%) of the exact quantiles
+1	1	1
+geometric interpolation, hand-checkable
+2.181015
+zero sentinel: target rank inside bucket -1 returns 0
+0
+all zeros: level 1 returns upper bound of the zero bucket, which is 0
+0	0
+level 1 returns the upper bound of the last bucket: 2^((16+1)/8)
+4.362031
+level 0 returns the lower bound of the first bucket: 2^(0/8) = 1
+1
+negative bucket indexes are legitimate for values below 1
+0.805245
+empty input returns NaN
+nan	[nan,nan]
+float bucket counts are supported
+2.181015
+unsigned bucket indexes are supported
+4.362031
+schema 1 and schema 8 grids
+2	1.00543
+states merge by per-bucket addition
+2.181015
+singular and plural variants share the same state representation
+[2.181015]
+validation errors

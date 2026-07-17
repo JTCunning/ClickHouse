@@ -33,6 +33,7 @@ static const std::unordered_map<String, String> quantile_fuse_name_mapping =
     {"quantileExactWeighted", "quantilesExactWeighted"},
     {"quantileExactWeightedInterpolated", "quantilesExactWeightedInterpolated"},
     {"quantileInterpolatedWeighted", "quantilesInterpolatedWeighted"},
+    {"quantileExponentialHistogram", "quantilesExponentialHistogram"},
     {"quantilePrometheusHistogram", "quantilesPrometheusHistogram"},
     {"quantileTDigest", "quantilesTDigest"},
     {"quantileTDigestWeighted", "quantilesTDigestWeighted"},
@@ -75,7 +76,8 @@ void GatherFunctionQuantileData::FuseQuantileAggregatesData::addFuncNode(ASTPtr 
     bool need_two_args = func->name == "quantileDeterministic" || func->name == "quantileExactWeighted"
         || func->name == "quantileExactWeightedInterpolated" || func->name == "quantileInterpolatedWeighted"
         || func->name == "quantileTimingWeighted" || func->name == "quantileTDigestWeighted"
-        || func->name == "quantileBFloat16Weighted" || func->name == "quantilePrometheusHistogram";
+        || func->name == "quantileBFloat16Weighted" || func->name == "quantilePrometheusHistogram"
+        || func->name == "quantileExponentialHistogram";
 
     if (arguments.size() != (need_two_args ? 2 : 1))
         return;
