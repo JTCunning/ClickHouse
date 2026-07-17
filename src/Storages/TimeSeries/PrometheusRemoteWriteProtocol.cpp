@@ -9,6 +9,7 @@
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnTuple.h>
+#include <Columns/ColumnsNumber.h>
 #include <Core/Field.h>
 #include <Core/DecimalFunctions.h>
 #include <DataTypes/DataTypeDateTime64.h>
@@ -136,23 +137,27 @@ namespace
         return std::move(id_column);
     }
 
-    /// Finds the minimum timestamp in a time series.
-    Int64 findMinTime(const google::protobuf::RepeatedPtrField<prometheus::Sample> & samples)
+    /// Finds the minimum timestamp in a time series (among both scalar samples and native histograms).
+    Int64 findMinTime(const prometheus::TimeSeries & element)
     {
-        chassert(!samples.empty());
+        chassert(element.samples_size() || element.histograms_size());
         Int64 min_time = std::numeric_limits<Int64>::max();
-        for (const auto & sample : samples)
+        for (const auto & sample : element.samples())
             min_time = std::min(sample.timestamp(), min_time);
+        for (const auto & histogram : element.histograms())
+            min_time = std::min(histogram.timestamp(), min_time);
         return min_time;
     }
 
-    /// Finds the maximum timestamp in a time series.
-    Int64 findMaxTime(const google::protobuf::RepeatedPtrField<prometheus::Sample> & samples)
+    /// Finds the maximum timestamp in a time series (among both scalar samples and native histograms).
+    Int64 findMaxTime(const prometheus::TimeSeries & element)
     {
-        chassert(!samples.empty());
+        chassert(element.samples_size() || element.histograms_size());
         Int64 max_time = std::numeric_limits<Int64>::min();
-        for (const auto & sample : samples)
+        for (const auto & sample : element.samples())
             max_time = std::max(sample.timestamp(), max_time);
+        for (const auto & histogram : element.histograms())
+            max_time = std::max(histogram.timestamp(), max_time);
         return max_time;
     }
 
@@ -227,12 +232,12 @@ namespace
         for (size_t i = 0; i != static_cast<size_t>(time_series.size()); ++i)
         {
             const auto & element = time_series[static_cast<int>(i)];
-            if (!element.samples_size())
+            if (!element.samples_size() && !element.histograms_size())
                 out_column.insertDefault();
             else if constexpr (is_decimal<T>)
-                out_column.insert(DecimalUtils::convertTo<T>(scale, DateTime64{findMinTime(element.samples())}, 3));
+                out_column.insert(DecimalUtils::convertTo<T>(scale, DateTime64{findMinTime(element)}, 3));
             else
-                out_column.insert(DecimalUtils::convertTo<T>(DateTime64{findMinTime(element.samples())}, 3));
+                out_column.insert(DecimalUtils::convertTo<T>(DateTime64{findMinTime(element)}, 3));
         }
     }
 
@@ -257,12 +262,12 @@ namespace
         for (size_t i = 0; i != static_cast<size_t>(time_series.size()); ++i)
         {
             const auto & element = time_series[static_cast<int>(i)];
-            if (!element.samples_size())
+            if (!element.samples_size() && !element.histograms_size())
                 out_column.insertDefault();
             else if constexpr (is_decimal<T>)
-                out_column.insert(DecimalUtils::convertTo<T>(scale, DateTime64{findMaxTime(element.samples())}, 3));
+                out_column.insert(DecimalUtils::convertTo<T>(scale, DateTime64{findMaxTime(element)}, 3));
             else
-                out_column.insert(DecimalUtils::convertTo<T>(DateTime64{findMaxTime(element.samples())}, 3));
+                out_column.insert(DecimalUtils::convertTo<T>(DateTime64{findMaxTime(element)}, 3));
         }
     }
 
@@ -319,6 +324,147 @@ namespace
             fillSamplesColumnsImpl<UInt32>(time_series, id_column_in_tags_table, out_id_column, timestamp_scale, out_timestamp_column, out_value_column);
     }
 
+    /// Expands protobuf bucket spans with delta-encoded (integer histogram) or absolute float (float histogram)
+    /// counts into absolute (bucket index, bucket count) pairs, appended as one array row to each output column.
+    /// Bucket indexes are stored in the Prometheus convention untouched: at schema `s`,
+    /// positive bucket `i` covers `(2^((i-1)/2^s), 2^(i/2^s)]`.
+    void expandHistogramBuckets(
+        const google::protobuf::RepeatedPtrField<prometheus::BucketSpan> & spans,
+        const google::protobuf::RepeatedField<Int64> & deltas,
+        const google::protobuf::RepeatedField<double> & counts,
+        ColumnArray & out_indexes_column,
+        ColumnArray & out_counts_column)
+    {
+        auto & indexes_data = typeid_cast<ColumnInt64 &>(out_indexes_column.getData());
+        auto & counts_data = typeid_cast<ColumnFloat64 &>(out_counts_column.getData());
+
+        /// An integer histogram uses delta encoding, a float histogram uses absolute counts.
+        const bool use_deltas = counts.empty();
+
+        Int64 current_index = 0;
+        Int64 running_count_int = 0;
+        int bucket_pos = 0;
+
+        for (const auto & span : spans)
+        {
+            current_index += span.offset();
+            for (UInt32 j = 0; j != span.length(); ++j)
+            {
+                Float64 bucket_count = 0;
+                if (use_deltas)
+                {
+                    if (bucket_pos < deltas.size())
+                        running_count_int += deltas[bucket_pos];
+                    bucket_count = static_cast<Float64>(running_count_int);
+                }
+                else if (bucket_pos < counts.size())
+                {
+                    bucket_count = counts[bucket_pos];
+                }
+                ++bucket_pos;
+
+                indexes_data.insertValue(current_index);
+                counts_data.insertValue(bucket_count);
+                ++current_index;
+            }
+        }
+
+        out_indexes_column.getOffsets().push_back(indexes_data.size());
+        out_counts_column.getOffsets().push_back(counts_data.size());
+    }
+
+    /// Columns of the block inserted into the "histograms" table.
+    struct HistogramsColumns
+    {
+        MutableColumnPtr id;
+        MutableColumnPtr timestamp;
+        MutableColumnPtr schema;
+        MutableColumnPtr count;
+        MutableColumnPtr sum;
+        MutableColumnPtr zero_threshold;
+        MutableColumnPtr zero_count;
+        MutableColumnPtr positive_bucket_indexes;
+        MutableColumnPtr positive_bucket_counts;
+        MutableColumnPtr negative_bucket_indexes;
+        MutableColumnPtr negative_bucket_counts;
+        MutableColumnPtr reset_hint;
+    };
+
+    /// Fills the columns for the "histograms" table by iterating over the time series.
+    /// T is the timestamp type: either DateTime64 (sub-second precision) or UInt32 (second precision).
+    template <typename T>
+    void fillHistogramsColumnsImpl(
+        const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series,
+        const IColumn & id_column_in_tags_table,
+        UInt32 timestamp_scale,
+        HistogramsColumns & out)
+    {
+        auto & schema_column = typeid_cast<ColumnInt8 &>(*out.schema);
+        auto & count_column = typeid_cast<ColumnFloat64 &>(*out.count);
+        auto & sum_column = typeid_cast<ColumnFloat64 &>(*out.sum);
+        auto & zero_threshold_column = typeid_cast<ColumnFloat64 &>(*out.zero_threshold);
+        auto & zero_count_column = typeid_cast<ColumnFloat64 &>(*out.zero_count);
+        auto & positive_bucket_indexes_column = typeid_cast<ColumnArray &>(*out.positive_bucket_indexes);
+        auto & positive_bucket_counts_column = typeid_cast<ColumnArray &>(*out.positive_bucket_counts);
+        auto & negative_bucket_indexes_column = typeid_cast<ColumnArray &>(*out.negative_bucket_indexes);
+        auto & negative_bucket_counts_column = typeid_cast<ColumnArray &>(*out.negative_bucket_counts);
+        auto & reset_hint_column = typeid_cast<ColumnInt8 &>(*out.reset_hint);
+
+        for (size_t i = 0; i != static_cast<size_t>(time_series.size()); ++i)
+        {
+            const auto & element = time_series[static_cast<int>(i)];
+            if (!element.histograms_size())
+                continue;
+
+            out.id->insertManyFrom(id_column_in_tags_table, i, element.histograms_size());
+            for (const auto & histogram : element.histograms())
+            {
+                if constexpr (is_decimal<T>)
+                    out.timestamp->insert(DecimalUtils::convertTo<T>(timestamp_scale, DateTime64{histogram.timestamp()}, 3));
+                else
+                    out.timestamp->insert(DecimalUtils::convertTo<T>(DateTime64{histogram.timestamp()}, 3));
+
+                schema_column.insertValue(static_cast<Int8>(histogram.schema()));
+
+                if (histogram.count_case() == prometheus::Histogram::kCountFloat)
+                    count_column.insertValue(histogram.count_float());
+                else
+                    count_column.insertValue(static_cast<Float64>(histogram.count_int()));
+
+                sum_column.insertValue(histogram.sum());
+                zero_threshold_column.insertValue(histogram.zero_threshold());
+
+                if (histogram.zero_count_case() == prometheus::Histogram::kZeroCountFloat)
+                    zero_count_column.insertValue(histogram.zero_count_float());
+                else
+                    zero_count_column.insertValue(static_cast<Float64>(histogram.zero_count_int()));
+
+                expandHistogramBuckets(
+                    histogram.positive_spans(), histogram.positive_deltas(), histogram.positive_counts(),
+                    positive_bucket_indexes_column, positive_bucket_counts_column);
+
+                expandHistogramBuckets(
+                    histogram.negative_spans(), histogram.negative_deltas(), histogram.negative_counts(),
+                    negative_bucket_indexes_column, negative_bucket_counts_column);
+
+                reset_hint_column.insertValue(static_cast<Int8>(histogram.reset_hint()));
+            }
+        }
+    }
+
+    /// Fills the columns for the "histograms" table by iterating over the time series.
+    void fillHistogramsColumns(
+        const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series,
+        const IColumn & id_column_in_tags_table,
+        UInt32 timestamp_scale,
+        HistogramsColumns & out)
+    {
+        if (isDateTime64Column(*out.timestamp))
+            fillHistogramsColumnsImpl<DateTime64>(time_series, id_column_in_tags_table, timestamp_scale, out);
+        else
+            fillHistogramsColumnsImpl<UInt32>(time_series, id_column_in_tags_table, timestamp_scale, out);
+    }
+
     /// Fills the metric_family_name, type, unit, and help columns for the "metrics" table.
     void fillMetricsColumns(
         const google::protobuf::RepeatedPtrField<prometheus::MetricMetadata> & metrics_metadata,
@@ -352,7 +498,9 @@ namespace
                             const StorageTimeSeries & time_series_storage,
                             const TimeSeriesSettings & time_series_settings,
                             const StorageInMemoryMetadata & tags_metadata,
-                            const StorageInMemoryMetadata & samples_metadata)
+                            const StorageInMemoryMetadata & samples_metadata,
+                            const StorageInMemoryMetadata * histograms_metadata,
+                            Poco::Logger * log)
     {
         size_t num_time_series = time_series.size();
         if (!num_time_series)
@@ -525,12 +673,69 @@ namespace
         samples_block.insert(ColumnWithTypeAndName{std::move(timestamp_column), timestamp_type, TimeSeriesColumnNames::Timestamp});
         samples_block.insert(ColumnWithTypeAndName{std::move(value_column), scalar_type, TimeSeriesColumnNames::Value});
 
+        /// Prepare a block for inserting to the "histograms" table (native histogram samples).
+        size_t total_histograms = 0;
+        for (const auto & element : time_series)
+            total_histograms += element.histograms_size();
+
+        Block histograms_block;
+        if (total_histograms && histograms_metadata)
+        {
+            HistogramsColumns columns;
+            auto create_column = [&](const char * column_name, MutableColumnPtr & out_column) -> DataTypePtr
+            {
+                DataTypePtr column_type = histograms_metadata->columns.get(column_name).type;
+                out_column = column_type->createColumn();
+                out_column->reserve(total_histograms);
+                return column_type;
+            };
+
+            auto histograms_id_type = create_column(TimeSeriesColumnNames::ID, columns.id);
+            auto histograms_timestamp_type = create_column(TimeSeriesColumnNames::Timestamp, columns.timestamp);
+            auto schema_type = create_column(TimeSeriesColumnNames::Schema, columns.schema);
+            auto count_type = create_column(TimeSeriesColumnNames::Count, columns.count);
+            auto sum_type = create_column(TimeSeriesColumnNames::Sum, columns.sum);
+            auto zero_threshold_type = create_column(TimeSeriesColumnNames::ZeroThreshold, columns.zero_threshold);
+            auto zero_count_type = create_column(TimeSeriesColumnNames::ZeroCount, columns.zero_count);
+            auto positive_bucket_indexes_type = create_column(TimeSeriesColumnNames::PositiveBucketIndexes, columns.positive_bucket_indexes);
+            auto positive_bucket_counts_type = create_column(TimeSeriesColumnNames::PositiveBucketCounts, columns.positive_bucket_counts);
+            auto negative_bucket_indexes_type = create_column(TimeSeriesColumnNames::NegativeBucketIndexes, columns.negative_bucket_indexes);
+            auto negative_bucket_counts_type = create_column(TimeSeriesColumnNames::NegativeBucketCounts, columns.negative_bucket_counts);
+            auto reset_hint_type = create_column(TimeSeriesColumnNames::ResetHint, columns.reset_hint);
+
+            UInt32 histograms_timestamp_scale = tryGetDecimalScale(*histograms_timestamp_type).value_or(0);
+            fillHistogramsColumns(time_series, *id_column_in_tags_table, histograms_timestamp_scale, columns);
+
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.id), histograms_id_type, TimeSeriesColumnNames::ID});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.timestamp), histograms_timestamp_type, TimeSeriesColumnNames::Timestamp});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.schema), schema_type, TimeSeriesColumnNames::Schema});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.count), count_type, TimeSeriesColumnNames::Count});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.sum), sum_type, TimeSeriesColumnNames::Sum});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.zero_threshold), zero_threshold_type, TimeSeriesColumnNames::ZeroThreshold});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.zero_count), zero_count_type, TimeSeriesColumnNames::ZeroCount});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.positive_bucket_indexes), positive_bucket_indexes_type, TimeSeriesColumnNames::PositiveBucketIndexes});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.positive_bucket_counts), positive_bucket_counts_type, TimeSeriesColumnNames::PositiveBucketCounts});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.negative_bucket_indexes), negative_bucket_indexes_type, TimeSeriesColumnNames::NegativeBucketIndexes});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.negative_bucket_counts), negative_bucket_counts_type, TimeSeriesColumnNames::NegativeBucketCounts});
+            histograms_block.insert(ColumnWithTypeAndName{std::move(columns.reset_hint), reset_hint_type, TimeSeriesColumnNames::ResetHint});
+        }
+        else if (total_histograms)
+        {
+            /// The table was created before the "histograms" target was introduced, so there is nowhere to store them.
+            LOG_WARNING(log, "{}: Dropping {} native histogram samples because this TimeSeries table has no 'histograms' target table. "
+                             "Recreate the TimeSeries table to store native histograms.",
+                        time_series_storage.getStorageID().getNameForLogs(), total_histograms);
+        }
+
         BlocksToInsert res;
 
         /// A block to the "tags" table should be inserted first.
         /// (Because any INSERT can fail and we don't want to have rows in the samples table with no corresponding "id" written to the "tags" table.)
         res.blocks.emplace_back(ViewTarget::Tags, std::move(tags_block));
         res.blocks.emplace_back(ViewTarget::Samples, std::move(samples_block));
+
+        if (!histograms_block.empty())
+            res.blocks.emplace_back(ViewTarget::Histograms, std::move(histograms_block));
 
         return res;
     }
@@ -653,9 +858,16 @@ void PrometheusRemoteWriteProtocol::writeTimeSeries(const google::protobuf::Repe
 
     auto tags_table_metadata = time_series_storage->getTargetTable(ViewTarget::Tags, getContext())->getInMemoryMetadataPtr(getContext(), false);
     auto samples_table_metadata = time_series_storage->getTargetTable(ViewTarget::Samples, getContext())->getInMemoryMetadataPtr(getContext(), false);
+
+    /// The "histograms" target can be absent if the table was created before that target was introduced.
+    StorageMetadataHandle histograms_table_metadata;
+    if (auto histograms_table = time_series_storage->tryGetTargetTable(ViewTarget::Histograms, getContext()))
+        histograms_table_metadata = histograms_table->getInMemoryMetadataPtr(getContext(), false);
+
     const auto & tags_metadata = *tags_table_metadata;
     const auto & samples_metadata = *samples_table_metadata;
-    auto blocks = toBlocks(time_series, getContext(), *time_series_storage, *time_series_settings, tags_metadata, samples_metadata);
+    auto blocks = toBlocks(time_series, getContext(), *time_series_storage, *time_series_settings, tags_metadata, samples_metadata,
+                           histograms_table_metadata ? &*histograms_table_metadata : nullptr, log.get());
     insertToTargetTables(std::move(blocks), *time_series_storage, getContext(), log.get());
 
     LOG_TRACE(log, "{}: {} time series written",

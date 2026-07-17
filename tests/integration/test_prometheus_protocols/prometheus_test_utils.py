@@ -37,6 +37,42 @@ def convert_time_series_to_protobuf(time_series):
     return write_request
 
 
+# Converts native histogram data
+# [ ({'label_name1': 'label_value1', ...}, [histogram_dict1, ...]), ... ]
+# to a protobuf message of type remote_pb2.WriteRequest.
+# Each histogram_dict provides keyword arguments of the types_pb2.Histogram message,
+# e.g. {"timestamp": ..., "schema": 3, "count_int": 150, "sum": 1000.0, "zero_threshold": 0.001,
+#       "zero_count_int": 50, "positive_spans": [(1, 2)], "positive_deltas": [40, 0]}.
+def convert_native_histograms_to_protobuf(time_series):
+    write_request = remote_pb2.WriteRequest()
+    for src_labels, src_histograms in time_series:
+        dest_timeseries = types_pb2.TimeSeries()
+        for label_name, label_value in src_labels.items():
+            dest_timeseries.labels.append(
+                types_pb2.Label(name=label_name, value=label_value)
+            )
+        for src_histogram in src_histograms:
+            histogram = types_pb2.Histogram()
+            for field_name, field_value in src_histogram.items():
+                if field_name in ("positive_spans", "negative_spans"):
+                    for offset, length in field_value:
+                        getattr(histogram, field_name).append(
+                            types_pb2.BucketSpan(offset=offset, length=length)
+                        )
+                elif field_name in (
+                    "positive_deltas",
+                    "negative_deltas",
+                    "positive_counts",
+                    "negative_counts",
+                ):
+                    getattr(histogram, field_name).extend(field_value)
+                else:
+                    setattr(histogram, field_name, field_value)
+            dest_timeseries.histograms.append(histogram)
+        write_request.timeseries.append(dest_timeseries)
+    return write_request
+
+
 # Loads a preset from folder "presets". The function returns a protobuf message of type remote_pb2.WriteRequest.
 def load_preset(preset_name):
     preset_fullname = os.path.join(PRESETS_DIR, preset_name)
