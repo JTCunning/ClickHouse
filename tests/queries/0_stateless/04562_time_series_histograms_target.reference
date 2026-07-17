@@ -1,0 +1,27 @@
+default inner histograms table
+id	UUID					
+timestamp	DateTime64(3)					
+schema	Int8					
+count	Float64					
+sum	Float64					
+zero_threshold	Float64					
+zero_count	Float64					
+positive_bucket_indexes	Array(Int64)					
+positive_bucket_counts	Array(Float64)					
+negative_bucket_indexes	Array(Int64)					
+negative_bucket_counts	Array(Float64)					
+reset_hint	Int8					
+insert and select through the table function
+3	100	1234.5	0.001	5	[1,2,10]	[40,30,20]	[-3]	[5]	0
+detach and attach keep the histograms target
+1
+rename keeps the histograms target
+1
+create table as gets a histograms target too
+0
+truncate empties the histograms target
+0
+external histograms target
+4	7
+external histograms target must have the required columns
+external histograms target must have the required column types

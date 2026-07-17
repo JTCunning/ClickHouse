@@ -132,6 +132,13 @@ void registerTableFunctionTimeSeries(TableFunctionFactory & factory)
             .category = FunctionDocumentation::Category::TableFunction
         });
 
+    factory.registerFunction<TableFunctionTimeSeriesTarget<ViewTarget::Histograms>>(
+        {
+            .description=R"(Provides direct access to the 'histograms' target table for a specified TimeSeries table.)",
+            .examples{{"timeSeriesHistograms", "SELECT * from timeSeriesHistograms('mydb', 'time_series_table');", ""}},
+            .category = FunctionDocumentation::Category::TableFunction
+        });
+
     factory.registerFunction<TableFunctionTimeSeriesSelector>(
         {
             .description=R"(Reads time series from a specified TimeSeries table.)",

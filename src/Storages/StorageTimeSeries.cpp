@@ -86,6 +86,14 @@ std::vector<StorageTimeSeries::Target> StorageTimeSeries::buildTargets(
     std::vector<Target> targets;
     for (auto target_kind : getTargetKinds())
     {
+        /// Tables created before the histograms target was introduced have neither a HISTOGRAMS external
+        /// target nor HISTOGRAMS INNER COLUMNS in their create query (the normalizer adds the clause only
+        /// at CREATE time). Skip the target for them: the inner histograms table doesn't exist on disk.
+        if (target_kind == ViewTarget::Histograms
+            && create_query.getTargetTableID(target_kind).empty()
+            && !create_query.getTargetInnerColumns(target_kind))
+            continue;
+
         Target target;
         target.kind = target_kind;
 
@@ -171,13 +179,31 @@ StoragePtr StorageTimeSeries::tryGetTargetTable(ViewTarget::Kind target_kind, co
     return getTargetTableImpl(target_kind, local_context, /* throw_if_not_found = */ false);
 }
 
+const StorageTimeSeries::Target * StorageTimeSeries::findTarget(ViewTarget::Kind target_kind) const
+{
+    for (const auto & target : targets)
+    {
+        if (target.kind == target_kind)
+            return &target;
+    }
+    return nullptr;
+}
+
 StoragePtr StorageTimeSeries::getTargetTableImpl(ViewTarget::Kind target_kind, const ContextPtr & local_context, bool throw_if_not_found) const
 {
-    /// `targets` is populated in the `getTargetKinds()` order.
-    auto index = static_cast<size_t>(target_kind - ViewTarget::Samples);
-    if (index >= targets.size() || targets[index].kind != target_kind)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected target kind {} (index={})", target_kind, index);
-    const auto & target = targets[index];
+    const auto * found_target = findTarget(target_kind);
+    if (!found_target)
+    {
+        /// Legacy TimeSeries tables have no Histograms target.
+        if (target_kind != ViewTarget::Histograms)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected target kind {}", target_kind);
+        if (throw_if_not_found)
+            throw Exception(ErrorCodes::UNKNOWN_TABLE,
+                            "TimeSeries table {} has no {} target table because it was created before the {} target was introduced",
+                            getStorageID().getNameForLogs(), target_kind, target_kind);
+        return nullptr;
+    }
+    const auto & target = *found_target;
 
     auto lookup = [&](const StorageID & id) -> StoragePtr
     {
@@ -250,11 +276,15 @@ StorageID StorageTimeSeries::tryGetTargetTableID(ViewTarget::Kind target_kind, c
 
 bool StorageTimeSeries::isInnerTable(ViewTarget::Kind target_kind) const
 {
-    /// `targets` is populated in the `getTargetKinds()` order.
-    auto index = static_cast<size_t>(target_kind - ViewTarget::Samples);
-    if (index >= targets.size() || targets[index].kind != target_kind)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected target kind {} (index={})", target_kind, index);
-    return targets[index].is_inner_table;
+    const auto * target = findTarget(target_kind);
+    if (!target)
+    {
+        /// Legacy TimeSeries tables have no Histograms target.
+        if (target_kind != ViewTarget::Histograms)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected target kind {}", target_kind);
+        return false;
+    }
+    return target->is_inner_table;
 }
 
 
@@ -698,6 +728,7 @@ CREATE TABLE name [(columns)] ENGINE=TimeSeries
 [SAMPLES db.samples_table_name | [SAMPLES INNER COLUMNS (...)] [SAMPLES INNER ENGINE engine(arguments)]]
 [TAGS db.tags_table_name | [TAGS INNER COLUMNS (...)] [TAGS INNER ENGINE engine(arguments)]]
 [METRICS db.metrics_table_name | [METRICS INNER COLUMNS (...)] [METRICS INNER ENGINE engine(arguments)]]
+[HISTOGRAMS db.histograms_table_name | [HISTOGRAMS INNER COLUMNS (...)] [HISTOGRAMS INNER ENGINE engine(arguments)]]
 ```
 
 :::note
@@ -776,12 +807,14 @@ If both forms are used in the same `CREATE TABLE` statement, the declared types 
 A `TimeSeries` table doesn't have its own data, everything is stored in its target tables.
 This is similar to how a [materialized view](../../../sql-reference/statements/create/view#materialized-view) works,
 with the difference that a materialized view has one target table
-whereas a `TimeSeries` table has three target tables named [samples](#samples-table), [tags](#tags-table), and [metrics](#metrics-table).
+whereas a `TimeSeries` table has four target tables named [samples](#samples-table), [tags](#tags-table), [metrics](#metrics-table), and [histograms](#histograms-table).
 
 The target tables can be either specified explicitly in the `CREATE TABLE` query
 or the `TimeSeries` table engine can generate inner target tables automatically.
 
-Rows inserted into a `TimeSeries` table are transformed, split into blocks, and inserted in these three target tables.
+Rows inserted into a `TimeSeries` table are transformed, split into blocks, and inserted in the samples, tags, and metrics target tables.
+The histograms target table is filled by the [prometheus remote-write](/interfaces/prometheus#remote-write) protocol when Prometheus sends
+[native histograms](https://prometheus.io/docs/specs/native_histograms/).
 
 The target tables are the following:
 
@@ -825,6 +858,35 @@ The _metrics_ table must have columns:
 | `type` | [x] | `LowCardinality(String)` | `String` or `LowCardinality(String)` | The type of a metric family, one of "counter", "gauge", "summary", "stateset", "histogram", "gaugehistogram" |
 | `unit` | [x] | `LowCardinality(String)` | `String` or `LowCardinality(String)` | The unit used in a metric |
 | `help` | [x] | `String` | `String` or `LowCardinality(String)` | The description of a metric |
+
+### Histograms table {#histograms-table}
+
+The _histograms_ table contains [Prometheus native (exponential) histogram](https://prometheus.io/docs/specs/native_histograms/) samples in full fidelity.
+Bucket spans and delta-encoded counts from the protocol are expanded to absolute `(bucket index, bucket count)` pairs at ingestion time.
+Bucket indexes follow the Prometheus convention: at schema `s`, positive bucket `i` covers `(2^((i-1)/2^s), 2^(i/2^s)]`.
+`Float64` counts hold both integer and float histograms (integer counts above 2^53 lose precision).
+
+The _histograms_ table must have columns:
+
+| Name | Mandatory? | Default type | Possible types | Description |
+|---|---|---|---|---|
+| `id` | [x] | `UUID` | any (must match the type of `id` in the [samples](#samples-table) table) | Identifies a combination of a metric name and tags |
+| `timestamp` | [x] | `DateTime64(3)` | `DateTime64(X)` | A time point |
+| `schema` | [x] | `Int8` | `Int8` | Exponential bucketing schema, from -4 to 8: there are `2^schema` buckets per power of two |
+| `count` | [x] | `Float64` | `Float64` | Total number of observations |
+| `sum` | [x] | `Float64` | `Float64` | Sum of all observed values |
+| `zero_threshold` | [x] | `Float64` | `Float64` | Width of the zero bucket |
+| `zero_count` | [x] | `Float64` | `Float64` | Number of observations in `[-zero_threshold, zero_threshold]` |
+| `positive_bucket_indexes` | [x] | `Array(Int64)` | `Array(Int64)` | Absolute indexes of the populated positive buckets |
+| `positive_bucket_counts` | [x] | `Array(Float64)` | `Array(Float64)` | Observation counts of the populated positive buckets |
+| `negative_bucket_indexes` | [x] | `Array(Int64)` | `Array(Int64)` | Absolute indexes of the populated negative buckets |
+| `negative_bucket_counts` | [x] | `Array(Float64)` | `Array(Float64)` | Observation counts of the populated negative buckets |
+| `reset_hint` | [x] | `Int8` | `Int8` | Counter reset hint from the protocol: 0 = unknown, 1 = yes, 2 = no, 3 = gauge |
+
+:::note
+`TimeSeries` tables created by ClickHouse versions without the histograms target keep working after an upgrade, but they have no histograms table.
+To store native histograms in such a table, recreate it (a table created with `CREATE TABLE new_table AS old_table` gets the histograms target).
+:::
 
 ## Creation {#creation}
 
@@ -874,14 +936,30 @@ METRICS INNER COLUMNS
     `help` String
 )
 METRICS INNER ENGINE = ReplacingMergeTree ORDER BY metric_family_name
+HISTOGRAMS INNER COLUMNS
+(
+    `id` UUID,
+    `timestamp` DateTime64(3),
+    `schema` Int8,
+    `count` Float64,
+    `sum` Float64,
+    `zero_threshold` Float64,
+    `zero_count` Float64,
+    `positive_bucket_indexes` Array(Int64),
+    `positive_bucket_counts` Array(Float64),
+    `negative_bucket_indexes` Array(Int64),
+    `negative_bucket_counts` Array(Float64),
+    `reset_hint` Int8
+)
+HISTOGRAMS INNER ENGINE = MergeTree ORDER BY (id, timestamp)
 ```
 
-So the columns were generated automatically and also there are three inner target tables with their own column definitions
+So the columns were generated automatically and also there are four inner target tables with their own column definitions
 stored in the `INNER COLUMNS` clauses.
 
 Inner target tables have names like `.inner_id.samples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
-`.inner_id.tags.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, `.inner_id.metrics.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
-and each target table has its own set of columns:
+`.inner_id.tags.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, `.inner_id.metrics.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
+`.inner_id.histograms.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` and each target table has its own set of columns:
 
 ```sql
 CREATE TABLE default.`.inner_id.samples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
@@ -994,7 +1072,8 @@ By default inner target tables use the following table engines:
 - the [tags](#tags-table) table uses [AggregatingMergeTree](../mergetree-family/aggregatingmergetree) because the same data is often inserted multiple times to this table so we need a way
 to remove duplicates, and also because it's required to do aggregation for columns `min_time` and `max_time`;
 - the [metrics](#metrics-table) table uses [ReplacingMergeTree](../mergetree-family/replacingmergetree) because the same data is often inserted multiple times to this table so we need a way
-to remove duplicates.
+to remove duplicates;
+- the [histograms](#histograms-table) table uses [MergeTree](../mergetree-family/mergetree).
 
 Other table engines also can be used for inner target tables if it's specified so:
 
@@ -1003,6 +1082,7 @@ CREATE TABLE my_table ENGINE=TimeSeries
 SAMPLES ENGINE=ReplicatedMergeTree
 TAGS ENGINE=ReplicatedAggregatingMergeTree
 METRICS ENGINE=ReplicatedReplacingMergeTree
+HISTOGRAMS ENGINE=ReplicatedMergeTree
 ```
 
 The [tags](#tags-table) table keeps the tag columns (and the `tags`/`all_tags` Maps) outside its sorting key,
@@ -1072,6 +1152,7 @@ Here is a list of functions supporting a `TimeSeries` table as an argument:
 - [timeSeriesSamples](../../../sql-reference/table-functions/timeSeriesSamples.md)
 - [timeSeriesTags](../../../sql-reference/table-functions/timeSeriesTags.md)
 - [timeSeriesMetrics](../../../sql-reference/table-functions/timeSeriesMetrics.md)
+- [timeSeriesHistograms](../../../sql-reference/table-functions/timeSeriesHistograms.md)
 )DOCS_MD",
         .syntax = "ENGINE = TimeSeries()"});
 }

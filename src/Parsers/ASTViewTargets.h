@@ -39,6 +39,9 @@ struct ViewTarget
 
         /// The "metrics" table for a TimeSeries table, contains general information (metadata) about metrics.
         Metrics,
+
+        /// The "histograms" table for a TimeSeries table, contains native (exponential) histogram samples.
+        Histograms,
     };
 
     explicit ViewTarget(Kind kind_);

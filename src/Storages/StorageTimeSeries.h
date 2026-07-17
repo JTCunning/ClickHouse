@@ -52,10 +52,10 @@ public:
     bool isInnerTable(ViewTarget::Kind target_kind) const;
     bool hasInnerTables() const { return has_inner_tables; }
 
-    /// Returns the three target kinds: Samples, Tags, Metrics.
-    static constexpr std::array<ViewTarget::Kind, 3> getTargetKinds()
+    /// Returns the four target kinds: Samples, Tags, Metrics, Histograms.
+    static constexpr std::array<ViewTarget::Kind, 4> getTargetKinds()
     {
-        return {ViewTarget::Samples, ViewTarget::Tags, ViewTarget::Metrics};
+        return {ViewTarget::Samples, ViewTarget::Tags, ViewTarget::Metrics, ViewTarget::Histograms};
     }
 
     void readImpl(
@@ -108,7 +108,7 @@ public:
 #endif
 
 private:
-    /// Represents one of the three target tables (Samples, Tags, Metrics).
+    /// Represents one of the target tables (Samples, Tags, Metrics, Histograms).
     /// `is_inner_table` is true when the table was auto-created by TimeSeries and is owned by it.
     struct Target
     {
@@ -117,12 +117,16 @@ private:
         bool is_inner_table = false;
     };
 
-    /// Initializes information about three target tables (Samples, Tags, Metrics).
+    /// Initializes information about the target tables (Samples, Tags, Metrics, Histograms).
     /// The function also creates inner tables (unless this is an ATTACH query).
+    /// The Histograms target can be absent for tables created before it was introduced.
     static std::vector<Target> buildTargets(
         const ASTCreateQuery & create_query,
         const StorageID & table_id,
         const ContextPtr & local_context, LoadingStrictnessLevel mode);
+
+    /// Finds a target by kind; returns nullptr if the target is absent (legacy tables have no Histograms target).
+    const Target * findTarget(ViewTarget::Kind target_kind) const;
 
     /// Implementation for getTargetTable() and tryGetTargetTable().
     StoragePtr getTargetTableImpl(ViewTarget::Kind target_kind, const ContextPtr & local_context, bool throw_if_not_found) const;

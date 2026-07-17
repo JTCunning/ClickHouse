@@ -59,9 +59,9 @@ namespace ErrorCodes
 
 namespace
 {
-    constexpr std::array<ViewTarget::Kind, 3> getTargetKinds()
+    constexpr std::array<ViewTarget::Kind, 4> getTargetKinds()
     {
-        return {ViewTarget::Samples, ViewTarget::Tags, ViewTarget::Metrics};
+        return {ViewTarget::Samples, ViewTarget::Tags, ViewTarget::Metrics, ViewTarget::Histograms};
     }
 
     /// Conflict-checking setter for `DataTypePtr`.
@@ -486,6 +486,26 @@ namespace
                 break;
             }
 
+            case ViewTarget::Histograms:
+            {
+                /// Column "id" - no DEFAULT for the same reason as in the samples table.
+                add_column_if_missing(TimeSeriesColumnNames::ID, dataTypeToAST(resolved_types.id_type));
+                add_column_if_missing(TimeSeriesColumnNames::Timestamp, dataTypeToAST(resolved_types.timestamp_type));
+                /// Native (exponential) histograms are stored in full fidelity:
+                /// Float64 counts hold both integer and float histograms, and negative buckets are kept alongside positive ones.
+                add_column_if_missing(TimeSeriesColumnNames::Schema, makeASTDataType("Int8"));
+                add_column_if_missing(TimeSeriesColumnNames::Count, makeASTDataType("Float64"));
+                add_column_if_missing(TimeSeriesColumnNames::Sum, makeASTDataType("Float64"));
+                add_column_if_missing(TimeSeriesColumnNames::ZeroThreshold, makeASTDataType("Float64"));
+                add_column_if_missing(TimeSeriesColumnNames::ZeroCount, makeASTDataType("Float64"));
+                add_column_if_missing(TimeSeriesColumnNames::PositiveBucketIndexes, makeASTDataType("Array", makeASTDataType("Int64")));
+                add_column_if_missing(TimeSeriesColumnNames::PositiveBucketCounts, makeASTDataType("Array", makeASTDataType("Float64")));
+                add_column_if_missing(TimeSeriesColumnNames::NegativeBucketIndexes, makeASTDataType("Array", makeASTDataType("Int64")));
+                add_column_if_missing(TimeSeriesColumnNames::NegativeBucketCounts, makeASTDataType("Array", makeASTDataType("Float64")));
+                add_column_if_missing(TimeSeriesColumnNames::ResetHint, makeASTDataType("Int8"));
+                break;
+            }
+
             default:
                 UNREACHABLE();
         }
@@ -558,6 +578,10 @@ namespace
 
         for (auto inner_table_kind : getTargetKinds())
         {
+            /// Prealpha tables predate the histograms target; don't invent a HISTOGRAMS clause for them
+            /// because the inner histograms table doesn't exist on disk.
+            if (inner_table_kind == ViewTarget::Histograms)
+                continue;
             if (create_query.hasTargetTableID(inner_table_kind))
                 continue;
             if (create_query.getTargetInnerColumns(inner_table_kind))
@@ -733,7 +757,7 @@ namespace
     {
         auto storage = make_intrusive<ASTStorage>();
 
-        if (target_kind == ViewTarget::Samples)
+        if (target_kind == ViewTarget::Samples || target_kind == ViewTarget::Histograms)
         {
             auto engine = makeASTFunction("MergeTree");
             engine->setNoEmptyArgs(false);
@@ -918,6 +942,23 @@ namespace
                 check_column_is_string(TimeSeriesColumnNames::Type);
                 check_column_is_string(TimeSeriesColumnNames::Unit);
                 check_column_is_string(TimeSeriesColumnNames::Help);
+                break;
+            }
+
+            case ViewTarget::Histograms:
+            {
+                check_column_type(TimeSeriesColumnNames::ID, resolved_types.id_type);
+                check_column_type(TimeSeriesColumnNames::Timestamp, resolved_types.timestamp_type);
+                check_column_type(TimeSeriesColumnNames::Schema, std::make_shared<DataTypeInt8>());
+                check_column_type(TimeSeriesColumnNames::Count, std::make_shared<DataTypeFloat64>());
+                check_column_type(TimeSeriesColumnNames::Sum, std::make_shared<DataTypeFloat64>());
+                check_column_type(TimeSeriesColumnNames::ZeroThreshold, std::make_shared<DataTypeFloat64>());
+                check_column_type(TimeSeriesColumnNames::ZeroCount, std::make_shared<DataTypeFloat64>());
+                check_column_type(TimeSeriesColumnNames::PositiveBucketIndexes, std::make_shared<DataTypeArray>(std::make_shared<DataTypeInt64>()));
+                check_column_type(TimeSeriesColumnNames::PositiveBucketCounts, std::make_shared<DataTypeArray>(std::make_shared<DataTypeFloat64>()));
+                check_column_type(TimeSeriesColumnNames::NegativeBucketIndexes, std::make_shared<DataTypeArray>(std::make_shared<DataTypeInt64>()));
+                check_column_type(TimeSeriesColumnNames::NegativeBucketCounts, std::make_shared<DataTypeArray>(std::make_shared<DataTypeFloat64>()));
+                check_column_type(TimeSeriesColumnNames::ResetHint, std::make_shared<DataTypeInt8>());
                 break;
             }
 

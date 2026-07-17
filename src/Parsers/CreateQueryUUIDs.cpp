@@ -50,6 +50,10 @@ namespace
         {
             return ViewTarget::Metrics;
         }
+        else if (str == "histograms")
+        {
+            return ViewTarget::Histograms;
+        }
         else
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unexpected view target's kind {}", str);
     }
@@ -109,6 +113,7 @@ CreateQueryUUIDs::CreateQueryUUIDs(const ASTCreateQuery & query, bool generate_r
                 generate_target_uuid(ViewTarget::Samples);
                 generate_target_uuid(ViewTarget::Tags);
                 generate_target_uuid(ViewTarget::Metrics);
+                generate_target_uuid(ViewTarget::Histograms);
             }
         }
     }

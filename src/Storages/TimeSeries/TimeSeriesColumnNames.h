@@ -28,6 +28,19 @@ struct TimeSeriesColumnNames
     static constexpr const char * MinTime = "min_time";
     static constexpr const char * MaxTime = "max_time";
 
+    /// The "histograms" table contains native (exponential) histogram samples.
+    /// It shares the `id` and `timestamp` columns with the "samples" table and adds:
+    static constexpr const char * Schema = "schema";
+    static constexpr const char * Count = "count";
+    static constexpr const char * Sum = "sum";
+    static constexpr const char * ZeroThreshold = "zero_threshold";
+    static constexpr const char * ZeroCount = "zero_count";
+    static constexpr const char * PositiveBucketIndexes = "positive_bucket_indexes";
+    static constexpr const char * PositiveBucketCounts = "positive_bucket_counts";
+    static constexpr const char * NegativeBucketIndexes = "negative_bucket_indexes";
+    static constexpr const char * NegativeBucketCounts = "negative_bucket_counts";
+    static constexpr const char * ResetHint = "reset_hint";
+
     /// The "metrics" table contains general information (metadata) about metrics:
     static constexpr const char * MetricFamily = "metric_family";
     static constexpr const char * Type = "type";
