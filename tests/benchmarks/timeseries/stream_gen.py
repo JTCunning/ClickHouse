@@ -473,7 +473,7 @@ def iter_series_specs(model, step):
 
 
 def build_sorted_specs(model, step):
-    """Materialize sorted (labels, kind, params) list — O(series), not O(samples)."""
+    """Materialize sorted (labels, kind, params) list: O(series), not O(samples)."""
     specs = list(iter_series_specs(model, step))
     specs.sort(key=lambda t: tuple(sorted(t[0].items())))
     return specs
@@ -583,7 +583,7 @@ def iter_frames(model, specs, start, step, num_steps, frame_steps, time_shift_ms
     """Yield snappy-compressed WriteRequest bodies for successive time frames.
 
     Timestamps are absolute ms: (start + i*step)*1000 + time_shift_ms.
-    Generation is O(series * frame_steps) RAM per frame — never full history.
+    Generation is O(series * frame_steps) RAM per frame, never full history.
     """
     for a in range(0, num_steps, frame_steps):
         b = min(a + frame_steps, num_steps)
