@@ -1,0 +1,6 @@
+counter-delta quantiles over the window
+1.044274	4.213444
+same result via the plural form
+[1.044274,4.213444]
+instant quantile from a single histogram sample
+1.045302
