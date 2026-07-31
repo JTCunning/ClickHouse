@@ -29,10 +29,14 @@
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/InterpreterInsertQuery.h>
+#include <Interpreters/ProcessList.h>
 #include <Interpreters/addMissingDefaults.h>
+#include <Interpreters/executeQuery.h>
+#include <Interpreters/Cache/QueryResultCacheUsage.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTInsertQuery.h>
+#include <Parsers/queryNormalization.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Processors/Executors/PushingPipelineExecutor.h>
 #include <Processors/Sources/BlocksSource.h>
@@ -600,6 +604,18 @@ namespace
 
                 LOG_TEST(log, "{}: Executing query: {}", time_series_storage_id.getNameForLogs(), insert_query->formatForLogging());
 
+                const auto query_start_time = std::chrono::system_clock::now();
+                Stopwatch start_watch{CLOCK_MONOTONIC};
+
+                String query_for_logging = insert_query->formatForLogging();
+                UInt64 normalized_query_hash = normalizedQueryHash(query_for_logging, false);
+
+                /// Register the insert in the process list so that its progress counters feed
+                /// system.query_log with written_rows and written_bytes (issue #99475).
+                auto process_list_entry = insert_context->getProcessList().insert(
+                    query_for_logging, normalized_query_hash, insert_query.get(), insert_context, start_watch.getStart(), /* is_internal= */ false);
+                insert_context->setProcessListElement(process_list_entry->getQueryStatus());
+
                 InterpreterInsertQuery interpreter(
                     insert_query,
                     insert_context,
@@ -609,23 +625,68 @@ namespace
                     /* async_insert= */ false);
 
                 BlockIO io = interpreter.execute();
-                PushingPipelineExecutor executor(io.pipeline);
+                io.pipeline.setProcessListElement(insert_context->getProcessListElement());
 
-                executor.start();
+                QueryLogElement elem = logQueryStart(
+                    query_start_time,
+                    insert_context,
+                    query_for_logging,
+                    normalized_query_hash,
+                    insert_query,
+                    io.pipeline,
+                    &interpreter,
+                    /* internal= */ false,
+                    /* log_as_internal= */ false,
+                    target_table_id.database_name,
+                    target_table_id.table_name,
+                    /* async_insert= */ false);
 
-                // Convert block columns to match what the pipeline expects.
-                const Block & expected_header = executor.getHeader();
-                auto converting_dag = ActionsDAG::makeConvertingActions(
-                    block.getColumnsWithTypeAndName(),
-                    expected_header.getColumnsWithTypeAndName(),
-                    ActionsDAG::MatchColumnsMode::Name,
-                    insert_context);
-                auto converting_actions = std::make_shared<ExpressionActions>(
-                    std::move(converting_dag), ExpressionActionsSettings(insert_context));
-                converting_actions->execute(block);
+                try
+                {
+                    {
+                        PushingPipelineExecutor executor(io.pipeline);
 
-                executor.push(std::move(block));
-                executor.finish();
+                        executor.start();
+
+                        // Convert block columns to match what the pipeline expects.
+                        const Block & expected_header = executor.getHeader();
+                        auto converting_dag = ActionsDAG::makeConvertingActions(
+                            block.getColumnsWithTypeAndName(),
+                            expected_header.getColumnsWithTypeAndName(),
+                            ActionsDAG::MatchColumnsMode::Name,
+                            insert_context);
+                        auto converting_actions = std::make_shared<ExpressionActions>(
+                            std::move(converting_dag), ExpressionActionsSettings(insert_context));
+                        converting_actions->execute(block);
+
+                        executor.push(std::move(block));
+                        executor.finish();
+                    }
+
+                    logQueryFinish(
+                        elem,
+                        insert_context,
+                        insert_query,
+                        std::move(io.pipeline),
+                        /* pulling_pipeline= */ false,
+                        /* query_span= */ nullptr,
+                        QueryResultCacheUsage::None,
+                        /* internal= */ false,
+                        /* log_as_internal= */ false);
+                }
+                catch (...)
+                {
+                    logQueryException(
+                        elem,
+                        insert_context,
+                        start_watch,
+                        insert_query,
+                        /* query_span= */ nullptr,
+                        /* internal= */ false,
+                        /* log_as_internal= */ false,
+                        /* log_error= */ true);
+                    throw;
+                }
             }
         }
     }
