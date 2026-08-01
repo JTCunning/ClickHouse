@@ -42,6 +42,8 @@
 #include <Processors/Sources/BlocksSource.h>
 #include <Processors/Transforms/ExpressionTransform.h>
 #include <QueryPipeline/Pipe.h>
+#include <Common/ThreadGroupSwitcher.h>
+#include <Common/ThreadStatus.h>
 #include <base/EnumReflection.h>
 
 #include <algorithm>
@@ -62,6 +64,7 @@ namespace TimeSeriesSetting
 namespace ErrorCodes
 {
     extern const int ILLEGAL_COLUMN;
+    extern const int LOGICAL_ERROR;
 }
 
 
@@ -600,6 +603,8 @@ namespace
                 insert_query->columns = columns_ast;
 
                 ContextMutablePtr insert_context = Context::createCopy(context);
+                insert_context->setQueryKind(ClientInfo::QueryKind::SECONDARY_QUERY);
+                insert_context->getClientInfo().is_internal = true;
                 insert_context->setCurrentQueryId(fmt::format("{}:{}", context->getCurrentQueryId(), table_kind));
 
                 LOG_TEST(log, "{}: Executing query: {}", time_series_storage_id.getNameForLogs(), insert_query->formatForLogging());
@@ -610,10 +615,15 @@ namespace
                 String query_for_logging = insert_query->formatForLogging();
                 UInt64 normalized_query_hash = normalizedQueryHash(query_for_logging, false);
 
-                /// Register the insert in the process list so that its progress counters feed
-                /// system.query_log with written_rows and written_bytes (issue #99475).
+                auto outer_thread_group = getCurrentThreadGroup();
+                if (!outer_thread_group)
+                    throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot insert to target tables: current thread is not attached to a thread group");
+
+                auto insert_thread_group = std::make_shared<ThreadGroup>(insert_context, outer_thread_group);
+                ThreadGroupSwitcher thread_group_switcher(insert_thread_group, ThreadName::PROMETHEUS_HANDLER, /*allow_existing_group=*/ true);
+
                 auto process_list_entry = insert_context->getProcessList().insert(
-                    query_for_logging, normalized_query_hash, insert_query.get(), insert_context, start_watch.getStart(), /* is_internal= */ false);
+                    query_for_logging, normalized_query_hash, insert_query.get(), insert_context, start_watch.getStart(), /* is_internal= */ true);
                 insert_context->setProcessListElement(process_list_entry->getQueryStatus());
 
                 InterpreterInsertQuery interpreter(
@@ -635,8 +645,8 @@ namespace
                     insert_query,
                     io.pipeline,
                     &interpreter,
-                    /* internal= */ false,
-                    /* log_as_internal= */ false,
+                    /* internal= */ true,
+                    /* log_as_internal= */ true,
                     target_table_id.database_name,
                     target_table_id.table_name,
                     /* async_insert= */ false);
@@ -671,8 +681,8 @@ namespace
                         /* pulling_pipeline= */ false,
                         /* query_span= */ nullptr,
                         QueryResultCacheUsage::None,
-                        /* internal= */ false,
-                        /* log_as_internal= */ false);
+                        /* internal= */ true,
+                        /* log_as_internal= */ true);
                 }
                 catch (...)
                 {
@@ -682,8 +692,8 @@ namespace
                         start_watch,
                         insert_query,
                         /* query_span= */ nullptr,
-                        /* internal= */ false,
-                        /* log_as_internal= */ false,
+                        /* internal= */ true,
+                        /* log_as_internal= */ true,
                         /* log_error= */ true);
                     throw;
                 }
