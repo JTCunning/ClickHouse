@@ -129,7 +129,16 @@ class PromQLSupportMatrixTest(unittest.TestCase):
                 {
                     "name": "Functions",
                     "slug": "functions",
-                    "features": [{"name": "rate"}, {"name": "absent"}],
+                    "features": [
+                        {"name": "rate"},
+                        {"name": "absent"},
+                        {"name": "uncovered"},
+                    ],
+                },
+                {
+                    "name": "Uncovered functions",
+                    "slug": "uncovered-functions",
+                    "features": [{"name": "also_uncovered"}],
                 }
             ]
         }
@@ -177,6 +186,8 @@ class PromQLSupportMatrixTest(unittest.TestCase):
 
         self.assertIn("| `rate` | Supported | Passed: 1; differences: 0; unsupported: 0", generated)
         self.assertIn("| `absent` | Not supported | Passed: 0; differences: 0; unsupported: 1", generated)
+        self.assertNotIn("`uncovered`", generated)
+        self.assertNotIn("Uncovered functions", generated)
 
 
 if __name__ == "__main__":

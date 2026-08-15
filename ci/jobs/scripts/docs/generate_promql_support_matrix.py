@@ -189,6 +189,11 @@ def render_matrix(catalog: dict, implemented: set[str], compliance: dict) -> str
         if feature.get("kind") == "aggregation"
     }
     counts = aggregate_compliance(results, catalog_names, aggregation_names)
+    covered_features = {
+        name
+        for name, feature_counts in counts.items()
+        if sum(feature_counts.values()) > 0
+    }
 
     lines = [
         (
@@ -199,6 +204,13 @@ def render_matrix(catalog: dict, implemented: set[str], compliance: dict) -> str
     ]
 
     for category in catalog["categories"]:
+        covered_category_features = [
+            feature
+            for feature in category["features"]
+            if feature["name"] in covered_features
+        ]
+        if not covered_category_features:
+            continue
         lines.extend(
             [
                 f"## {category['name']} {{#{category['slug']}}}",
@@ -207,7 +219,7 @@ def render_matrix(catalog: dict, implemented: set[str], compliance: dict) -> str
                 "|---|---|---|---|",
             ]
         )
-        for feature in category["features"]:
+        for feature in covered_category_features:
             name = feature["name"]
             if name not in implemented:
                 status = "Not supported"
