@@ -262,7 +262,18 @@ Instant selectors, range selectors, label matchers (`=`, `!=`, `=~`, `!~`), offs
 
 ### Functions {#functions}
 
-See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for function-level support, limitations, and compliance results.
+| Category | Functions |
+|----------|-----------|
+| Range | `rate`, `irate`, `delta`, `idelta`, `increase`, `last_over_time`, `deriv`, `changes`, `resets` |
+| Math | `abs`, `sgn`, `floor`, `ceil`, `sqrt`, `exp`, `ln`, `log2`, `log10`, `rad`, `deg` |
+| Trig | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` |
+| DateTime | `day_of_week`, `day_of_month`, `days_in_month`, `day_of_year`, `minute`, `hour`, `month`, `year` |
+| Label | `label_replace`, `label_join` |
+| Type | `scalar`, `vector` |
+| Histogram | `histogram_quantile` |
+| Other | `time`, `pi` |
+
+`histogram_quantile` uses linear interpolation on classic histogram buckets (identified by the `le` label). Native histograms are not supported. The `phi` (quantile level) argument must be a constant scalar. Expressions that vary per step, such as `histogram_quantile(time() / 1000, ...)`, are rejected with a `NOT_IMPLEMENTED` exception.
 
 ### Operators {#operators}
 
@@ -272,7 +283,13 @@ Unary operators `+` and `-`.
 
 ### Aggregation Operators {#aggregation-operators}
 
-See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
+`sum`, `avg`, `min`, `max`, `count`, `stddev`, `stdvar`, `group`, `quantile`, `topk`, `bottomk`, `limitk` — with optional `by()` or `without()` modifiers.
+
+### Not yet supported {#not-yet-supported}
+
+- Aggregation operator `count_values`
+- Range functions `predict_linear`, `avg_over_time`, `min_over_time`, `max_over_time`, `sum_over_time`, `count_over_time`, `quantile_over_time`, `stddev_over_time`, `stdvar_over_time`, `present_over_time`, `absent_over_time`, `mad_over_time`, `first_over_time`, `ts_of_min_over_time`, `ts_of_max_over_time`, `ts_of_last_over_time`, `ts_of_first_over_time`
+- Function `absent`
 
 ## Example {#example}
 
@@ -320,7 +337,18 @@ Instant selectors, range selectors, label matchers (`=`, `!=`, `=~`, `!~`), offs
 
 ### Functions {#functions}
 
-See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for function-level support, limitations, and compliance results.
+| Category | Functions |
+|----------|-----------|
+| Range | `rate`, `irate`, `delta`, `idelta`, `increase`, `last_over_time`, `deriv`, `changes`, `resets` |
+| Math | `abs`, `sgn`, `floor`, `ceil`, `sqrt`, `exp`, `ln`, `log2`, `log10`, `rad`, `deg` |
+| Trig | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` |
+| DateTime | `day_of_week`, `day_of_month`, `days_in_month`, `day_of_year`, `minute`, `hour`, `month`, `year` |
+| Label | `label_replace`, `label_join` |
+| Type | `scalar`, `vector` |
+| Histogram | `histogram_quantile` |
+| Other | `time`, `pi` |
+
+`histogram_quantile` uses linear interpolation on classic histogram buckets (identified by the `le` label). Native histograms are not supported. The `phi` (quantile level) argument must be a constant scalar. Expressions that vary per step, such as `histogram_quantile(time() / 1000, ...)`, are rejected with a `NOT_IMPLEMENTED` exception.
 
 ### Operators {#operators}
 
@@ -330,7 +358,13 @@ Unary operators `+` and `-`.
 
 ### Aggregation Operators {#aggregation-operators}
 
-See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
+`sum`, `avg`, `min`, `max`, `count`, `stddev`, `stdvar`, `group`, `quantile`, `topk`, `bottomk`, `limitk` — with optional `by()` or `without()` modifiers.
+
+### Not yet supported {#not-yet-supported}
+
+- Aggregation operator `count_values`
+- Range functions `predict_linear`, `avg_over_time`, `min_over_time`, `max_over_time`, `sum_over_time`, `count_over_time`, `quantile_over_time`, `stddev_over_time`, `stdvar_over_time`, `present_over_time`, `absent_over_time`, `mad_over_time`, `first_over_time`, `ts_of_min_over_time`, `ts_of_max_over_time`, `ts_of_last_over_time`, `ts_of_first_over_time`
+- Function `absent`
 
 ## Example {#example}
 
