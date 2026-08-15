@@ -220,7 +220,13 @@
                 "concepts/features/interfaces/mysql",
                 "concepts/features/interfaces/odbc",
                 "concepts/features/interfaces/postgresql",
-                "concepts/features/interfaces/prometheus",
+                {
+                  "group": "Prometheus",
+                  "pages": [
+                    "concepts/features/interfaces/prometheus",
+                    "concepts/features/interfaces/promql-support-matrix"
+                  ]
+                },
                 "concepts/features/interfaces/ssh",
                 "concepts/features/interfaces/grpc",
                 "concepts/features/interfaces/arrowflight"

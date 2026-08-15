@@ -5692,6 +5692,10 @@
     "source": "/interfaces/prometheus"
   },
   {
+    "destination": "/concepts/features/interfaces/promql-support-matrix",
+    "source": "/interfaces/promql-support-matrix"
+  },
+  {
     "destination": "/integrations/language-clients/python/index",
     "source": "/interfaces/python"
   },

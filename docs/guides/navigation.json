@@ -168,7 +168,6 @@
             "guides/use-cases/observability/index",
             "guides/use-cases/observability/cloud-monitoring",
             "guides/use-cases/observability/self-managed-monitoring",
-            "guides/use-cases/observability/promql-support-matrix",
             {
               "group": "Build your own",
               "pages": [

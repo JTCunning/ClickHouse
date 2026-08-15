@@ -262,7 +262,7 @@ Instant selectors, range selectors, label matchers (`=`, `!=`, `=~`, `!~`), offs
 
 ### Functions {#functions}
 
-See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for function-level support, limitations, and compliance results.
+See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for function-level support, limitations, and compliance results.
 
 ### Operators {#operators}
 
@@ -272,7 +272,7 @@ Unary operators `+` and `-`.
 
 ### Aggregation Operators {#aggregation-operators}
 
-See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
+See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
 
 ## Example {#example}
 
@@ -320,7 +320,7 @@ Instant selectors, range selectors, label matchers (`=`, `!=`, `=~`, `!~`), offs
 
 ### Functions {#functions}
 
-See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for function-level support, limitations, and compliance results.
+See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for function-level support, limitations, and compliance results.
 
 ### Operators {#operators}
 
@@ -330,7 +330,7 @@ Unary operators `+` and `-`.
 
 ### Aggregation Operators {#aggregation-operators}
 
-See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
+See the [PromQL support matrix](/concepts/features/interfaces/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
 
 ## Example {#example}
 
