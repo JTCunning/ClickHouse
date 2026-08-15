@@ -136,37 +136,53 @@ Settings:
 
 ## PromQL query support {#promql-query-support}
 
-The `query` handler evaluates PromQL through the Prometheus HTTP query API. Configure handlers for the instant and range query endpoints:
+The `prometheus_api_v1` handler serves the Prometheus HTTP API on the main ClickHouse HTTP port. A prefix rule routes all supported API endpoints through one handler:
 
 ```xml
-<prometheus>
-    <port>9363</port>
-    <handlers>
-        <query>
-            <url>/api/v1/query</url>
-            <handler>
-                <type>query</type>
-                <table>db_name.time_series_table</table>
-            </handler>
-        </query>
-        <query_range>
-            <url>/api/v1/query_range</url>
-            <handler>
-                <type>query</type>
-                <table>db_name.time_series_table</table>
-            </handler>
-        </query_range>
-    </handlers>
-</prometheus>
+<http_handlers>
+    <defaults/>
+    <rule>
+        <url_prefix>/prometheus/api/v1</url_prefix>
+        <handler>
+            <type>prometheus_api_v1</type>
+        </handler>
+    </rule>
+</http_handlers>
 ```
 
-Settings:
+`<defaults/>` preserves the built-in handlers for endpoints such as `/ping` and for SQL requests. The prefix above exposes endpoints including:
+
+- `/prometheus/api/v1/query`
+- `/prometheus/api/v1/query_range`
+- `/prometheus/api/v1/write`
+- `/prometheus/api/v1/read`
+
+The example omits `table`, so each request selects a [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table with the `database` and `table` query parameters:
+
+```bash
+curl --user default:<password> \
+  "https://clickhouse.example.com:8443/prometheus/api/v1/query?query=up&database=db_name&table=time_series_table"
+```
+
+Configure a fixed table inside the handler when every request should use the same table:
+
+```xml
+<handler>
+    <type>prometheus_api_v1</type>
+    <database>db_name</database>
+    <table>time_series_table</table>
+</handler>
+```
+
+A table configured in the handler cannot be overridden by request parameters.
+
+Handler settings:
 
 | Name | Default | Description |
 |---|---|---|
-| `url` / `headers` / `method` | none | Filters used to find a matching handler. Similar to the fields with the same names in [`<http_handlers>`](/concepts/features/interfaces/http). |
-| `table` | none | The name of the [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table used to evaluate PromQL. The name can include a database. |
-| `database` | none | The database containing the table when `table` does not include a database. |
+| `url_prefix` | none | Matches every request path that starts with the configured prefix. |
+| `table` | none | The name of a `TimeSeries` table. When omitted, the request must provide the `table` query parameter. The configured name can include a database. |
+| `database` | none | The database containing the table. When omitted with `table`, the request must provide the `database` query parameter. |
 
 ClickHouse also evaluates PromQL through the `promql` dialect and the [`prometheusQuery`](/sql-reference/table-functions/prometheusQuery) and [`prometheusQueryRange`](/sql-reference/table-functions/prometheusQueryRange) table functions. See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for function-level support and compliance results.
 
