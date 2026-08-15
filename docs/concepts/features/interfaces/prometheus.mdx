@@ -8,11 +8,49 @@ doc_type: 'reference'
 
 import { CloudNotSupportedBadge } from "/snippets/components/CloudNotSupportedBadge/CloudNotSupportedBadge.jsx";
 
+## Expose ClickHouse server metrics {#expose}
+
+<Note>
+If you're using ClickHouse Cloud, you can expose metrics to Prometheus using the [Prometheus Integration](/products/cloud/features/monitoring/prometheus).
+</Note>
+
+Configure a dedicated port when a Prometheus server needs to scrape ClickHouse's own metrics:
+
+```xml
+<prometheus>
+    <port>9363</port>
+    <endpoint>/metrics</endpoint>
+    <metrics>true</metrics>
+    <asynchronous_metrics>true</asynchronous_metrics>
+    <events>true</events>
+    <errors>true</errors>
+    <histograms>true</histograms>
+    <dimensional_metrics>true</dimensional_metrics>
+</prometheus>
+```
+
+Settings:
+
+| Name | Default | Description |
+|---|---|---|
+| `port` | none | Port that serves ClickHouse metrics. |
+| `endpoint` | `/metrics` | HTTP endpoint for scraping metrics. It starts with `/`. |
+| `metrics` | true | Exposes metrics from [`system.metrics`](/reference/system-tables/metrics). |
+| `asynchronous_metrics` | true | Exposes metrics from [`system.asynchronous_metrics`](/reference/system-tables/asynchronous_metrics). |
+| `events` | true | Exposes metrics from [`system.events`](/reference/system-tables/events). |
+| `errors` | true | Exposes error counts from [`system.errors`](/reference/system-tables/errors). |
+| `histograms` | true | Exposes metrics from [`system.histogram_metrics`](/reference/system-tables/histogram_metrics). |
+| `dimensional_metrics` | true | Exposes metrics from [`system.dimensional_metrics`](/reference/system-tables/dimensional_metrics). |
+
+Check the endpoint:
+
+```bash
+curl http://127.0.0.1:9363/metrics
+```
+
 <CloudNotSupportedBadge/>
 
 ClickHouse implements the Prometheus HTTP API over a [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table. One handler serves remote write, remote read, instant PromQL queries, and range PromQL queries.
-
-A separate `<prometheus>` port exposes ClickHouse's own server metrics for scraping, independent of any `TimeSeries` table.
 
 ## Prerequisites {#prerequisites}
 
@@ -178,44 +216,4 @@ remote_read:
     basic_auth:
       username: default
       password: <password>
-```
-
-## Expose ClickHouse server metrics {#expose}
-
-<Note>
-If you're using ClickHouse Cloud, you can expose metrics to Prometheus using the [Prometheus Integration](/products/cloud/features/monitoring/prometheus).
-</Note>
-
-Configure a dedicated port when a Prometheus server needs to scrape ClickHouse's own metrics:
-
-```xml
-<prometheus>
-    <port>9363</port>
-    <endpoint>/metrics</endpoint>
-    <metrics>true</metrics>
-    <asynchronous_metrics>true</asynchronous_metrics>
-    <events>true</events>
-    <errors>true</errors>
-    <histograms>true</histograms>
-    <dimensional_metrics>true</dimensional_metrics>
-</prometheus>
-```
-
-Settings:
-
-| Name | Default | Description |
-|---|---|---|
-| `port` | none | Port that serves ClickHouse metrics. |
-| `endpoint` | `/metrics` | HTTP endpoint for scraping metrics. It starts with `/`. |
-| `metrics` | true | Exposes metrics from [`system.metrics`](/reference/system-tables/metrics). |
-| `asynchronous_metrics` | true | Exposes metrics from [`system.asynchronous_metrics`](/reference/system-tables/asynchronous_metrics). |
-| `events` | true | Exposes metrics from [`system.events`](/reference/system-tables/events). |
-| `errors` | true | Exposes error counts from [`system.errors`](/reference/system-tables/errors). |
-| `histograms` | true | Exposes metrics from [`system.histogram_metrics`](/reference/system-tables/histogram_metrics). |
-| `dimensional_metrics` | true | Exposes metrics from [`system.dimensional_metrics`](/reference/system-tables/dimensional_metrics). |
-
-Check the endpoint:
-
-```bash
-curl http://127.0.0.1:9363/metrics
 ```
