@@ -39,3 +39,7 @@ For users with **custom requirements** — such as highly specialized ingestion 
 | [Integrating OpenTelemetry](/guides/use-cases/observability/build-your-own/integrating-opentelemetry) | Collecting and exporting logs and traces using OpenTelemetry with ClickHouse.                                                           |
 | [Using Visualization Tools](/guides/use-cases/observability/build-your-own/grafana)    | Learn how to use observability visualization tools for ClickHouse, including HyperDX and Grafana.                                       |
 | [Demo Application](/guides/use-cases/observability/build-your-own/demo-application)    | Explore the OpenTelemetry demo application forked to work with ClickHouse for logs and traces.                                           |
+
+## Prometheus metrics {#prometheus-metrics}
+
+ClickHouse can store Prometheus metrics in a [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table and evaluate PromQL queries. See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for function-level support and compliance results.

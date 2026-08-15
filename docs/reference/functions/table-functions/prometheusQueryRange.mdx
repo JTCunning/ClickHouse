@@ -45,17 +45,7 @@ Instant selectors, range selectors, label matchers (`=`, `!=`, `=~`, `!~`), offs
 
 ### Functions {#functions}
 
-| Category | Functions |
-|----------|-----------|
-| Range    | `rate`, `irate`, `delta`, `idelta`, `increase`, `last_over_time`, `deriv`, `changes`, `resets` |
-| Math     | `abs`, `sgn`, `floor`, `ceil`, `sqrt`, `exp`, `ln`, `log2`, `log10`, `rad`, `deg` |
-| Trig     | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` |
-| DateTime | `day_of_week`, `day_of_month`, `days_in_month`, `day_of_year`, `minute`, `hour`, `month`, `year` |
-| Type     | `scalar`, `vector` |
-| Histogram | `histogram_quantile` |
-| Other    | `time`, `pi` |
-
-**Note**: `histogram_quantile` uses linear interpolation on classic histogram buckets (identified by the `le` label). Native histograms are not yet supported, and the `phi` (quantile level) argument must currently be a constant scalar — expressions that vary per step such as `histogram_quantile(time() / 1000, ...)` are rejected with a `NOT_IMPLEMENTED` error.
+See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for function-level support, limitations, and compliance results.
 
 ### Operators {#operators}
 
@@ -65,9 +55,7 @@ Unary operators `+` and `-`.
 
 ### Aggregation Operators {#aggregation-operators}
 
-`sum`, `avg`, `min`, `max`, `count`, `stddev`, `stdvar`, `group`, `quantile`, `topk`, `bottomk`, `limitk` — with optional `by()` or `without()` modifiers.
-
-Not yet supported: `count_values`.
+See the [PromQL support matrix](/guides/use-cases/observability/promql-support-matrix) for aggregation operator support. Supported aggregation operators accept optional `by()` or `without()` modifiers.
 
 ## Example {#example}
 

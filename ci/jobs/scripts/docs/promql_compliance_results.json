@@ -1,0 +1,2729 @@
+{
+  "passed": 411,
+  "failed": 3,
+  "unsupported": 125,
+  "total": 539,
+  "pct": 76.2523,
+  "breakdown": {
+    "should_fail mismatch (ClickHouse should reject but accepts)": 1,
+    "Function timestamp is not implemented": 4,
+    "Function sum_over_time is not implemented": 6,
+    "Function avg_over_time is not implemented": 7,
+    "Function max_over_time is not implemented": 7,
+    "Function min_over_time is not implemented": 6,
+    "Function count_over_time is not implemented": 6,
+    "Function stddev_over_time is not implemented": 6,
+    "Function stdvar_over_time is not implemented": 6,
+    "Function absent_over_time is not implemented": 6,
+    "Function quantile_over_time is not implemented": 54,
+    "Function round is not implemented": 2,
+    "Function predict_linear is not implemented": 6,
+    "reference mismatch (Prometheus behaves differently than expected)": 2,
+    "Function clamp_min is not implemented": 1,
+    "Function clamp_max is not implemented": 1,
+    "Function clamp is not implemented": 4,
+    "Aggregation operator 'count_values' is not implemented": 1,
+    "Function absent is not implemented": 2
+  },
+  "metadata": {
+    "clickhouse_version": "26.8.1.1",
+    "clickhouse_revision": "33b35f404376aad5fd89b23987663c0b6aeec5d7"
+  },
+  "results": [
+    {
+      "query": "42",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.234",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": ".123",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.23e-3",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0x3d",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "Inf",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "+Inf",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "-Inf",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "NaN",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "{__name__=\"demo_memory_usage_bytes\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes{type=\"free\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes{type!=\"free\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes{instance=~\"demo.promlabs.com:.*\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes{instance=~\"host\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes{instance!~\".*:10000\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes{type=\"free\", instance!=\"demo.promlabs.com:10000\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "{type=\"free\", instance!=\"demo.promlabs.com:10000\"}",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "{__name__=~\".*\"}",
+      "outcome": "failed",
+      "reason": "expected failure but ClickHouse succeeded"
+    },
+    {
+      "query": "nonexistent_metric_name",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes offset 1m",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes offset 5m",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes offset 10m",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes offset -1m",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes offset -5m",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes offset -10m",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_intermittent_metric",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar(nonexistent_metric_name)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar by() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar by(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar by(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar by(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar without() (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar without(instance) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar without(instance, type) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "max without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "min without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stddev without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "stdvar without(nonexistent) (demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "topk (3, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "bottomk (3, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "topk by(instance) (2, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "bottomk by(instance) (2, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "topk without(instance) (2, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "bottomk without(instance) (2, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "topk without() (2, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "bottomk without() (2, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(-0.5, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(0.1, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(0.5, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(0.75, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(0.95, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(0.90, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(0.99, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(1, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile(1.5, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "avg(max by(type) (demo_memory_usage_bytes))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 * 2 + 4 / 6 - 10 % 2 ^ 2",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus + (1 == bool 2)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus + (1 != bool 2)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus + (1 < bool 2)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus + (1 > bool 2)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus + (1 <= bool 2)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus + (1 >= bool 2)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes + 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes - 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes * 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes % 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes ^ 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes == 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes != 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes < 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes > 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes <= 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes >= 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes == bool 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes != bool 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes < bool 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes > bool 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes <= bool 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes >= bool 1.2345",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.2345 == bool demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.2345 != bool demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.2345 < bool demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.2345 > bool demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.2345 <= bool demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1.2345 >= bool demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 + demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 - demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 * demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 / demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 % demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 ^ demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 == demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 != demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 < demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 > demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 <= demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "0.12345 >= demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) + demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) - demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) * demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) / demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) % demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) ^ demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) == demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) != demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) < demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) > demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) <= demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "(1 * 2 + 4 / 6 - (10%7)^2) >= demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes + (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes - (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes * (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes % (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes ^ (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes == (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes != (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes < (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes > (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes <= (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes >= (1 * 2 + 4 / 6 - 10)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "timestamp(demo_memory_usage_bytes * 1)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function timestamp is not implemented"
+    },
+    {
+      "query": "timestamp(-demo_memory_usage_bytes)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function timestamp is not implemented"
+    },
+    {
+      "query": "demo_memory_usage_bytes + on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes - on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes * on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes % on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes ^ on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes == on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes != on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes < on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes > on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes <= on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes >= on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) + on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) - on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) * on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) / on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) % on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) ^ on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) == on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) != on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) < on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) > on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) <= on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum by(instance, type) (demo_memory_usage_bytes) >= on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes == bool on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes != bool on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes < bool on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes > bool on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes <= bool on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes >= bool on(instance, job, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / on(instance, job, type, __name__) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without(job) (demo_memory_usage_bytes) / on(instance, type) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without(job) (demo_memory_usage_bytes) / on(instance, type) group_left demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum without(job) (demo_memory_usage_bytes) / on(instance, type) group_left(job) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / on(instance, job) group_left demo_num_cpus",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / on(instance, type, job, non_existent) demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus * Inf",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus * -Inf",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_num_cpus * NaN",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes + -(1)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "-demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "-1 ^ 2",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 + time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 - time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 * time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 / time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 % time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 ^ time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() + 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() - 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() * 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() / 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() % 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() ^ 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() == bool 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() != bool 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() < bool 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() > bool 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() <= bool 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() >= bool 1",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 == bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 != bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 < bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 > bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 <= bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "1 >= bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() + time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() - time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() * time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() / time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() % time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() ^ time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() == bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() != bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() < bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() > bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() <= bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() >= bool time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() + demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() - demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() * demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() / demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() % demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() ^ demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() == demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() != demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() < demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() > demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() <= demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "time() >= demo_memory_usage_bytes",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes + time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes - time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes * time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes / time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes % time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes ^ time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes == time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes != time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes < time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes > time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes <= time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "demo_memory_usage_bytes >= time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sum_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function sum_over_time is not implemented"
+    },
+    {
+      "query": "sum_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function sum_over_time is not implemented"
+    },
+    {
+      "query": "sum_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function sum_over_time is not implemented"
+    },
+    {
+      "query": "sum_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function sum_over_time is not implemented"
+    },
+    {
+      "query": "sum_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function sum_over_time is not implemented"
+    },
+    {
+      "query": "sum_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function sum_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    },
+    {
+      "query": "max_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "max_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "max_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "max_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "max_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "max_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "min_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function min_over_time is not implemented"
+    },
+    {
+      "query": "min_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function min_over_time is not implemented"
+    },
+    {
+      "query": "min_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function min_over_time is not implemented"
+    },
+    {
+      "query": "min_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function min_over_time is not implemented"
+    },
+    {
+      "query": "min_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function min_over_time is not implemented"
+    },
+    {
+      "query": "min_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function min_over_time is not implemented"
+    },
+    {
+      "query": "count_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function count_over_time is not implemented"
+    },
+    {
+      "query": "count_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function count_over_time is not implemented"
+    },
+    {
+      "query": "count_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function count_over_time is not implemented"
+    },
+    {
+      "query": "count_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function count_over_time is not implemented"
+    },
+    {
+      "query": "count_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function count_over_time is not implemented"
+    },
+    {
+      "query": "count_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function count_over_time is not implemented"
+    },
+    {
+      "query": "stddev_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stddev_over_time is not implemented"
+    },
+    {
+      "query": "stddev_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stddev_over_time is not implemented"
+    },
+    {
+      "query": "stddev_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stddev_over_time is not implemented"
+    },
+    {
+      "query": "stddev_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stddev_over_time is not implemented"
+    },
+    {
+      "query": "stddev_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stddev_over_time is not implemented"
+    },
+    {
+      "query": "stddev_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stddev_over_time is not implemented"
+    },
+    {
+      "query": "stdvar_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stdvar_over_time is not implemented"
+    },
+    {
+      "query": "stdvar_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stdvar_over_time is not implemented"
+    },
+    {
+      "query": "stdvar_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stdvar_over_time is not implemented"
+    },
+    {
+      "query": "stdvar_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stdvar_over_time is not implemented"
+    },
+    {
+      "query": "stdvar_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stdvar_over_time is not implemented"
+    },
+    {
+      "query": "stdvar_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function stdvar_over_time is not implemented"
+    },
+    {
+      "query": "absent_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent_over_time is not implemented"
+    },
+    {
+      "query": "absent_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent_over_time is not implemented"
+    },
+    {
+      "query": "absent_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent_over_time is not implemented"
+    },
+    {
+      "query": "absent_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent_over_time is not implemented"
+    },
+    {
+      "query": "absent_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent_over_time is not implemented"
+    },
+    {
+      "query": "absent_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent_over_time is not implemented"
+    },
+    {
+      "query": "last_over_time(demo_memory_usage_bytes[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "last_over_time(demo_memory_usage_bytes[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "last_over_time(demo_memory_usage_bytes[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "last_over_time(demo_memory_usage_bytes[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "last_over_time(demo_memory_usage_bytes[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "last_over_time(demo_memory_usage_bytes[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "quantile_over_time(-0.5, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(-0.5, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(-0.5, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(-0.5, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(-0.5, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(-0.5, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.1, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.1, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.1, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.1, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.1, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.1, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.5, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.5, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.5, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.5, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.5, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.5, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.75, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.75, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.75, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.75, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.75, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.75, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.95, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.95, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.95, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.95, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.95, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.95, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.90, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.90, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.90, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.90, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.90, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.90, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.99, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.99, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.99, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.99, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.99, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(0.99, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1.5, demo_memory_usage_bytes[1s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1.5, demo_memory_usage_bytes[15s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1.5, demo_memory_usage_bytes[1m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1.5, demo_memory_usage_bytes[5m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1.5, demo_memory_usage_bytes[15m])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "quantile_over_time(1.5, demo_memory_usage_bytes[1h])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function quantile_over_time is not implemented"
+    },
+    {
+      "query": "timestamp(demo_num_cpus)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function timestamp is not implemented"
+    },
+    {
+      "query": "timestamp(timestamp(demo_num_cpus))",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function timestamp is not implemented"
+    },
+    {
+      "query": "abs(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "ceil(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "floor(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "exp(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sqrt(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "ln(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "log2(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "log10(demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "round(demo_memory_usage_bytes)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function round is not implemented"
+    },
+    {
+      "query": "abs(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "ceil(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "floor(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "exp(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "sqrt(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "ln(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "log2(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "log10(-demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "round(-demo_memory_usage_bytes)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function round is not implemented"
+    },
+    {
+      "query": "delta(nonexistent_metric[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(nonexistent_metric[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(nonexistent_metric[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "delta(demo_cpu_usage_seconds_total[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "delta(demo_cpu_usage_seconds_total[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "delta(demo_cpu_usage_seconds_total[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "delta(demo_cpu_usage_seconds_total[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "delta(demo_cpu_usage_seconds_total[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "delta(demo_cpu_usage_seconds_total[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(demo_cpu_usage_seconds_total[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(demo_cpu_usage_seconds_total[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(demo_cpu_usage_seconds_total[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(demo_cpu_usage_seconds_total[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(demo_cpu_usage_seconds_total[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "rate(demo_cpu_usage_seconds_total[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(demo_cpu_usage_seconds_total[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(demo_cpu_usage_seconds_total[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(demo_cpu_usage_seconds_total[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(demo_cpu_usage_seconds_total[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(demo_cpu_usage_seconds_total[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "increase(demo_cpu_usage_seconds_total[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "deriv(demo_disk_usage_bytes[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "deriv(demo_disk_usage_bytes[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "deriv(demo_disk_usage_bytes[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "deriv(demo_disk_usage_bytes[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "deriv(demo_disk_usage_bytes[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "deriv(demo_disk_usage_bytes[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "predict_linear(demo_disk_usage_bytes[1s], 600)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function predict_linear is not implemented"
+    },
+    {
+      "query": "predict_linear(demo_disk_usage_bytes[15s], 600)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function predict_linear is not implemented"
+    },
+    {
+      "query": "predict_linear(demo_disk_usage_bytes[1m], 600)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function predict_linear is not implemented"
+    },
+    {
+      "query": "predict_linear(demo_disk_usage_bytes[5m], 600)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function predict_linear is not implemented"
+    },
+    {
+      "query": "predict_linear(demo_disk_usage_bytes[15m], 600)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function predict_linear is not implemented"
+    },
+    {
+      "query": "predict_linear(demo_disk_usage_bytes[1h], 600)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function predict_linear is not implemented"
+    },
+    {
+      "query": "time()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"destination-value-$1\", \"instance\", \"demo.promlabs.com:(.*)\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"destination-value-$1\", \"instance\", \"host:(.*)\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"$1-$2\", \"instance\", \"local(.*):(.*)\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"value-$1\", \"nonexistent-src\", \"source-value-(.*)\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"value-$1\", \"nonexistent-src\", \"(.*)\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"value-$1\", \"instance\", \"non-matching-regex\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"\", \"dst\", \".*\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"job\", \"value-$1\", \"src\", \"(.*\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"~invalid\", \"\", \"src\", \"(.*)\")",
+      "outcome": "failed",
+      "reason": "reference unexpectedly succeeded (expected failure)"
+    },
+    {
+      "query": "label_replace(demo_num_cpus, \"instance\", \"\", \"\", \"\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_join(demo_num_cpus, \"new_label\", \"-\", \"instance\", \"job\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_join(demo_num_cpus, \"job\", \"-\", \"instance\", \"job\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_join(demo_num_cpus, \"job\", \"-\", \"instance\")",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "label_join(demo_num_cpus, \"~invalid\", \"-\", \"instance\")",
+      "outcome": "failed",
+      "reason": "reference unexpectedly succeeded (expected failure)"
+    },
+    {
+      "query": "day_of_month()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_week()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "days_in_month()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "hour()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "minute()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "month()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "year()",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_month(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_month(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_month(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_week(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_week(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "day_of_week(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "days_in_month(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "days_in_month(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "days_in_month(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "hour(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "hour(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "hour(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "minute(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "minute(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "minute(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "month(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "month(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "month(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "year(demo_batch_last_success_timestamp_seconds offset 1m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "year(demo_batch_last_success_timestamp_seconds offset 5m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "year(demo_batch_last_success_timestamp_seconds offset 10m)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "idelta(demo_cpu_usage_seconds_total[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "idelta(demo_cpu_usage_seconds_total[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "idelta(demo_cpu_usage_seconds_total[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "idelta(demo_cpu_usage_seconds_total[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "idelta(demo_cpu_usage_seconds_total[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "idelta(demo_cpu_usage_seconds_total[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "irate(demo_cpu_usage_seconds_total[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "irate(demo_cpu_usage_seconds_total[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "irate(demo_cpu_usage_seconds_total[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "irate(demo_cpu_usage_seconds_total[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "irate(demo_cpu_usage_seconds_total[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "irate(demo_cpu_usage_seconds_total[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "clamp_min(demo_memory_usage_bytes, 2)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function clamp_min is not implemented"
+    },
+    {
+      "query": "clamp_max(demo_memory_usage_bytes, 2)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function clamp_max is not implemented"
+    },
+    {
+      "query": "clamp(demo_memory_usage_bytes, 0, 1)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function clamp is not implemented"
+    },
+    {
+      "query": "clamp(demo_memory_usage_bytes, 0, 1000000000000)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function clamp is not implemented"
+    },
+    {
+      "query": "clamp(demo_memory_usage_bytes, 1000000000000, 0)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function clamp is not implemented"
+    },
+    {
+      "query": "clamp(demo_memory_usage_bytes, 1000000000000, 1000000000000)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function clamp is not implemented"
+    },
+    {
+      "query": "resets(demo_cpu_usage_seconds_total[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "resets(demo_cpu_usage_seconds_total[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "resets(demo_cpu_usage_seconds_total[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "resets(demo_cpu_usage_seconds_total[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "resets(demo_cpu_usage_seconds_total[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "resets(demo_cpu_usage_seconds_total[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "changes(demo_batch_last_success_timestamp_seconds[1s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "changes(demo_batch_last_success_timestamp_seconds[15s])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "changes(demo_batch_last_success_timestamp_seconds[1m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "changes(demo_batch_last_success_timestamp_seconds[5m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "changes(demo_batch_last_success_timestamp_seconds[15m])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "changes(demo_batch_last_success_timestamp_seconds[1h])",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "vector(1.23)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "vector(time())",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(-0.5, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.1, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.5, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.75, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.95, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.90, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.99, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(1, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(1.5, rate(demo_api_request_duration_seconds_bucket[1m]))",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.9, nonexistent_metric)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.9, demo_memory_usage_bytes)",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "histogram_quantile(0.9, {__name__=~\"demo_api_request_duration_seconds_.+\"})",
+      "outcome": "passed",
+      "reason": ""
+    },
+    {
+      "query": "count_values(\"value\", demo_api_request_duration_seconds_bucket)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Aggregation operator 'count_values' is not implemented"
+    },
+    {
+      "query": "absent(demo_memory_usage_bytes)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent is not implemented"
+    },
+    {
+      "query": "absent(nonexistent_metric_name)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function absent is not implemented"
+    },
+    {
+      "query": "max_over_time((time() - max(demo_batch_last_success_timestamp_seconds) < 1000)[5m:10s] offset 5m)",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function max_over_time is not implemented"
+    },
+    {
+      "query": "avg_over_time(rate(demo_cpu_usage_seconds_total[1m])[2m:10s])",
+      "outcome": "unsupported",
+      "reason": "bad_data: Function avg_over_time is not implemented"
+    }
+  ]
+}

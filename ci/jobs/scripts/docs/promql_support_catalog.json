@@ -1,0 +1,159 @@
+{
+  "categories": [
+    {
+      "name": "Range functions",
+      "slug": "range-functions",
+      "features": [
+        {"name": "rate"},
+        {"name": "increase"},
+        {"name": "irate"},
+        {"name": "delta"},
+        {"name": "idelta"},
+        {"name": "deriv"},
+        {"name": "double_exponential_smoothing", "note": "Experimental in Prometheus."},
+        {"name": "changes"},
+        {"name": "resets"},
+        {"name": "predict_linear"},
+        {"name": "avg_over_time"},
+        {"name": "min_over_time"},
+        {"name": "max_over_time"},
+        {"name": "sum_over_time"},
+        {"name": "count_over_time"},
+        {"name": "quantile_over_time"},
+        {"name": "stddev_over_time"},
+        {"name": "stdvar_over_time"},
+        {"name": "last_over_time"},
+        {"name": "present_over_time"},
+        {"name": "absent_over_time"},
+        {"name": "mad_over_time", "note": "Experimental in Prometheus."},
+        {"name": "first_over_time"},
+        {"name": "ts_of_min_over_time", "note": "Experimental in Prometheus."},
+        {"name": "ts_of_max_over_time", "note": "Experimental in Prometheus."},
+        {"name": "ts_of_last_over_time", "note": "Experimental in Prometheus."},
+        {"name": "ts_of_first_over_time", "note": "Experimental in Prometheus."}
+      ]
+    },
+    {
+      "name": "Math and trigonometric functions",
+      "slug": "math-and-trigonometric-functions",
+      "features": [
+        {"name": "abs"},
+        {"name": "ceil"},
+        {"name": "clamp"},
+        {"name": "clamp_max"},
+        {"name": "clamp_min"},
+        {"name": "exp"},
+        {"name": "floor"},
+        {"name": "ln"},
+        {"name": "log2"},
+        {"name": "log10"},
+        {"name": "max_of", "note": "Experimental in Prometheus."},
+        {"name": "min_of", "note": "Experimental in Prometheus."},
+        {"name": "round"},
+        {"name": "sgn"},
+        {"name": "sqrt"},
+        {"name": "acos"},
+        {"name": "acosh"},
+        {"name": "asin"},
+        {"name": "asinh"},
+        {"name": "atan"},
+        {"name": "atanh"},
+        {"name": "cos"},
+        {"name": "cosh"},
+        {"name": "sin"},
+        {"name": "sinh"},
+        {"name": "tan"},
+        {"name": "tanh"},
+        {"name": "deg"},
+        {"name": "rad"}
+      ]
+    },
+    {
+      "name": "Date and time functions",
+      "slug": "date-and-time-functions",
+      "features": [
+        {"name": "day_of_month"},
+        {"name": "day_of_week"},
+        {"name": "day_of_year"},
+        {"name": "days_in_month"},
+        {"name": "hour"},
+        {"name": "minute"},
+        {"name": "month"},
+        {"name": "year"}
+      ]
+    },
+    {
+      "name": "Label functions",
+      "slug": "label-functions",
+      "features": [
+        {"name": "label_join"},
+        {"name": "label_replace"},
+        {"name": "info", "note": "Experimental in Prometheus."}
+      ]
+    },
+    {
+      "name": "Histogram functions",
+      "slug": "histogram-functions",
+      "features": [
+        {"name": "histogram_avg"},
+        {"name": "histogram_count"},
+        {"name": "histogram_fraction"},
+        {
+          "name": "histogram_quantile",
+          "partial": true,
+          "note": "Supports classic histograms and a constant quantile argument. Native histograms are not supported."
+        },
+        {"name": "histogram_quantiles", "note": "Experimental in Prometheus."},
+        {"name": "histogram_stddev"},
+        {"name": "histogram_stdvar"},
+        {"name": "histogram_sum"}
+      ]
+    },
+    {
+      "name": "Type and utility functions",
+      "slug": "type-and-utility-functions",
+      "features": [
+        {"name": "absent"},
+        {"name": "end", "note": "Experimental in Prometheus."},
+        {"name": "pi"},
+        {"name": "range", "note": "Experimental in Prometheus."},
+        {"name": "scalar"},
+        {"name": "sort"},
+        {"name": "sort_desc"},
+        {"name": "sort_by_label", "note": "Experimental in Prometheus."},
+        {"name": "sort_by_label_desc", "note": "Experimental in Prometheus."},
+        {"name": "start", "note": "Experimental in Prometheus."},
+        {"name": "start_timestamp", "note": "Experimental in Prometheus."},
+        {"name": "step", "note": "Experimental in Prometheus and requires Prometheus duration expressions."},
+        {"name": "time"},
+        {"name": "timestamp"},
+        {"name": "vector"}
+      ]
+    },
+    {
+      "name": "Aggregation operators",
+      "slug": "aggregation-operators",
+      "features": [
+        {"name": "sum", "kind": "aggregation"},
+        {"name": "min", "kind": "aggregation"},
+        {"name": "max", "kind": "aggregation"},
+        {"name": "avg", "kind": "aggregation"},
+        {"name": "group", "kind": "aggregation"},
+        {"name": "stddev", "kind": "aggregation"},
+        {"name": "stdvar", "kind": "aggregation"},
+        {"name": "count", "kind": "aggregation"},
+        {"name": "count_values", "kind": "aggregation"},
+        {"name": "bottomk", "kind": "aggregation"},
+        {"name": "topk", "kind": "aggregation"},
+        {"name": "limitk", "kind": "aggregation", "note": "Experimental in Prometheus."},
+        {"name": "limit_ratio", "kind": "aggregation", "note": "Experimental in Prometheus."},
+        {
+          "name": "quantile",
+          "kind": "aggregation",
+          "partial": true,
+          "note": "Supports a constant quantile argument. A quantile that varies by evaluation step is not supported."
+        }
+      ]
+    }
+  ]
+}
