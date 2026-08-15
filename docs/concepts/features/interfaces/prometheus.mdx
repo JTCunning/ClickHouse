@@ -79,9 +79,11 @@ curl http://127.0.0.1:9363/metrics
 
 <CloudNotSupportedBadge/>
 
+## Prometheus HTTP API and PromQL {#prometheus-http-api-and-promql}
+
 ClickHouse implements the Prometheus HTTP API over a [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table. One handler serves remote write, remote read, instant PromQL queries, and range PromQL queries.
 
-## Prerequisites {#prerequisites}
+### Prerequisites {#prerequisites}
 
 Enable the [`allow_experimental_time_series_table`](/reference/settings/session-settings/allow-experimental#allow_experimental_time_series_table) setting for the user that creates and accesses the table:
 
@@ -98,7 +100,7 @@ CREATE TABLE prometheus.metrics ENGINE = TimeSeries;
 
 For HTTP API requests, enable `allow_experimental_time_series_table` in the profile of the API user.
 
-## Configure the Prometheus API {#configure-prometheus-api}
+### Configure the Prometheus API {#configure-prometheus-api}
 
 Configure one prefix-routed handler on the main ClickHouse HTTP port:
 
@@ -145,7 +147,7 @@ Routing and handler settings:
 | `table` | none | The name of a `TimeSeries` table. When omitted, the request must provide the `table` query parameter. The configured name can include a database. |
 | `database` | none | The database containing the table. A request can provide it as a query parameter. When omitted, ClickHouse uses a database from a qualified `table` value or falls back to `default`. |
 
-## Ingest metrics with remote write {#remote-write}
+### Ingest metrics with remote write {#remote-write}
 
 ClickHouse supports the [Prometheus remote-write protocol](https://prometheus.io/docs/specs/remote_write_spec/). Configure Prometheus to write to the handler:
 
@@ -159,7 +161,7 @@ remote_write:
 
 Prometheus sends samples to the `prometheus.metrics` table.
 
-## Query with PromQL {#promql-query-support}
+### Query with PromQL {#promql-query-support}
 
 Use the instant-query endpoint to evaluate a PromQL expression at one point in time:
 
@@ -186,7 +188,7 @@ curl --user default:<password> --get \
 
 See the [supported PromQL features](/sql-reference/table-functions/prometheusQueryRange#supported-promql-features) for the function and aggregation operator list used by the HTTP API, the `promql` dialect, and the table functions.
 
-### Grafana {#grafana}
+#### Grafana {#grafana}
 
 Configure a Prometheus data source with the base URL ending before `/api/v1`:
 
@@ -208,7 +210,7 @@ datasources:
 
 Grafana appends `/api/v1/query` or `/api/v1/query_range` to this base URL and adds `customQueryParameters` to each request.
 
-### SQL entry points {#sql-entry-points}
+#### SQL entry points {#sql-entry-points}
 
 ClickHouse uses the same PromQL converter for the HTTP API, the `promql` dialect, and the [`prometheusQuery`](/sql-reference/table-functions/prometheusQuery) and [`prometheusQueryRange`](/sql-reference/table-functions/prometheusQueryRange) table functions.
 
@@ -233,7 +235,7 @@ FROM prometheusQuery(
 );
 ```
 
-## Read metrics with remote read {#remote-read}
+### Read metrics with remote read {#remote-read}
 
 ClickHouse supports the [Prometheus remote-read protocol](https://prometheus.io/docs/prometheus/latest/querying/remote_read_api/) at `/prometheus/api/v1/read`.
 
