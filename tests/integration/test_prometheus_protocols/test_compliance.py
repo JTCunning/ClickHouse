@@ -472,7 +472,6 @@ class ComplianceResult:
         self.failed = 0
         self.unsupported = 0
         self.failures = []
-        self.results = []
 
     @property
     def total(self):
@@ -482,21 +481,16 @@ class ComplianceResult:
     def score(self):
         return (self.passed / self.total * 100) if self.total > 0 else 0
 
-    def record_pass(self, query):
+    def record_pass(self):
         self.passed += 1
-        self.results.append({"query": query, "outcome": "passed", "reason": ""})
 
     def record_fail(self, query, reason):
         self.failed += 1
         self.failures.append((query, reason))
-        self.results.append({"query": query, "outcome": "failed", "reason": reason})
 
     def record_unsupported(self, query, reason):
         self.unsupported += 1
         self.failures.append((query, f"UNSUPPORTED: {reason}"))
-        self.results.append(
-            {"query": query, "outcome": "unsupported", "reason": reason}
-        )
 
 
 # ── Fixtures and test ────────────────────────────────────────────────────────
@@ -550,7 +544,7 @@ def test_promql_compliance():
 
         if should_fail:
             if test_failed:
-                result.record_pass(query)
+                result.record_pass()
             else:
                 result.record_fail(query, "expected failure but ClickHouse succeeded")
             continue
@@ -564,7 +558,7 @@ def test_promql_compliance():
 
         match, diff = compare_results(ref_data, test_data)
         if match:
-            result.record_pass(query)
+            result.record_pass()
         else:
             result.record_fail(query, diff)
 
@@ -634,13 +628,6 @@ def test_promql_compliance():
             "total": result.total,
             "pct": round(result.score, 4),
             "breakdown": breakdown,
-            "metadata": {
-                "clickhouse_version": node.query("SELECT version()").strip(),
-                "clickhouse_revision": node.query(
-                    "SELECT value FROM system.build_options WHERE name = 'GIT_HASH'"
-                ).strip(),
-            },
-            "results": result.results,
         }
         with open(out_path, "w") as out_f:
             json.dump(record, out_f, indent=2)
