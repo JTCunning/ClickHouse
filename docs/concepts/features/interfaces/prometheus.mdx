@@ -1,14 +1,18 @@
 ---
-description: 'Use ClickHouse to store Prometheus metrics, ingest and read Prometheus protocols, and evaluate PromQL.'
+description: 'Prometheus HTTP API support in ClickHouse: remote write, remote read, PromQL queries, and server metrics.'
 sidebarTitle: 'Prometheus and PromQL'
 slug: /interfaces/prometheus
 title: 'Prometheus protocols and PromQL'
 doc_type: 'reference'
 ---
 
-ClickHouse can store Prometheus metrics in a [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table and serve the Prometheus HTTP API. The same API handler supports remote write, remote read, instant PromQL queries, and range PromQL queries.
+import { CloudNotSupportedBadge } from "/snippets/components/CloudNotSupportedBadge/CloudNotSupportedBadge.jsx";
 
-ClickHouse can also expose its own server metrics for a Prometheus server to scrape. This is a separate use case from storing and querying metrics in a `TimeSeries` table.
+<CloudNotSupportedBadge/>
+
+ClickHouse implements the Prometheus HTTP API over a [`TimeSeries`](/reference/engines/table-engines/integrations/time-series) table. One handler serves remote write, remote read, instant PromQL queries, and range PromQL queries.
+
+A separate `<prometheus>` port exposes ClickHouse's own server metrics for scraping, independent of any `TimeSeries` table.
 
 ## Prerequisites {#prerequisites}
 
