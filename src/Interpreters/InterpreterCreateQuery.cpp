@@ -1671,6 +1671,7 @@ bool isReplicated(const ASTStorage & storage)
 BlockIO InterpreterCreateQuery::createTable(ASTCreateQuery & create)
 {
     auto component_guard = Coordination::setCurrentComponent("InterpreterCreateQuery::createTable");
+
     /// Temporary tables are created out of databases.
     if (create.isTemporary() && create.attach)
         throw Exception(ErrorCodes::SYNTAX_ERROR, "ATTACH of TEMPORARY tables are not supported");

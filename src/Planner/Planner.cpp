@@ -63,6 +63,7 @@
 #include <Storages/StorageDistributed.h>
 #include <Storages/StorageDummy.h>
 #include <Storages/StorageMerge.h>
+#include <Storages/StorageProxy.h>
 #include <Storages/StorageView.h>
 #include <Storages/ObjectStorage/StorageObjectStorageCluster.h>
 
@@ -97,6 +98,8 @@
 #include <Planner/PlannerWindowFunctions.h>
 #include <Planner/Utils.h>
 #include <base/types.h>
+
+#include <unordered_set>
 
 
 namespace ProfileEvents
@@ -206,6 +209,25 @@ namespace ErrorCodes
 namespace
 {
 
+StoragePtr unwrapStorageProxy(StoragePtr storage)
+{
+    std::unordered_set<const IStorage *> visited;
+
+    while (storage)
+    {
+        if (!visited.insert(storage.get()).second)
+            break;
+
+        const auto * proxy = typeid_cast<const StorageProxy *>(storage.get());
+        if (!proxy)
+            break;
+
+        storage = proxy->getNested();
+    }
+
+    return storage;
+}
+
 /** Check that table and table function table expressions from planner context support transactions.
   *
   * There is precondition that table expression data for table expression nodes is collected in planner context.
@@ -262,10 +284,11 @@ FiltersForTableExpressionMap collectFiltersForAnalysis(const QueryTreeNodePtr & 
 
     auto storage_requires_filter_collection = [parallel_replicas_estimation_enabled](const StoragePtr & storage_ptr)
     {
-        const auto * raw = storage_ptr.get();
+        const auto effective_storage = unwrapStorageProxy(storage_ptr);
+        const auto * raw = effective_storage.get();
         if (typeid_cast<const StorageDistributed *>(raw))
             return true;
-        if (parallel_replicas_estimation_enabled && std::dynamic_pointer_cast<MergeTreeData>(storage_ptr))
+        if (parallel_replicas_estimation_enabled && std::dynamic_pointer_cast<MergeTreeData>(effective_storage))
             return true;
         if (typeid_cast<const StorageObjectStorageCluster *>(raw))
             return true;
@@ -282,6 +305,7 @@ FiltersForTableExpressionMap collectFiltersForAnalysis(const QueryTreeNodePtr & 
             continue;
 
         const auto & storage = table_node ? table_node->getStorage() : table_function_node->getStorage();
+        const auto effective_storage = unwrapStorageProxy(storage);
         if (storage_requires_filter_collection(storage))
         {
             collect_filters = true;
@@ -293,7 +317,7 @@ FiltersForTableExpressionMap collectFiltersForAnalysis(const QueryTreeNodePtr & 
         /// above the `Merge` must still reach those storages via `query_info`.
         /// The dummy-plan trick captures the WHERE clause for the `Merge` table
         /// expression, which `StorageMerge` then forwards to each child storage.
-        if (const auto * storage_merge = typeid_cast<const StorageMerge *>(storage.get()))
+        if (const auto * storage_merge = typeid_cast<const StorageMerge *>(effective_storage.get()))
         {
             if (storage_merge->hasChildTable(storage_requires_filter_collection))
             {
@@ -2599,10 +2623,13 @@ void Planner::buildPlanForQueryNode()
         for (const auto & it : table_expression_nodes)
         {
             auto * table_node = it->as<TableNode>();
-            if (!table_node)
+            auto * table_function_node = it->as<TableFunctionNode>();
+            if (!table_node && !table_function_node)
                 continue;
 
-            const auto & modifiers = table_node->getTableExpressionModifiers();
+            const auto & modifiers = table_node
+                ? table_node->getTableExpressionModifiers()
+                : table_function_node->getTableExpressionModifiers();
             /// A follower must keep the setting on for its own read-side `STREAM` refusal to fire.
             if (modifiers.has_value()
                 && (modifiers->hasFinal()

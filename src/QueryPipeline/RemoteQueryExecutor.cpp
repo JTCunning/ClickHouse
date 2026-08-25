@@ -512,21 +512,40 @@ void RemoteQueryExecutor::sendQueryUnlocked(ClientInfo::QueryKind query_kind, As
             "Sending a distributed query with unknown (zero) client version. "
             "The query context was not initialized as an initial query");
 
-    /// Forward this node's current roles so the remote scopes row policies the same way (gated by the setting).
-    /// Reset first against stale/injected values, and skip when initial_user was rewritten (remote(user=>...)).
+    /// Forward this node's current roles so the remote scopes row policies the same way. A
+    /// TimeSeries target read carries the exact snapshot captured with its target context even
+    /// when the regular Distributed role-forwarding setting is disabled.
+    const auto & context_current_roles = context->getClientInfo().current_roles;
+    const bool time_series_target_read = modified_client_info.is_time_series_target_read;
     modified_client_info.current_roles.reset();
-    if (context->getSettingsRef()[Setting::push_external_roles_in_interserver_queries]
+    if ((time_series_target_read || context->getSettingsRef()[Setting::push_external_roles_in_interserver_queries])
         && modified_client_info.initial_user == modified_client_info.current_user)
     {
-        const auto & access_control = context->getAccessControl();
-        Strings current_role_names;
-        for (const auto & role_id : context->getCurrentRoles())
+        if (time_series_target_read)
         {
-            /// tryReadName: skip a concurrently-dropped role (its policies already target nobody).
-            if (auto name = access_control.tryReadName(role_id))
-                current_role_names.push_back(*name);
+            /// Use the exact server-captured snapshot, including an explicitly empty active-role set.
+            modified_client_info.current_roles = context_current_roles;
         }
-        modified_client_info.current_roles = std::move(current_role_names);
+        else if (!context->getUserID() && context_current_roles)
+        {
+            /// SQL SECURITY NONE-like contexts intentionally have full local access and no user, so
+            /// getCurrentRoles() is empty. Preserve the role snapshot explicitly carried by
+            /// server-created contexts; normal user contexts still derive roles from access.
+            modified_client_info.current_roles = context_current_roles;
+        }
+        else
+        {
+            /// Existing normal Distributed behavior.
+            const auto & access_control = context->getAccessControl();
+            Strings current_role_names;
+            for (const auto & role_id : context->getCurrentRoles())
+            {
+                /// tryReadName: skip a concurrently-dropped role (its policies already target nobody).
+                if (auto name = access_control.tryReadName(role_id))
+                    current_role_names.push_back(*name);
+            }
+            modified_client_info.current_roles = std::move(current_role_names);
+        }
     }
 
     if (extension)

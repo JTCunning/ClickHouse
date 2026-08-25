@@ -1,10 +1,13 @@
 #include <TableFunctions/TableFunctionTimeSeries.h>
 
+#include <Access/Common/AccessFlags.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/evaluateConstantExpression.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
+#include <Storages/StorageInMemoryMetadata.h>
+#include <Storages/StorageProxy.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/checkAndGetLiteralArgument.h>
 #include <TableFunctions/TableFunctionFactory.h>
@@ -20,6 +23,71 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
     extern const int LOGICAL_ERROR;
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
+}
+
+namespace
+{
+
+/// A table function normally returns its nested storage directly, which makes the outer query
+/// read it with the caller's context. TimeSeries targets are implementation tables, so keep the
+/// target context with the proxy and use it for both local and Distributed reads.
+class StorageTimeSeriesTargetProxy final : public StorageProxy
+{
+public:
+    StorageTimeSeriesTargetProxy(const StorageID & table_id_, StoragePtr nested_, ContextPtr target_context_)
+        : StorageProxy(table_id_)
+        , nested(std::move(nested_))
+        , target_context(std::move(target_context_))
+    {
+        auto nested_metadata = nested->getInMemoryMetadataPtr(target_context, false);
+        setInMemoryMetadata(*nested_metadata);
+    }
+
+    StoragePtr getNested() const override { return nested; }
+
+    bool supportsTransactions() const override { return nested->supportsTransactions(); }
+    bool supportsStreaming() const override { return nested->supportsStreaming(); }
+    bool isMergeTree() const override { return nested->isMergeTree(); }
+
+    QueryProcessingStage::Enum getQueryProcessingStage(
+        ContextPtr /* context */,
+        QueryProcessingStage::Enum to_stage,
+        const StorageSnapshotPtr & /* storage_snapshot */,
+        SelectQueryInfo & info) const override
+    {
+        auto nested_metadata = nested->getInMemoryMetadataPtr(target_context, false);
+        auto nested_snapshot = nested->getStorageSnapshot(nested_metadata, target_context);
+        return nested->getQueryProcessingStage(target_context, to_stage, nested_snapshot, info);
+    }
+
+    void read(
+        QueryPlan & query_plan,
+        const Names & column_names,
+        const StorageSnapshotPtr & /* storage_snapshot */,
+        SelectQueryInfo & query_info,
+        ContextPtr /* context */,
+        QueryProcessingStage::Enum processed_stage,
+        size_t max_block_size,
+        size_t num_streams) override
+    {
+        auto nested_metadata = nested->getInMemoryMetadataPtr(target_context, false);
+        auto nested_snapshot = nested->getStorageSnapshot(nested_metadata, target_context);
+        nested->read(
+            query_plan,
+            column_names,
+            nested_snapshot,
+            query_info,
+            target_context,
+            processed_stage,
+            max_block_size,
+            num_streams);
+    }
+
+private:
+    const StoragePtr nested;
+    const ContextPtr target_context;
+};
+
 }
 
 
@@ -87,14 +155,32 @@ StoragePtr TableFunctionTimeSeriesTarget<target_kind>::executeImpl(
         ContextPtr context,
         const String & /* table_name */,
         ColumnsDescription /* cached_columns */,
-        bool /* is_insert_query */) const
+        bool is_insert_query) const
 {
-    return getTargetTable(context);
+    if (is_insert_query)
+    {
+        context->checkAccess(AccessType::INSERT, time_series_storage_id);
+        auto target_table = getTargetTable(context);
+        checkTimeSeriesTargetInsertAccess(context, time_series_storage_id, target_table);
+        return target_table;
+    }
+
+    checkTimeSeriesTableSelectAccess(
+        context,
+        time_series_storage_id,
+        true);
+    auto target_table = getTargetTable(context);
+    checkTimeSeriesTargetSelectAccess(context, time_series_storage_id, target_table);
+    checkTimeSeriesTargetSelectRowPolicy(context, time_series_storage_id, target_table);
+    auto target_context = getTimeSeriesTargetContext(context, {target_table});
+    return std::make_shared<StorageTimeSeriesTargetProxy>(
+        target_table->getStorageID(), std::move(target_table), std::move(target_context));
 }
 
 template <ViewTarget::Kind target_kind>
 ColumnsDescription TableFunctionTimeSeriesTarget<target_kind>::getActualTableStructure(ContextPtr context, bool /* is_insert_query */) const
 {
+    context->checkAccess(AccessType::SELECT, time_series_storage_id);
     auto metadata_snapshot = getTargetTable(context)->getInMemoryMetadataPtr(context, false);
     return metadata_snapshot->columns;
 }
@@ -133,9 +219,14 @@ SELECT * FROM timeSeriesSamples('db_name', 'time_series_table');
 ```
 
 <Note>
+Access is authorized through the logical TimeSeries table. Direct `SELECT` or `INSERT` grants on
+supported target tables are not required.
+</Note>
+
+<Note>
 The function `timeSeriesSamples` has an alias `timeSeriesData` which is kept for backwards compatibility.
 </Note>
-)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction}, {.allow_readonly = true});
 
     factory.registerAlias("timeSeriesData", "timeSeriesSamples");
 
@@ -161,7 +252,12 @@ SELECT * FROM timeSeriesTags(db_name.time_series_table);
 SELECT * FROM timeSeriesTags('db_name.time_series_table');
 SELECT * FROM timeSeriesTags('db_name', 'time_series_table');
 ```
-)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+
+<Note>
+Access is authorized through the logical TimeSeries table. Direct `SELECT` or `INSERT` grants on
+supported target tables are not required.
+</Note>
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction}, {.allow_readonly = true});
 
     factory.registerFunction<TableFunctionTimeSeriesTarget<ViewTarget::Metrics>>(
         {.description = R"DOCS_MD(
@@ -185,12 +281,21 @@ SELECT * FROM timeSeriesMetrics(db_name.time_series_table);
 SELECT * FROM timeSeriesMetrics('db_name.time_series_table');
 SELECT * FROM timeSeriesMetrics('db_name', 'time_series_table');
 ```
-)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+
+<Note>
+Access is authorized through the logical TimeSeries table. Direct `SELECT` or `INSERT` grants on
+supported target tables are not required.
+</Note>
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction}, {.allow_readonly = true});
 
     factory.registerFunction<TableFunctionTimeSeriesSelector>(
         {.description = R"DOCS_MD(
 Reads time series from a TimeSeries table filtered by a selector and with timestamps in a specified interval.
 This function is similar to [range selectors](https://prometheus.io/docs/prometheus/latest/querying/basics/#range-vector-selectors) but it's used to implement [instant selectors](https://prometheus.io/docs/prometheus/latest/querying/basics/#instant-vector-selectors) too.
+
+<Note>
+Access is authorized through the logical TimeSeries table rather than its implementation tables.
+</Note>
 
 ## Syntax {#syntax}
 
@@ -222,11 +327,15 @@ There is no specific order for returned data.
 ```sql
 SELECT * FROM timeSeriesSelector(mytable, 'http_requests{job="prometheus"}', now() - INTERVAL 10 MINUTES, now())
 ```
-)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction}, {.allow_readonly = true});
 
     factory.registerFunction<TableFunctionPrometheusQuery</* range = */ false>>(
         {.description = R"DOCS_MD(
 Evaluates a prometheus query using data from a TimeSeries table.
+
+<Note>
+Access is authorized through the logical TimeSeries table rather than its implementation tables.
+</Note>
 
 ## Syntax {#syntax}
 
@@ -298,10 +407,14 @@ Unary operators `+` and `-`.
 ```sql
 SELECT * FROM prometheusQuery(mytable, 'rate(http_requests{job="prometheus"}[10m])[1h:10m]', now())
 ```
-)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction}, {.allow_readonly = true});
     factory.registerFunction<TableFunctionPrometheusQuery</* range = */ true>>(
         {.description = R"DOCS_MD(
 Evaluates a prometheus query using data from a TimeSeries table over a range of evaluation times.
+
+<Note>
+Access is authorized through the logical TimeSeries table rather than its implementation tables.
+</Note>
 
 ## Syntax {#syntax}
 
@@ -375,7 +488,7 @@ Unary operators `+` and `-`.
 ```sql
 SELECT * FROM prometheusQueryRange(mytable, 'rate(http_requests{job="prometheus"}[10m])[1h:10m]', now() - INTERVAL 10 MINUTES, now(), INTERVAL 1 MINUTE)
 ```
-)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction}, {.allow_readonly = true});
 }
 
 }

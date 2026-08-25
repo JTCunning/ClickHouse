@@ -1,0 +1,13 @@
+<clickhouse>
+    <remote_servers>
+        <test_cluster>
+            <secret>123457</secret>
+            <shard>
+                <replica>
+                    <host>node</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </test_cluster>
+    </remote_servers>
+</clickhouse>

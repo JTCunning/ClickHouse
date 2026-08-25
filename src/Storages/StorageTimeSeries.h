@@ -1,14 +1,19 @@
 #pragma once
 
+#include <Core/QualifiedTableName.h>
 #include <Parsers/ASTViewTargets.h>
 #include <Parsers/IAST_fwd.h>
 #include <Storages/IStorage_fwd.h>
 #include <Storages/StorageWithCommonVirtualColumns.h>
 #include <array>
+#include <optional>
+#include <vector>
 
 
 namespace DB
 {
+
+class ClientInfo;
 struct TimeSeriesSettings;
 using TimeSeriesSettingsPtr = std::shared_ptr<const TimeSeriesSettings>;
 
@@ -149,5 +154,49 @@ private:
 
 std::shared_ptr<StorageTimeSeries> storagePtrToTimeSeries(StoragePtr storage);
 std::shared_ptr<const StorageTimeSeries> storagePtrToTimeSeries(ConstStoragePtr storage);
+
+/// Checks SELECT access to a TimeSeries table and rejects effective outer-table row policies.
+/// Target-based reads cannot preserve a policy defined on the logical TimeSeries table.
+void checkTimeSeriesTableSelectAccess(
+    const ContextPtr & context,
+    const StorageID & time_series_table_id,
+    bool check_row_policy = true);
+
+/// Validates that a target can be read through the internal TimeSeries target context. The logical
+/// TimeSeries table is the access surface, so hidden implementation-table SELECT grants are not
+/// checked here.
+void checkTimeSeriesTargetSelectAccess(
+    const ContextPtr & context,
+    const StorageID & time_series_table_id,
+    const StoragePtr & target_table);
+
+/// Rejects target-based reads when a target or one of its forwarding wrappers has an effective
+/// SELECT row policy. View-like targets are also rejected because their arbitrary inner queries
+/// cannot be safely checked before they run in the internal target context.
+void checkTimeSeriesTargetSelectRowPolicy(
+    const ContextPtr & context,
+    const StorageID & time_series_table_id,
+    const StoragePtr & target_table);
+
+/// Forwarding targets re-check access on their physical destination, so the logical TimeSeries
+/// grant cannot replace the physical target grant without a separate write-side marker.
+void checkTimeSeriesTargetInsertAccess(
+    const ContextPtr & context,
+    const StorageID & time_series_table_id,
+    const StoragePtr & target_table);
+
+/// Builds the internal context used by TimeSeries table functions to read their target tables.
+/// The caller must check the logical TimeSeries table first.
+ContextMutablePtr getTimeSeriesTargetContext(
+    const ContextPtr & context,
+    const std::vector<StoragePtr> & target_tables);
+
+/// Returns the exact, fully qualified named storages covered by a target read. Forwarding wrappers
+/// are included, as is the named remote table of a Distributed target.
+std::vector<QualifiedTableName> getTimeSeriesTargetTableNames(
+    const std::vector<StoragePtr> & target_tables,
+    const ContextPtr & context);
+
+void expandTimeSeriesTargetTableNames(ClientInfo & client_info, const ContextPtr & context);
 
 }

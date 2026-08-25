@@ -39,6 +39,7 @@
 #include <Server/TCPServer.h>
 #include <Storages/ObjectStorage/StorageObjectStorageCluster.h>
 #include <Storages/StorageReplicatedMergeTree.h>
+#include <Storages/StorageTimeSeries.h>
 #include <base/defines.h>
 #include <base/scope_guard.h>
 #include <Poco/Net/SocketAddress.h>
@@ -924,7 +925,10 @@ void TCPHandler::runImpl()
                 query_state->query_context->setSetting("enable_producing_buckets_out_of_order_in_aggregation", false);
 
             /// Processing Query
-            std::tie(query_state->parsed_query, query_state->io) = executeQuery(query_state->query, query_state->query_context, QueryFlags{}, query_state->stage);
+            const auto & client_info = query_state->query_context->getClientInfo();
+            const QueryFlags query_flags = client_info.getTrustedQueryFlags(is_interserver_mode, client_tcp_protocol_version);
+            std::tie(query_state->parsed_query, query_state->io)
+                = executeQuery(query_state->query, query_state->query_context, query_flags, query_state->stage);
 
             after_check_cancelled.restart();
             after_send_progress.restart();
@@ -2542,6 +2546,8 @@ void TCPHandler::processQuery(std::shared_ptr<QueryState> & state)
         /// compatibility decisions below would wrongly downgrade, and a second distributed hop
         /// would trip the zero-version check in `RemoteQueryExecutor` during a rolling upgrade.
         client_info.setClientVersionFromConnectionIfUnknown();
+
+        client_info.sanitizeServerGeneratedFields(is_interserver_mode, client_tcp_protocol_version);
     }
 
     /// Per query settings are also passed via TCP.
@@ -2643,6 +2649,22 @@ void TCPHandler::processQuery(std::shared_ptr<QueryState> & state)
             writeVectorBinary(*client_info.current_roles, buffer);
             buffer.finalize();
             data += current_roles_str;
+        }
+        if (client_tcp_protocol_version >= DBMS_MIN_PROTOCOL_VERSION_WITH_TIME_SERIES_TARGET_READ)
+            data += (client_info.is_time_series_target_read
+                && client_tcp_protocol_version >= DBMS_MIN_PROTOCOL_VERSION_WITH_TIME_SERIES_TARGET_SCOPE) ? "1" : "0";
+        if (client_tcp_protocol_version >= DBMS_MIN_PROTOCOL_VERSION_WITH_QUERY_EXECUTION_FLAGS)
+        {
+            data += client_info.is_internal ? "1" : "0";
+            data += client_info.ignore_quota ? "1" : "0";
+        }
+        if (client_tcp_protocol_version >= DBMS_MIN_PROTOCOL_VERSION_WITH_TIME_SERIES_TARGET_SCOPE)
+        {
+            String target_tables_str;
+            WriteBufferFromString buffer(target_tables_str);
+            client_info.writeTimeSeriesTargetTables(buffer);
+            buffer.finalize();
+            data += target_tables_str;
         }
 
         std::string calculated_hash = encodeSHA256(data);
@@ -2789,6 +2811,15 @@ void TCPHandler::processQuery(std::shared_ptr<QueryState> & state)
     if (is_interserver_mode && !default_database.empty())
         state->query_context->setCurrentDatabase(default_database);
 
+    state->read_all_data = false;
+
+    if (is_interserver_authenticated)
+    {
+        auto expanded_client_info = state->query_context->getClientInfo();
+        expandTimeSeriesTargetTableNames(expanded_client_info, state->query_context);
+        state->query_context->setClientInfo(expanded_client_info);
+    }
+
     /// Use the received query id, or generate a random default. It is convenient
     /// to also generate the default OpenTelemetry trace id at the same time, and
     /// set the trace parent.
@@ -2811,7 +2842,6 @@ void TCPHandler::processQuery(std::shared_ptr<QueryState> & state)
         std::this_thread::sleep_for(ms);
     }
 
-    state->read_all_data = false;
 }
 
 void TCPHandler::processUnexpectedQuery()
