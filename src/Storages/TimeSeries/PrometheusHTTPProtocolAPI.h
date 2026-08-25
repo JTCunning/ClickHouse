@@ -1,5 +1,8 @@
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include <Common/Logger_fwd.h>
 #include <Core/Names.h>
 #include <Formats/FormatSettings.h>
@@ -69,12 +72,14 @@ public:
         UInt64 limit,
         QueryFinishCallback query_finish_callback = {});
 
-    /// Get all label names (/api/v1/labels)
+    /// Get all label names (/api/v1/labels). See getSeries for the meaning of `limit`.
     void getLabels(
         WriteBuffer & response,
-        const String & match_param,
+        const Strings & match_params,
         const String & start_param,
-        const String & end_param);
+        const String & end_param,
+        UInt64 limit,
+        QueryFinishCallback query_finish_callback = {});
 
     /// Get values for a specific label (/api/v1/label/<name>/values)
     void getLabelValues(
@@ -100,11 +105,16 @@ private:
     void writeTimestamp(WriteBuffer & response, DateTime64 value, UInt32 scale);
     void writeScalar(WriteBuffer & response, Float64 value);
 
-    /// Write JSON response for labels
-    void writeLabelsResponse(WriteBuffer & response, const Block & result_block);
+    /// Returns the (tag name -> column name) pairs configured via the `tags_to_columns` setting.
+    /// These tags are stored in dedicated columns of the `tags` table instead of the `tags` Map.
+    std::vector<std::pair<String, String>> getConfiguredTagColumns() const;
 
-    /// Write JSON response for label values
-    void writeLabelValuesResponse(WriteBuffer & response, const Block & result_block);
+    /// Appends `min_time`/`max_time` overlap conditions to `conditions` for the optional `start`/`end`
+    /// parameters of the metadata endpoints when trusted time bounds are available. Otherwise validates
+    /// the request and leaves the conditions unchanged, returning the approximate superset allowed by
+    /// Prometheus's `/api/v1/series` contract.
+    void appendTimeRangeConditions(
+        std::vector<String> & conditions, const StoragePtr & tags_table, const String & start_param, const String & end_param);
 
     std::shared_ptr<const StorageTimeSeries> time_series_storage;
     FormatSettings format_settings;

@@ -662,7 +662,7 @@ public:
             && (name == "metric" || name == "limit" || name == "limit_per_metric"))
             return false;
 
-        if (current_endpoint == Endpoint::Series && name == "limit")
+        if ((current_endpoint == Endpoint::Series || current_endpoint == Endpoint::Labels) && name == "limit")
             return false;
 
         /// Series, labels, and label-values consume Prometheus matchers themselves.
@@ -675,6 +675,24 @@ public:
         static const NameSet prometheus_param_names{"query", "time", "start", "end", "step", "lookback_delta"};
         return !prometheus_param_names.contains(name)
             && ImplWithContext::isSettingLikeParameter(name);
+    }
+
+    /// Parses the optional `limit` parameter of the Prometheus endpoints (the maximum number of returned
+    /// items; 0 means no limit, which is also the default). An absent or empty parameter means no limit.
+    UInt64 getLimitParam() const
+    {
+        String limit_str = params->get("limit", "");
+        if (limit_str.empty())
+            return 0;
+
+        Int64 parsed_limit = 0;
+        if (!tryParse(parsed_limit, limit_str.data(), limit_str.size()) || parsed_limit < 0)
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "Invalid value of the 'limit' parameter: '{}', expected a non-negative integer",
+                limit_str);
+
+        return static_cast<UInt64>(parsed_limit);
     }
 
     void handlingRequestWithContext(HTTPServerRequest & request, HTTPServerResponse & response) override
@@ -802,11 +820,12 @@ public:
                 }
                 case Endpoint::Labels:
                 {
-                    String match = params->get("match[]", "");
+                    Strings match = params->getAll("match[]");
                     String start = params->get("start", "");
                     String end = params->get("end", "");
+                    UInt64 limit = getLimitParam();
 
-                    protocol.getLabels(getOutputStream(response), match, start, end);
+                    protocol.getLabels(getOutputStream(response), match, start, end, limit, query_finish_callback);
                     break;
                 }
                 case Endpoint::LabelValues:
