@@ -85,9 +85,11 @@ public:
     void getLabelValues(
         WriteBuffer & response,
         const String & label_name,
-        const String & match_param,
+        const Strings & match_params,
         const String & start_param,
-        const String & end_param);
+        const String & end_param,
+        UInt64 limit,
+        QueryFinishCallback query_finish_callback = {});
 
 private:
     /// Writes the result of a prometheus query as a JSON.

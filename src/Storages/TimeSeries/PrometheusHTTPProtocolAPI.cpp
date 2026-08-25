@@ -3,6 +3,7 @@
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
 #include <Common/StringUtils.h>
+#include <Common/UTF8Helpers.h>
 #include <Common/isValidUTF8.h>
 #include <Core/DecimalFunctions.h>
 #include <Core/Field.h>
@@ -204,6 +205,59 @@ String makeMatchCondition(const Strings & match_params, const std::unordered_map
     return fmt::format("({})", makeASTForLogicalOr(std::move(selector_conditions))->formatWithSecretsOneLine());
 }
 
+String unescapePrometheusLabelName(const String & name)
+{
+    static constexpr std::string_view prefix = "U__";
+    if (!name.starts_with(prefix))
+        return name;
+
+    String result;
+    result.reserve(name.size());
+    size_t i = prefix.size();
+    while (i < name.size())
+    {
+        char c = name[i];
+        if (c != '_')
+        {
+            result += c;
+            ++i;
+            continue;
+        }
+
+        if (i + 1 < name.size() && name[i + 1] == '_')
+        {
+            result += '_';
+            i += 2;
+            continue;
+        }
+
+        size_t closing = name.find('_', i + 1);
+        if (closing == String::npos || closing == i + 1 || closing - (i + 1) > 6)
+            return name;
+
+        UInt32 code_point = 0;
+        for (size_t j = i + 1; j < closing; ++j)
+        {
+            if (!isHexDigit(name[j]))
+                return name;
+            char h = name[j];
+            UInt32 digit = (h >= '0' && h <= '9') ? (h - '0') : ((h | 0x20) - 'a' + 10);
+            code_point = code_point * 16 + digit;
+        }
+
+        if (code_point > 0x10FFFF || UTF8::isSurrogateCodePoint(code_point))
+            return name;
+
+        char utf8_bytes[4];
+        size_t utf8_length = UTF8::convertCodePointToUTF8(static_cast<int>(code_point), utf8_bytes, sizeof(utf8_bytes));
+        if (utf8_length == 0)
+            return name;
+        result.append(utf8_bytes, utf8_length);
+        i = closing + 1;
+    }
+    return result;
+}
+
 /// Closes the "data" array of a metadata endpoint response. When the optional `limit` parameter cut
 /// the result short, the response carries the same warning Prometheus produces for a truncated
 /// /api/v1/series, /api/v1/labels or /api/v1/label/<name>/values result.
@@ -306,6 +360,32 @@ Decimal64 parsePrometheusLookbackDelta(const String & value, UInt32 timestamp_sc
         ++timestamp_ticks;
 
     return Decimal64{timestamp_ticks};
+}
+
+String makeMapTagValuesExpression(const String & tag_name)
+{
+    const String labels_expr = fmt::format(
+        "arrayZip(mapKeys({0}), mapValues({0}))",
+        TimeSeriesColumnNames::Tags);
+    return fmt::format(
+        "arrayMap(x -> x.2, arrayFilter(x -> (x.1 = {0} AND x.2 != ''), {1}))",
+        quoteString(tag_name),
+        labels_expr);
+}
+
+String makeTagCarrierConflictCondition(const String & tag_name, const String & column_name)
+{
+    String column_expr = fmt::format("coalesce(toString({}), '')", backQuoteIfNeed(column_name));
+    String map_values_expr = makeMapTagValuesExpression(tag_name);
+    return fmt::format(
+        "(arrayUniq({0}) > 1) OR (({1} != '') AND (arrayUniq(arrayConcat([{1}], {0})) > 1))",
+        map_values_expr,
+        column_expr);
+}
+
+String makeMapTagConflictCondition(const String & tag_name)
+{
+    return fmt::format("arrayUniq({}) > 1", makeMapTagValuesExpression(tag_name));
 }
 
 /// SQL expression that rejects a row of the `tags` table carrying different non-empty values for the same
@@ -1182,13 +1262,189 @@ void PrometheusHTTPProtocolAPI::getLabels(
 
 void PrometheusHTTPProtocolAPI::getLabelValues(
     WriteBuffer & response,
-    const String & /* label_name */,
-    const String & /* match_param */,
-    const String & /* start_param */,
-    const String & /* end_param */)
+    const String & label_name_param,
+    const Strings & match_params,
+    const String & start_param,
+    const String & end_param,
+    UInt64 limit,
+    QueryFinishCallback query_finish_callback)
 {
-    UNUSED(response);
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The label values endpoint is not implemented");
+    auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, getContext());
+    auto tags_metadata = tags_table->getInMemoryMetadataPtr(getContext(), false);
+    auto make_unique_alias = [&tags_metadata](String alias)
+    {
+        while (tags_metadata->columns.has(alias))
+            alias += "_";
+        return alias;
+    };
+
+    const String label_value_alias = make_unique_alias("__prometheus_label_value");
+    const String metric_name_empty_alias = make_unique_alias("__prometheus_metric_name_empty");
+    const String metric_name_invalid_utf8_alias = make_unique_alias("__prometheus_metric_name_invalid_utf8");
+    const String metric_name_carrier_conflict_alias = make_unique_alias("__prometheus_metric_name_carrier_conflict");
+    const String label_carrier_conflict_alias = make_unique_alias("__prometheus_label_carrier_conflict");
+
+    const auto & time_series_table_id = time_series_storage->getStorageID();
+    const String tags_table_expression = fmt::format(
+        "timeSeriesTags({}, {})",
+        quoteString(time_series_table_id.database_name),
+        quoteString(time_series_table_id.table_name));
+
+    const String label_name = unescapePrometheusLabelName(label_name_param);
+    if (label_name.empty()
+        || !UTF8::isValidUTF8(reinterpret_cast<const UInt8 *>(label_name.data()), label_name.size()))
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid label name: {}", quoteString(label_name_param));
+
+    auto tag_columns = getConfiguredTagColumns();
+    const String metric_name_carrier_conflict_condition
+        = makeTagCarrierConflictCondition(TimeSeriesTagNames::MetricName, TimeSeriesColumnNames::MetricName);
+
+    String label_value_expr;
+    String label_carrier_conflict_condition = "0";
+    std::vector<String> conditions;
+
+    if (label_name == "__name__")
+    {
+        label_value_expr = TimeSeriesColumnNames::MetricName;
+    }
+    else
+    {
+        String column_name;
+        for (const auto & [tag_name, col_name] : tag_columns)
+        {
+            if (tag_name == label_name)
+            {
+                column_name = col_name;
+                break;
+            }
+        }
+
+        if (!column_name.empty())
+        {
+            String column_expr = fmt::format("coalesce(toString({}), '')", backQuoteIfNeed(column_name));
+            String map_value_expr = fmt::format("arrayElement({}, 1)", makeMapTagValuesExpression(label_name));
+            label_value_expr = fmt::format(
+                "if({0} != '', {0}, {1})",
+                column_expr,
+                map_value_expr);
+            label_carrier_conflict_condition = makeTagCarrierConflictCondition(label_name, column_name);
+            conditions.push_back(fmt::format("{} != ''", label_value_expr));
+        }
+        else
+        {
+            label_value_expr = fmt::format("arrayElement({}, 1)", makeMapTagValuesExpression(label_name));
+            label_carrier_conflict_condition = makeMapTagConflictCondition(label_name);
+            conditions.push_back(fmt::format("{} != ''", label_value_expr));
+        }
+    }
+
+    String query = fmt::format(
+        "SELECT {0} AS `{1}`, max({2} = '') AS `{3}`, "
+        "max(isValidUTF8({2}) = 0) AS `{4}`, max({5}) AS `{6}`, max({7}) AS `{8}` FROM {9}",
+        label_value_expr,
+        label_value_alias,
+        TimeSeriesColumnNames::MetricName,
+        metric_name_empty_alias,
+        metric_name_invalid_utf8_alias,
+        metric_name_carrier_conflict_condition,
+        metric_name_carrier_conflict_alias,
+        label_carrier_conflict_condition,
+        label_carrier_conflict_alias,
+        tags_table_expression);
+
+    std::unordered_map<String, String> column_name_by_tag_name(tag_columns.begin(), tag_columns.end());
+    if (String match_condition = makeMatchCondition(match_params, column_name_by_tag_name); !match_condition.empty())
+        conditions.push_back(match_condition);
+    appendTimeRangeConditions(conditions, tags_table, start_param, end_param);
+
+    for (size_t i = 0; i < conditions.size(); ++i)
+        query += (i == 0 ? " WHERE " : " AND ") + conditions[i];
+
+    query += fmt::format(" GROUP BY `{}` ORDER BY `{}`", label_value_alias, label_value_alias);
+    LOG_TRACE(log, "Prometheus label values query: {}", query);
+
+    auto [ast, io] = executeQuery(query, getContext(), {}, QueryProcessingStage::Complete);
+
+    try
+    {
+        PullingAsyncPipelineExecutor executor(io.pipeline);
+        Block result_block;
+        std::vector<String> values_to_write;
+        UInt64 emitted = 0;
+        bool truncated = false;
+        while (executor.pull(result_block))
+        {
+            if (result_block.rows() == 0)
+                continue;
+
+            const auto & value_col = result_block.getByName(label_value_alias).column;
+            const auto & metric_name_empty_col = result_block.getByName(metric_name_empty_alias).column;
+            const auto & metric_name_invalid_utf8_col = result_block.getByName(metric_name_invalid_utf8_alias).column;
+            const auto & metric_name_carrier_conflict_col = result_block.getByName(metric_name_carrier_conflict_alias).column;
+            const auto & label_carrier_conflict_col = result_block.getByName(label_carrier_conflict_alias).column;
+
+            for (size_t i = 0; i < result_block.rows(); ++i)
+            {
+                if (metric_name_empty_col->getUInt(i))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Found empty metric name in a row of the 'tags' table");
+
+                if (metric_name_invalid_utf8_col->getUInt(i))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Found invalid UTF-8 in a metric name in a row of the 'tags' table");
+
+                if (metric_name_carrier_conflict_col->getUInt(i))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Found two tags with the same name {} but different values in a row of the 'tags' table",
+                        quoteString(TimeSeriesTagNames::MetricName));
+
+                if (label_carrier_conflict_col->getUInt(i))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Found two tags with the same name {} but different values in a row of the 'tags' table",
+                        quoteString(label_name));
+
+                auto value = value_col->getDataAt(i);
+                if (value.empty())
+                    continue;
+
+                if (!UTF8::isValidUTF8(reinterpret_cast<const UInt8 *>(value.data()), value.size()))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Found invalid UTF-8 in a label value in a row of the 'tags' table");
+
+                if (limit && emitted == limit)
+                {
+                    truncated = true;
+                    continue;
+                }
+
+                values_to_write.emplace_back(value.data(), value.size());
+                ++emitted;
+            }
+        }
+
+        writeString(R"({"status":"success","data":[)", response);
+        for (size_t i = 0; i < values_to_write.size(); ++i)
+        {
+            if (i > 0)
+                writeString(",", response);
+            writeJSONString(std::string_view(values_to_write[i]), response, format_settings);
+        }
+        writeMetadataResponseFooter(response, truncated);
+
+        io.pipeline.finalizeWriteInQueryResultCache();
+    }
+    catch (...)
+    {
+        io.onException();
+        throw;
+    }
+
+    finishExecutedQuery(io, query_finish_callback);
 }
 
 

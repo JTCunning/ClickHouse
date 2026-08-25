@@ -662,7 +662,10 @@ public:
             && (name == "metric" || name == "limit" || name == "limit_per_metric"))
             return false;
 
-        if ((current_endpoint == Endpoint::Series || current_endpoint == Endpoint::Labels) && name == "limit")
+        if ((current_endpoint == Endpoint::Series
+                || current_endpoint == Endpoint::Labels
+                || current_endpoint == Endpoint::LabelValues)
+            && name == "limit")
             return false;
 
         /// Series, labels, and label-values consume Prometheus matchers themselves.
@@ -840,11 +843,19 @@ public:
                         label_name = extractLabelValuesNameFromURI(uri_path);
                     }
                     chassert(label_name);
-                    String match = params->get("match[]", "");
+                    Strings match = params->getAll("match[]");
                     String start = params->get("start", "");
                     String end = params->get("end", "");
+                    UInt64 limit = getLimitParam();
 
-                    protocol.getLabelValues(getOutputStream(response), *label_name, match, start, end);
+                    protocol.getLabelValues(
+                        getOutputStream(response),
+                        *label_name,
+                        match,
+                        start,
+                        end,
+                        limit,
+                        query_finish_callback);
                     break;
                 }
                 case Endpoint::Unknown:
