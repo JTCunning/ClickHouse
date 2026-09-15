@@ -4,6 +4,8 @@
 #include <Columns/ColumnMap.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnTuple.h>
+#include <Common/ProfileEvents.h>
+#include <Common/SipHash.h>
 #include <Common/logger_useful.h>
 #include <Common/typeid_cast.h>
 #include <Core/Field.h>
@@ -34,6 +36,13 @@
 #include <ranges>
 
 
+namespace ProfileEvents
+{
+extern const Event TimeSeriesInsertCacheHits;
+extern const Event TimeSeriesInsertCacheMisses;
+extern const Event TimeSeriesInsertCacheSkippedRows;
+}
+
 namespace DB
 {
 
@@ -54,6 +63,35 @@ namespace ErrorCodes
 
 namespace
 {
+    UInt128 hashColumnValue(const IColumn & column, size_t row)
+    {
+        SipHash hash;
+        column.updateHashWithValue(row, hash);
+        return hash.get128();
+    }
+
+    UInt128 hashMetricFamilyValue(
+        const IColumn & type_column,
+        const IColumn & unit_column,
+        const IColumn & help_column,
+        size_t row)
+    {
+        SipHash hash;
+        type_column.updateHashWithValue(row, hash);
+        unit_column.updateHashWithValue(row, hash);
+        help_column.updateHashWithValue(row, hash);
+        return hash.get128();
+    }
+
+    void filterBlock(Block & block, const PaddedPODArray<UInt8> & filter, size_t result_size)
+    {
+        for (size_t i = 0; i != block.columns(); ++i)
+        {
+            auto & column = block.safeGetByPosition(i).column;
+            column = column->filter(filter, result_size);
+        }
+    }
+
     /// Fills tag columns for the "tags" table by iterating over the columns metric_name and tags.
     void fillTagsColumns(
         const PaddedPODArray<UInt8> & filter,
@@ -425,6 +463,9 @@ TimeSeriesSink::TimeSeriesSink(
     , log(getLogger("TimeSeriesSink"))
     , async_insert(async_insert_)
 {
+    insert_cache = time_series_storage.getInsertCache();
+    cache_metric_families = insert_cache && time_series_storage.isInnerTable(ViewTarget::MetricFamilies);
+
     /// Determine which target tables need pipelines based on the columns mentioned in the INSERT query.
     /// If insert_columns is empty (e.g. INSERT INTO mytable VALUES ...), all columns are being inserted.
     auto is_insert_column = [&](const String & name)
@@ -719,10 +760,40 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
         tags_block.erase(TimeSeriesColumnNames::AllTags);
 
     /// Step 4. Push the tags block.
+    if (insert_cache)
+    {
+        PaddedPODArray<UInt8> cache_filter(tags_block.rows(), 1);
+        size_t misses = 0;
+        for (size_t row = 0; row != tags_block.rows(); ++row)
+        {
+            const UInt128 hash = hashColumnValue(*id_column, row);
+            if (insert_cache->containsSeries(hash))
+                cache_filter[row] = 0;
+            else
+            {
+                pending_series_hashes.push_back(hash);
+                ++misses;
+            }
+        }
 
-    /// Tags are pushed first so that if the samples insert fails,
-    /// we don't end up with sample rows referencing IDs that were never written to the tags table.
-    tags_pipeline->push(std::move(tags_block));
+        const size_t hits = tags_block.rows() - misses;
+        ::ProfileEvents::increment(::ProfileEvents::TimeSeriesInsertCacheHits, hits);
+        ::ProfileEvents::increment(::ProfileEvents::TimeSeriesInsertCacheMisses, misses);
+        ::ProfileEvents::increment(::ProfileEvents::TimeSeriesInsertCacheSkippedRows, hits);
+
+        if (misses)
+        {
+            if (misses != tags_block.rows())
+                filterBlock(tags_block, cache_filter, misses);
+            tags_pipeline->push(std::move(tags_block));
+        }
+    }
+    else
+    {
+        /// Tags are pushed first so that if the samples insert fails,
+        /// we don't end up with sample rows referencing IDs that were never written to the tags table.
+        tags_pipeline->push(std::move(tags_block));
+    }
 
     /// Step 5. Assemble and push the samples block.
     if (total_samples)
@@ -833,20 +904,64 @@ void TimeSeriesSink::consumeMetricFamilies(const Block & block)
     metric_families_block.insert(ColumnWithTypeAndName{std::move(new_unit_column), unit_col.type, TimeSeriesColumnNames::Unit});
     metric_families_block.insert(ColumnWithTypeAndName{std::move(new_help_column), help_col.type, TimeSeriesColumnNames::Help});
 
-    metric_families_pipeline->push(std::move(metric_families_block));
+    if (cache_metric_families)
+    {
+        const auto & names = *metric_families_block.getByName(TimeSeriesColumnNames::MetricFamilyName).column;
+        const auto & types = *metric_families_block.getByName(TimeSeriesColumnNames::Type).column;
+        const auto & units = *metric_families_block.getByName(TimeSeriesColumnNames::Unit).column;
+        const auto & helps = *metric_families_block.getByName(TimeSeriesColumnNames::Help).column;
+        PaddedPODArray<UInt8> cache_filter(metric_families_block.rows(), 1);
+        size_t misses = 0;
+
+        for (size_t row = 0; row != metric_families_block.rows(); ++row)
+        {
+            TimeSeriesInsertCache::MetricFamilyEntry entry{
+                hashColumnValue(names, row),
+                hashMetricFamilyValue(types, units, helps, row)};
+            if (insert_cache->containsMetricFamily(entry.name_hash, entry.value_hash))
+                cache_filter[row] = 0;
+            else
+            {
+                pending_metric_families.push_back(entry);
+                ++misses;
+            }
+        }
+
+        const size_t hits = metric_families_block.rows() - misses;
+        ::ProfileEvents::increment(::ProfileEvents::TimeSeriesInsertCacheHits, hits);
+        ::ProfileEvents::increment(::ProfileEvents::TimeSeriesInsertCacheMisses, misses);
+        ::ProfileEvents::increment(::ProfileEvents::TimeSeriesInsertCacheSkippedRows, hits);
+
+        if (misses)
+        {
+            if (misses != metric_families_block.rows())
+                filterBlock(metric_families_block, cache_filter, misses);
+            metric_families_pipeline->push(std::move(metric_families_block));
+        }
+    }
+    else
+        metric_families_pipeline->push(std::move(metric_families_block));
 }
 
 
 void TimeSeriesSink::onFinish()
 {
     if (tags_pipeline)
+    {
         tags_pipeline->executor->finish();
+        if (insert_cache)
+            insert_cache->insertSeries(pending_series_hashes);
+    }
     if (samples_pipeline)
         samples_pipeline->executor->finish();
     if (recent_samples_pipeline)
         recent_samples_pipeline->executor->finish();
     if (metric_families_pipeline)
+    {
         metric_families_pipeline->executor->finish();
+        if (cache_metric_families && insert_cache)
+            insert_cache->insertMetricFamilies(pending_metric_families);
+    }
 }
 
 }

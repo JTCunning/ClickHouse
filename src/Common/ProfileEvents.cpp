@@ -114,6 +114,9 @@
     M(PaimonMetadataFilesCacheHits, "Number of times paimon metadata files have been found in the cache.", ValueType::Number) \
     M(PaimonMetadataFilesCacheMisses, "Number of times paimon metadata files have not been found in the paimon metadata cache and had to be read from (remote) disk.", ValueType::Number) \
     M(PaimonMetadataFilesCacheWeightLost, "Approximate number of bytes evicted from the paimon metadata cache.", ValueType::Number) \
+    M(TimeSeriesInsertCacheHits, "Number of TimeSeries rows skipped because the insert cache contained the same value.", ValueType::Number) \
+    M(TimeSeriesInsertCacheMisses, "Number of TimeSeries rows written because the insert cache did not contain the same value.", ValueType::Number) \
+    M(TimeSeriesInsertCacheSkippedRows, "Number of rows omitted from TimeSeries target-table inserts by the insert cache.", ValueType::Number) \
     M(IcebergMetadataReadWaitTimeMicroseconds, "Total time data readers spend waiting for iceberg metadata files to be read and parsed, summed across all reader threads.", ValueType::Microseconds) \
     M(ParquetMetadataCacheHits, "Number of times parquet metadata has been found in the cache.", ValueType::Number) \
     M(ParquetMetadataCacheMisses, "Number of times parquet metadata has not been found in the cache and had to be read from disk.", ValueType::Number) \

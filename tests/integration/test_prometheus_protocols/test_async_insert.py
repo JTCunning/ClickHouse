@@ -46,6 +46,37 @@ def get_async_insert_query_count():
     )
 
 
+def get_insert_cache_event(event):
+    return int(
+        node.query(
+            f"SELECT sum(value) FROM system.events WHERE event = '{event}'"
+        )
+    )
+
+
+def test_remote_write_insert_cache():
+    node.query(
+        "CREATE TABLE prometheus ENGINE=TimeSeries "
+        "SETTINGS store_min_time_and_max_time=0, recent_samples_ttl_seconds=0"
+    )
+
+    time_series = [
+        (
+            {"__name__": "cached_metric", "job": "test"},
+            {1724112000: 1.5},
+        )
+    ]
+    protobuf = convert_time_series_to_protobuf(time_series)
+    hits_before = get_insert_cache_event("TimeSeriesInsertCacheHits")
+
+    send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
+    send_protobuf_to_remote_write(node.ip_address, 9093, "/write", protobuf)
+
+    assert node.query("SELECT count() FROM timeSeriesTags(prometheus)") == "1\n"
+    assert node.query("SELECT count() FROM timeSeriesData(prometheus)") == "2\n"
+    assert get_insert_cache_event("TimeSeriesInsertCacheHits") == hits_before + 1
+
+
 def test_async_insert_acknowledged_after_flush():
     node.query("CREATE TABLE prometheus ENGINE=TimeSeries")
 

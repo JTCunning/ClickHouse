@@ -7,6 +7,7 @@
 #include <Parsers/ASTViewTargets.h>
 #include <Processors/Sinks/SinkToStorage.h>
 #include <QueryPipeline/BlockIO.h>
+#include <Storages/TimeSeries/TimeSeriesInsertCache.h>
 
 #include <string_view>
 #include <unordered_map>
@@ -105,6 +106,11 @@ private:
     std::unique_ptr<TargetPipeline> samples_pipeline;
     std::unique_ptr<TargetPipeline> recent_samples_pipeline;
     std::unique_ptr<TargetPipeline> metric_families_pipeline;
+
+    TimeSeriesInsertCache * insert_cache = nullptr;
+    bool cache_metric_families = false;
+    std::vector<UInt128> pending_series_hashes;
+    std::vector<TimeSeriesInsertCache::MetricFamilyEntry> pending_metric_families;
 };
 
 }
