@@ -39,10 +39,10 @@ private:
 
     mutable std::array<std::mutex, NUM_SHARDS> mutexes;
     std::vector<UInt128> series_hashes;
-    std::vector<UInt8> series_occupied;
+    std::vector<UInt64> series_occupied;
     std::vector<UInt128> metric_family_name_hashes;
     std::vector<UInt128> metric_family_value_hashes;
-    std::vector<UInt8> metric_family_occupied;
+    std::vector<UInt64> metric_family_occupied;
     std::atomic_size_t occupied_entries = 0;
 };
 
