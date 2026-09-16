@@ -33,7 +33,7 @@ SELECT uniqExact(id), count() FROM timeSeriesTags(ts);
 DROP TABLE ts;
 CREATE TABLE ts ENGINE = TimeSeries
 SETTINGS store_min_time_and_max_time = 0, recent_samples_ttl_seconds = 0,
-         insert_cache_max_size_bytes = 17;
+         insert_cache_max_size_bytes = 150;
 INSERT INTO ts (metric_name, tags, samples)
 VALUES ('m', {'job': 'a'}, [(toDateTime64(1, 3), 1.)]);
 INSERT INTO ts (metric_name, tags, samples)
