@@ -605,7 +605,7 @@ namespace
         return count;
     }
 
-    /// Returns the total number of samples in the column `time_series` across all rows.
+    /// Returns the total number of samples in the outer column with samples across all rows.
     size_t getTotalSamples(const ColumnArray::Offsets & ts_offsets)
     {
         return ts_offsets.empty() ? 0 : ts_offsets.back();
@@ -776,9 +776,9 @@ TimeSeriesSink::TimeSeriesSink(
 
     insert_tags_and_samples = is_insert_column(TimeSeriesColumnNames::MetricName)
         || is_insert_column(TimeSeriesColumnNames::Tags)
-        || is_insert_column(TimeSeriesColumnNames::TimeSeries);
+        || is_insert_column(TimeSeriesColumnNames::getOuterSamples(time_series_storage.getVersion()));
 
-    insert_metrics = is_insert_column(TimeSeriesColumnNames::MetricFamily)
+    insert_metric_families = is_insert_column(TimeSeriesColumnNames::MetricFamily)
         || is_insert_column(TimeSeriesColumnNames::Type)
         || is_insert_column(TimeSeriesColumnNames::Unit)
         || is_insert_column(TimeSeriesColumnNames::Help);
@@ -786,8 +786,8 @@ TimeSeriesSink::TimeSeriesSink(
     if (insert_tags_and_samples)
         initTagsAndSamplesPipelines();
 
-    if (insert_metrics)
-        initMetricsPipeline();
+    if (insert_metric_families)
+        initMetricFamiliesPipeline();
 }
 
 
@@ -801,8 +801,8 @@ void TimeSeriesSink::consume(Chunk & chunk)
     if (insert_tags_and_samples)
         consumeTagsAndSamples(block);
 
-    if (insert_metrics)
-        consumeMetrics(block);
+    if (insert_metric_families)
+        consumeMetricFamilies(block);
 }
 
 
@@ -852,7 +852,8 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
     /// The types of the timestamps and the values are taken from the input header, not from the samples table:
     /// the samples are copied from the input columns as is, the converting actions of the pipelines
     /// convert them to the types of the target tables afterwards.
-    std::tie(timestamp_type, value_type) = splitTimeSeriesType(getHeader().getByName(TimeSeriesColumnNames::TimeSeries).type);
+    const auto * samples_column_name = TimeSeriesColumnNames::getOuterSamples(time_series_storage.getVersion());
+    std::tie(timestamp_type, value_type) = splitTimeSeriesType(getHeader().getByName(samples_column_name).type);
 
     if (settings[TimeSeriesSetting::store_min_time_and_max_time])
     {
@@ -931,7 +932,7 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     /// Step 1. Extract columns from the input block.
     const auto & metric_name_col = block.getByName(TimeSeriesColumnNames::MetricName);
     const auto & tags_col = block.getByName(TimeSeriesColumnNames::Tags);
-    const auto & time_series_col = block.getByName(TimeSeriesColumnNames::TimeSeries);
+    const auto & time_series_col = block.getByName(TimeSeriesColumnNames::getOuterSamples(time_series_storage.getVersion()));
 
     const auto * tags_map_column = typeid_cast<const ColumnMap *>(tags_col.column.get());
     if (!tags_map_column)
@@ -941,12 +942,12 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
 
     const auto * ts_arrays = typeid_cast<const ColumnArray *>(time_series_col.column.get());
     if (!ts_arrays)
-        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Expected ColumnArray for the time_series column, got {}", time_series_col.column->getName());
+        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Expected ColumnArray for the column `{}`, got {}", time_series_col.name, time_series_col.column->getName());
     const auto * ts_tuples = typeid_cast<const ColumnTuple *>(&ts_arrays->getData());
     if (!ts_tuples)
-        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Expected ColumnTuple for the time_series column data, got {}", ts_arrays->getData().getName());
+        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Expected ColumnTuple for the data of the column `{}`, got {}", time_series_col.name, ts_arrays->getData().getName());
     if (ts_tuples->tupleSize() != 2)
-        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Expected ColumnTuple with 2 elements for the time_series column data, got {}", ts_tuples->tupleSize());
+        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Expected ColumnTuple with 2 elements for the data of the column `{}`, got {}", time_series_col.name, ts_tuples->tupleSize());
     const ColumnArray::Offsets & ts_offsets = ts_arrays->getOffsets();
     size_t total_samples = getTotalSamples(ts_offsets);
 
@@ -1000,36 +1001,36 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
 }
 
 
-void TimeSeriesSink::initMetricsPipeline()
+void TimeSeriesSink::initMetricFamiliesPipeline()
 {
-    /// It's important to use here for `metrics_header`
-    /// the same data types as function consumeMetrics() uses to push blocks.
+    /// It's important to use here for `metric_families_header`
+    /// the same data types as function consumeMetricFamilies() uses to push blocks.
     /// There is a conversion step in the target pipelines, so we don't have to always
     /// match the data types of the columns in the "tags" or "samples" tables.
 
     const Block & header = getHeader();
 
-    Block metrics_header;
-    metrics_header.insert(ColumnWithTypeAndName{
+    Block metric_families_header;
+    metric_families_header.insert(ColumnWithTypeAndName{
         header.getByName(TimeSeriesColumnNames::MetricFamily).type, TimeSeriesColumnNames::MetricFamilyName});
 
-    metrics_header.insert(ColumnWithTypeAndName{
+    metric_families_header.insert(ColumnWithTypeAndName{
         header.getByName(TimeSeriesColumnNames::Type).type, TimeSeriesColumnNames::Type});
 
-    metrics_header.insert(ColumnWithTypeAndName{
+    metric_families_header.insert(ColumnWithTypeAndName{
         header.getByName(TimeSeriesColumnNames::Unit).type, TimeSeriesColumnNames::Unit});
 
-    metrics_header.insert(ColumnWithTypeAndName{
+    metric_families_header.insert(ColumnWithTypeAndName{
         header.getByName(TimeSeriesColumnNames::Help).type, TimeSeriesColumnNames::Help});
 
-    metrics_pipeline = createTargetPipeline(ViewTarget::Metrics, metrics_header);
+    metric_families_pipeline = createTargetPipeline(ViewTarget::MetricFamilies, metric_families_header);
 }
 
 
-void TimeSeriesSink::consumeMetrics(const Block & block)
+void TimeSeriesSink::consumeMetricFamilies(const Block & block)
 {
-    if (auto metrics_block = makeMetricsBlock(block))
-        metrics_pipeline->push(std::move(*metrics_block));
+    if (auto metric_families_block = makeMetricsBlock(block))
+        metric_families_pipeline->push(std::move(*metric_families_block));
 }
 
 
@@ -1041,8 +1042,8 @@ void TimeSeriesSink::onFinish()
         samples_pipeline->executor->finish();
     if (recent_samples_pipeline)
         recent_samples_pipeline->executor->finish();
-    if (metrics_pipeline)
-        metrics_pipeline->executor->finish();
+    if (metric_families_pipeline)
+        metric_families_pipeline->executor->finish();
 }
 
 }
