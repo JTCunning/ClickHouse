@@ -165,10 +165,10 @@ ASTPtr IMergeTreeDataPartWriter::getCodecDescriptionOrDefault(const String & col
     ASTPtr default_codec_desc = default_codec->getFullCodecDescription();
 
     if (const auto * column_desc = metadata_snapshot->columns.tryGet(column_name))
-        return column_desc->codec ? column_desc->codec : default_codec_desc;
+        return column_desc->codec.hasRoot() ? column_desc->codec.getRoot() : default_codec_desc;
 
     if (const auto * virtual_desc = metadata_snapshot->virtuals.tryGetDescription(column_name, VirtualsKind::All, VirtualsMaterializationPlace::Reader))
-        return virtual_desc->codec ? virtual_desc->codec : default_codec_desc;
+        return virtual_desc->codec.hasRoot() ? virtual_desc->codec.getRoot() : default_codec_desc;
 
     throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected column name: {}", column_name);
 }
@@ -176,11 +176,11 @@ ASTPtr IMergeTreeDataPartWriter::getCodecDescriptionOrDefault(const String & col
 bool IMergeTreeDataPartWriter::columnUsesDefaultCodec(const String & column_name) const
 {
     if (const auto * column_desc = metadata_snapshot->columns.tryGet(column_name))
-        return CompressionCodecFactory::isDefaultCodec(column_desc->codec);
+        return CompressionCodecFactory::isDefaultCodec(column_desc->codec.getRoot());
 
     if (const auto * virtual_desc
         = metadata_snapshot->virtuals.tryGetDescription(column_name, VirtualsKind::All, VirtualsMaterializationPlace::Reader))
-        return CompressionCodecFactory::isDefaultCodec(virtual_desc->codec);
+        return CompressionCodecFactory::isDefaultCodec(virtual_desc->codec.getRoot());
 
     throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected column name: {}", column_name);
 }

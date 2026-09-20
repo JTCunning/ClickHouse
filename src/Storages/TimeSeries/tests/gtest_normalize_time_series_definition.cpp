@@ -383,7 +383,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, ExternalTagsTableRecordsIdTypeAndIdGen
     EXPECT_TRUE(definition.contains("id_generator = 'sipHash64(tags)'")) << definition;
     EXPECT_TRUE(definition.contains("db.ext_tags")) << definition;
     EXPECT_EQ(extractInnerColumns(definition, "TAGS"), "");
-    EXPECT_EQ(extractInnerColumns(definition, "SAMPLES"), "`id` UInt64, `timestamp` DateTime64(3) CODEC(Delta, T64, ZSTD(3)), `value` Float64 CODEC(ALP, ZSTD(3))");
+    EXPECT_EQ(extractInnerColumns(definition, "SAMPLES"), makeBucketedSamplesColumns("UInt64", "DateTime64(3)", "Float64"));
 
     /// The DEFAULT expression of the `id` column of the external table is recorded as the generator.
     params.external_target_columns[ViewTarget::Tags] = external_tags_columns("UInt64", "cityHash64(tags)");
@@ -431,7 +431,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, ExternalTargetTablesDefineTypes)
         {makeColumn("metric_family_name", "String"), makeColumn("type", "String"), makeColumn("unit", "String"), makeColumn("help", "String")});
 
     auto definition = normalizeNewTable(
-        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 0 SAMPLES db.ext_samples TAGS db.ext_tags METRIC FAMILIES db.ext_metric_families", params);
+        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 5, recent_samples_ttl_seconds = 0 SAMPLES db.ext_samples TAGS db.ext_tags METRIC FAMILIES db.ext_metric_families", params);
     EXPECT_TRUE(definition.contains("`samples` Array(Tuple(DateTime64(6), Float32))")) << definition;
     EXPECT_TRUE(definition.contains("id_type = 'UInt64'")) << definition;
     EXPECT_FALSE(definition.contains("INNER")) << definition;
@@ -440,7 +440,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, ExternalTargetTablesDefineTypes)
     params.external_target_columns[ViewTarget::Tags] = external_tags_columns("UUID");
     EXPECT_EQ(getExceptionCode([&]
     {
-        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 0 SAMPLES db.ext_samples TAGS db.ext_tags METRIC FAMILIES db.ext_metric_families", params);
+        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 5, recent_samples_ttl_seconds = 0 SAMPLES db.ext_samples TAGS db.ext_tags METRIC FAMILIES db.ext_metric_families", params);
     }), ErrorCodes::BAD_TYPE_OF_FIELD);
 }
 
@@ -599,7 +599,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, NormalizationIsIdempotent)
         {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 2", {}},
         {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 1", {}},
         {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS tags_to_columns = {'job': 'job'}, store_min_time_and_max_time = 0, recent_samples_ttl_seconds = 0", {}},
-        {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS recent_samples_partition_by = 'toStartOfHour(timestamp)' "
+        {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 5, recent_samples_partition_by = 'toStartOfHour(timestamp)' "
          "SAMPLES INNER COLUMNS (timestamp DateTime64(6) CODEC(Delta, ZSTD(1)), extra UInt8) TAGS INNER COLUMNS (id UInt64) "
          "TAGS ENGINE = AggregatingMergeTree ORDER BY (metric_name, id) SETTINGS index_granularity = 1024", {}},
         {"CREATE TABLE db.ts ENGINE = TimeSeries TAGS db.ext_tags", params_with_external_tags},
