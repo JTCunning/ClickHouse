@@ -2,12 +2,14 @@
 
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTLiteral.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/ConverterContext.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/SelectQueryBuilder.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/applyMathBinaryOperator.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/applyOneArgumentAggregationOperator.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/toVectorGrid.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/transformGroupASTForAggregationOperator.h>
+#include <Storages/TimeSeries/PrometheusQueryToSQL/zeroGroup.h>
 #include <algorithm>
 
 
@@ -119,6 +121,7 @@ SQLQueryPiece applyFusedAggregationBinaryOperator(
     /// The transformed group is aliased directly as `group`. Empty grids are filtered in a
     /// following WHERE so `values` cannot bind to the input column under prefer_column_name_to_alias.
     ASTPtr aggregation_query;
+    bool constant_zero_group = false;
     {
         SelectQueryBuilder builder;
 
@@ -127,6 +130,7 @@ SQLQueryPiece applyFusedAggregationBinaryOperator(
 
         ASTPtr new_group = transformGroupASTForAggregationOperator(
             left_aggregation, make_intrusive<ASTIdentifier>(ColumnNames::Group), /*drop_metric_name=*/true, res.metric_name_dropped);
+        constant_zero_group = isZeroGroupAST(new_group);
 
         builder.select_list.push_back(std::move(new_group));
         builder.select_list.back()->setAlias(ColumnNames::Group);
@@ -153,7 +157,15 @@ SQLQueryPiece applyFusedAggregationBinaryOperator(
 
         SelectQueryBuilder builder;
         builder.from_table = context.subqueries.back().name;
-        builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Group));
+        if (constant_zero_group)
+        {
+            builder.select_list.push_back(makeASTFunction("CAST", make_intrusive<ASTLiteral>(0u), make_intrusive<ASTLiteral>("UInt64")));
+            builder.select_list.back()->setAlias(ColumnNames::Group);
+        }
+        else
+        {
+            builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Group));
+        }
         builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Values));
         builder.where = makeASTFunction("notEmpty", make_intrusive<ASTIdentifier>(ColumnNames::Values));
 

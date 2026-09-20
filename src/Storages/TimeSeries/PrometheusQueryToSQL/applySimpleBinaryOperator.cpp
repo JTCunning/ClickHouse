@@ -10,6 +10,7 @@
 #include <Storages/TimeSeries/PrometheusQueryToSQL/dropMetricName.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/toVectorGrid.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/transformGroupASTForBinaryOperator.h>
+#include <Storages/TimeSeries/PrometheusQueryToSQL/zeroGroup.h>
 #include <algorithm>
 
 
@@ -81,11 +82,13 @@ namespace
         String sides[2];
 
         left_argument = toVectorGrid(std::move(left_argument), context);
+        bool left_zero_group = producesConstantZeroGroup(left_argument.select_query);
         context.subqueries.emplace_back(SQLSubquery{context.subqueries.size(), std::move(left_argument.select_query), SQLSubqueryType::TABLE});
         sides[0] = context.subqueries.back().name;
         String & left = sides[0];
 
         right_argument = toVectorGrid(std::move(right_argument), context);
+        bool right_zero_group = producesConstantZeroGroup(right_argument.select_query);
         context.subqueries.emplace_back(SQLSubquery{context.subqueries.size(), std::move(right_argument.select_query), SQLSubqueryType::TABLE});
         sides[1] = context.subqueries.back().name;
         String & right = sides[1];
@@ -93,6 +96,41 @@ namespace
         bool group_left = operator_node->group_left;
         bool group_right = operator_node->group_right;
         const auto & extra_labels = operator_node->extra_labels;
+
+        /// Fast path: both sides have at most one row with the constant zero group
+        /// (for example both sides of `sum(a) / sum(b)`). Vector matching is then a CROSS JOIN.
+        if (!group_left && !group_right && !operator_node->on && !operator_node->ignoring && left_zero_group && right_zero_group)
+        {
+            /// SELECT CAST(0, 'UInt64') AS group,
+            ///        arrayMap(x, y -> f(x, y), left.values, right.values) AS values
+            /// FROM left CROSS JOIN right
+            SelectQueryBuilder builder;
+
+            builder.select_list.push_back(makeASTFunction("CAST", make_intrusive<ASTLiteral>(0u), make_intrusive<ASTLiteral>("UInt64")));
+            builder.select_list.back()->setAlias(ColumnNames::Group);
+
+            builder.select_list.push_back(makeASTFunction(
+                "arrayMap",
+                makeASTFunction(
+                    "lambda",
+                    makeASTFunction("tuple", make_intrusive<ASTIdentifier>("x"), make_intrusive<ASTIdentifier>("y")),
+                    apply_function_to_ast(make_intrusive<ASTIdentifier>("x"), make_intrusive<ASTIdentifier>("y"))),
+                make_intrusive<ASTIdentifier>(Strings{left, ColumnNames::Values}),
+                make_intrusive<ASTIdentifier>(Strings{right, ColumnNames::Values})));
+            builder.select_list.back()->setAlias(ColumnNames::Values);
+
+            builder.from_table = left;
+            builder.join_table = right;
+            builder.join_kind = JoinKind::Cross;
+
+            SQLQueryPiece res{operator_node, operator_node->result_type, StoreMethod::VECTOR_GRID};
+            res.select_query = builder.getSelectQuery();
+            res.start_time = left_argument.start_time;
+            res.end_time = left_argument.end_time;
+            res.step = left_argument.step;
+            res.metric_name_dropped = true;
+            return res;
+        }
 
         /// Step 1:
         /// new_left:
