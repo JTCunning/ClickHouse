@@ -122,8 +122,9 @@ SQLQueryPiece applyAggregationOperatorQuantile(
     auto res = vector_arg;
     res.node = operator_node;
 
-    /// Step 1: aggregate over series, using `new_group` as an intermediate alias to avoid
-    /// ambiguity with the input `group` column when the alias and the source column share the same name.
+    /// Aggregate over series. The transformed group is aliased directly as `group`.
+    /// Empty grids are filtered in a following WHERE so `values` cannot bind to the input
+    /// column under prefer_column_name_to_alias.
     ASTPtr aggregation_query;
     {
         SelectQueryBuilder builder;
@@ -135,7 +136,7 @@ SQLQueryPiece applyAggregationOperatorQuantile(
             operator_node, make_intrusive<ASTIdentifier>(ColumnNames::Group), /*drop_metric_name=*/true, res.metric_name_dropped);
 
         builder.select_list.push_back(std::move(new_group));
-        builder.select_list.back()->setAlias(ColumnNames::NewGroup);
+        builder.select_list.back()->setAlias(ColumnNames::Group);
 
         ASTPtr quantile_expr;
         if (const_phi_out_of_range)
@@ -218,20 +219,17 @@ SQLQueryPiece applyAggregationOperatorQuantile(
         builder.select_list.back()->setAlias(ColumnNames::Values);
 
         if (operator_node->by || operator_node->without)
-            builder.group_by.push_back(make_intrusive<ASTIdentifier>(ColumnNames::NewGroup));
+            builder.group_by.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Group));
 
         aggregation_query = builder.getSelectQuery();
     }
 
-    /// Step 2: rename `new_group` back to `group` and drop empty grids (a WHERE, so `values` cannot bind to the input column
-    /// under prefer_column_name_to_alias).
     {
         context.subqueries.emplace_back(SQLSubquery{context.subqueries.size(), std::move(aggregation_query), SQLSubqueryType::TABLE});
 
         SelectQueryBuilder builder;
         builder.from_table = context.subqueries.back().name;
-        builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::NewGroup));
-        builder.select_list.back()->setAlias(ColumnNames::Group);
+        builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Group));
         builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Values));
         builder.where = makeASTFunction("notEmpty", make_intrusive<ASTIdentifier>(ColumnNames::Values));
 
