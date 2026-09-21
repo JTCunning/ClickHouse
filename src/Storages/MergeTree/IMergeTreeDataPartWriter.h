@@ -9,6 +9,7 @@
 #include <Storages/MergeTree/MergeTreeIndexGranularityInfo.h>
 #include <Storages/MergeTree/MergeTreeIndices.h>
 #include <Storages/MergeTree/ColumnsSubstreams.h>
+#include <Storages/ColumnCodecDescription.h>
 #include <Storages/Statistics/Statistics.h>
 #include <Storages/VirtualColumnsDescription.h>
 #include <Formats/MarkInCompressedFile.h>
@@ -83,7 +84,7 @@ public:
 protected:
     SerializationPtr getSerialization(const String & column_name) const;
 
-    ASTPtr getCodecDescriptionOrDefault(const String & column_name, CompressionCodecPtr default_codec) const;
+    ColumnCodecDescription getCodecDescription(const String & column_name) const;
 
     /// True if `column_name` uses the default codec (no `CODEC` clause, or an explicit lone `CODEC(Default)`).
     bool columnUsesDefaultCodec(const String & column_name) const;
