@@ -23,6 +23,12 @@ class StorageTimeSeries;
 /// (`DateTime64` with the specified scale, or `DateTime` / `UInt32`).
 void insertPrometheusTimestamp(Int64 timestamp_ms, UInt32 scale, IColumn & column);
 
+struct PrometheusRemoteWriteV2Stats
+{
+    size_t samples = 0;
+    size_t histograms = 0;
+};
+
 /// Helper class to support the prometheus remote write protocol.
 class PrometheusRemoteWriteProtocol : WithMutableContext
 {
@@ -33,7 +39,7 @@ public:
     void write(
         const google::protobuf::RepeatedPtrField<prometheus::TimeSeries> & time_series,
         const google::protobuf::RepeatedPtrField<prometheus::MetricMetadata> & metrics_metadata);
-    size_t write(const io::prometheus::write::v2::Request & request);
+    PrometheusRemoteWriteV2Stats write(const io::prometheus::write::v2::Request & request);
 
 private:
     std::shared_ptr<StorageTimeSeries> time_series_storage;

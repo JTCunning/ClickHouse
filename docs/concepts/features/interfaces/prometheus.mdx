@@ -115,27 +115,18 @@ Remote Write 1.0 is enabled by default. To accept Remote Write 2.0 (`io.promethe
 SET enable_prometheus_remote_write_v2 = 1;
 ```
 
-Remote Write 2.0 support is float-only. ClickHouse stores float samples and metric metadata.
-ClickHouse rejects the complete request when native histograms are present.
+Remote Write 2.0 stores float samples, metric metadata, and native histograms.
+Native histograms on Remote Write 2.0 use the same storage as Remote Write 1.0: a current-version `TimeSeries` table stores them, and an older table drops them and still accepts the request.
 ClickHouse rejects the complete request when exemplars are present.
 ClickHouse rejects the complete request when a sample has a nonzero `start_timestamp`.
 Senders can set `send_exemplars: false` to omit exemplars.
-
-Prometheus `send_native_histograms` is a no-op for `io.prometheus.write.v2.Request`, so a sender cannot use it to omit native histograms.
-A sender drops native histogram series with a `write_relabel_configs` rule on the `__type__` label.
-Prometheus sets `__type__` only when it runs with `--enable-feature=type-and-unit-labels`.
-Without that feature flag the rule matches nothing, and ClickHouse rejects every request that carries a native histogram.
-The rule removes the complete series, not only its histogram samples.
 
 ```yaml
 remote_write:
   - url: https://clickhouse.example.com:8443/prometheus/api/v1/write?database=prometheus&table=metrics
     protobuf_message: io.prometheus.write.v2.Request
     send_exemplars: false
-    write_relabel_configs:
-      - source_labels: [__type__]
-        regex: histogram|gaugehistogram
-        action: drop
+    send_native_histograms: true
 ```
 
 To batch data from many concurrent remote-write requests into fewer parts, enable [asynchronous inserts](/reference/settings/session-settings/async-insert#async_insert) by adding the `async_insert` setting to the URL (or by enabling it in the user profile):
@@ -164,7 +155,7 @@ PromQL queries don't support native histograms yet: a query fails if the time se
 A histogram which Prometheus itself would reject, for example one whose bucket spans do not match its bucket counts, makes ClickHouse reject the whole request with HTTP status 400, and Prometheus drops the request without retrying, as it does with any 4xx status.
 
 :::note
-Prometheus does not send native histograms with custom buckets (such as classic histograms converted with `convert_classic_histograms_to_nhcb`) over remote-write 1.0, which is the protocol version ClickHouse supports: Prometheus 3.10 and later drop them on the sending side with a warning, and earlier versions send them without their bucket bounds, which makes ClickHouse reject the request. Exponential native histograms are sent by every version. Other senders do send custom-bucket histograms over remote-write 1.0, for example the OpenTelemetry Collector with `convert_explicit_histograms_to_nhcb` enabled, and ClickHouse stores them.
+Prometheus 3.10 and later send native histograms with custom buckets over Remote Write 2.0. Remote Write 1.0 still drops them on the sending side with a warning. Earlier Prometheus versions send them over Remote Write 1.0 without bucket bounds, which makes ClickHouse reject the request. Other senders, for example the OpenTelemetry Collector with `convert_explicit_histograms_to_nhcb` enabled, send custom-bucket histograms over Remote Write 1.0, and ClickHouse stores them.
 :::
 
 A table of an earlier version has no histograms table. Such a table stores the float samples of a request and drops its native histograms: rejecting the request would make Prometheus drop the float samples too. Every drop is counted in the `PrometheusRemoteWriteDroppedHistograms` profile event and logged with a warning, at most once a minute. To store native histograms, create a table of the current version and move the data into it.

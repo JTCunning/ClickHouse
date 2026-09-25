@@ -339,16 +339,16 @@ public:
             throw Exception(ErrorCodes::UNSUPPORTED_MEDIA_TYPE,
                 "HTTP header Content-Encoding has unsupported value '{}' (must be 'snappy' or 'zstd')", content_encoding);
 
-        const auto set_v2_written_headers = [&](size_t samples_written)
+        const auto set_v2_written_headers = [&](size_t samples_written, size_t histograms_written = 0)
         {
             response.set("X-Prometheus-Remote-Write-Samples-Written", std::to_string(samples_written));
-            response.set("X-Prometheus-Remote-Write-Histograms-Written", "0");
+            response.set("X-Prometheus-Remote-Write-Histograms-Written", std::to_string(histograms_written));
             response.set("X-Prometheus-Remote-Write-Exemplars-Written", "0");
         };
 
         if (is_v2)
         {
-            set_v2_written_headers(0);
+            set_v2_written_headers(0, 0);
             if (!context->getSettingsRef()[Setting::enable_prometheus_remote_write_v2])
                 throw Exception(
                     ErrorCodes::BAD_ARGUMENTS, "Setting `enable_prometheus_remote_write_v2` is not enabled");
@@ -380,7 +380,8 @@ public:
                 }
                 try
                 {
-                    set_v2_written_headers(protocol.write(v2_request));
+                    const auto stats = protocol.write(v2_request);
+                    set_v2_written_headers(stats.samples, stats.histograms);
                 }
                 catch (const Exception & e)
                 {

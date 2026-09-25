@@ -30,6 +30,7 @@
 #include <Storages/TimeSeries/makePrometheusHistogramsBlock.h>
 #include <Storages/TimeSeries/splitTimeSeriesType.h>
 #include <prompb/io/prometheus/write/v2/types.pb.h>
+#include <prompb/types.pb.h>
 
 #include <chrono>
 #include <vector>
@@ -278,12 +279,102 @@ Block makeBlock(
     return block;
 }
 
-size_t countFloatTimeSeries(const io::prometheus::write::v2::Request & request)
+bool hasSamplesOrHistograms(const io::prometheus::write::v2::TimeSeries & element)
+{
+    return !element.samples().empty() || element.histograms_size();
+}
+
+size_t countTimeSeriesRows(const io::prometheus::write::v2::Request & request)
 {
     size_t count = 0;
     for (const auto & element : request.timeseries())
-        count += !element.samples().empty();
+        count += hasSamplesOrHistograms(element);
     return count;
+}
+
+void copyBucketSpans(
+    const google::protobuf::RepeatedPtrField<io::prometheus::write::v2::BucketSpan> & src,
+    google::protobuf::RepeatedPtrField<prometheus::BucketSpan> * dest)
+{
+    dest->Clear();
+    dest->Reserve(src.size());
+    for (const auto & span : src)
+    {
+        auto * out = dest->Add();
+        out->set_offset(span.offset());
+        out->set_length(span.length());
+    }
+}
+
+void copyHistogram(const io::prometheus::write::v2::Histogram & src, prometheus::Histogram & dest)
+{
+    dest.Clear();
+    switch (src.count_case())
+    {
+        case io::prometheus::write::v2::Histogram::kCountInt:
+            dest.set_count_int(src.count_int());
+            break;
+        case io::prometheus::write::v2::Histogram::kCountFloat:
+            dest.set_count_float(src.count_float());
+            break;
+        default:
+            break;
+    }
+    dest.set_sum(src.sum());
+    dest.set_schema(src.schema());
+    dest.set_zero_threshold(src.zero_threshold());
+    switch (src.zero_count_case())
+    {
+        case io::prometheus::write::v2::Histogram::kZeroCountInt:
+            dest.set_zero_count_int(src.zero_count_int());
+            break;
+        case io::prometheus::write::v2::Histogram::kZeroCountFloat:
+            dest.set_zero_count_float(src.zero_count_float());
+            break;
+        default:
+            break;
+    }
+    copyBucketSpans(src.negative_spans(), dest.mutable_negative_spans());
+    *dest.mutable_negative_deltas() = src.negative_deltas();
+    *dest.mutable_negative_counts() = src.negative_counts();
+    copyBucketSpans(src.positive_spans(), dest.mutable_positive_spans());
+    *dest.mutable_positive_deltas() = src.positive_deltas();
+    *dest.mutable_positive_counts() = src.positive_counts();
+    dest.set_reset_hint(static_cast<prometheus::Histogram::ResetHint>(src.reset_hint()));
+    dest.set_timestamp(src.timestamp());
+    *dest.mutable_custom_values() = src.custom_values();
+}
+
+google::protobuf::RepeatedPtrField<prometheus::TimeSeries> convertV2Histograms(
+    const io::prometheus::write::v2::Request & request)
+{
+    const auto & symbols = request.symbols();
+    const auto lookup = [&](UInt32 ref) -> const std::string &
+    {
+        if (ref >= static_cast<UInt32>(symbols.size()))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid Prometheus remote write v2 symbol reference {}", ref);
+        return symbols[static_cast<int>(ref)];
+    };
+
+    google::protobuf::RepeatedPtrField<prometheus::TimeSeries> converted;
+    for (const auto & element : request.timeseries())
+    {
+        if (!hasSamplesOrHistograms(element))
+            continue;
+        if (element.labels_refs_size() % 2 != 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 labels_refs size must be even");
+
+        auto * dest = converted.Add();
+        for (int i = 0; i < element.labels_refs_size(); i += 2)
+        {
+            auto * label = dest->add_labels();
+            label->set_name(lookup(element.labels_refs(i)));
+            label->set_value(lookup(element.labels_refs(i + 1)));
+        }
+        for (const auto & histogram : element.histograms())
+            copyHistogram(histogram, *dest->add_histograms());
+    }
+    return converted;
 }
 
 Block makeBlock(
@@ -291,7 +382,7 @@ Block makeBlock(
     const StorageInMemoryMetadata & metadata,
     const String & samples_column_name)
 {
-    const auto num_time_series = countFloatTimeSeries(request);
+    const auto num_time_series = countTimeSeriesRows(request);
     const auto & symbols = request.symbols();
     const auto lookup = [&](UInt32 ref) -> const std::string &
     {
@@ -333,7 +424,7 @@ Block makeBlock(
         TimeSeriesBlockBuilder builder(num_time_series + metrics_metadata.size(), metadata, samples_column_name);
         for (const auto & element : request.timeseries())
         {
-            if (element.samples().empty())
+            if (!hasSamplesOrHistograms(element))
                 continue;
             if (element.labels_refs_size() % 2 != 0)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 labels_refs size must be even");
@@ -460,27 +551,27 @@ void PrometheusRemoteWriteProtocol::write(
         metrics_metadata.size());
 }
 
-size_t PrometheusRemoteWriteProtocol::write(const io::prometheus::write::v2::Request & request)
+PrometheusRemoteWriteV2Stats PrometheusRemoteWriteProtocol::write(const io::prometheus::write::v2::Request & request)
 {
-    size_t samples_written = 0;
+    PrometheusRemoteWriteV2Stats stats;
+    size_t histograms_in_request = 0;
     for (const auto & element : request.timeseries())
     {
         if (element.exemplars_size())
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 exemplars are not supported");
-        if (element.histograms_size())
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 native histograms are not supported");
-        if (element.samples().empty())
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 time series must contain samples");
+        if (!hasSamplesOrHistograms(element))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 time series must contain samples or histograms");
         for (const auto & sample : element.samples())
         {
             if (sample.start_timestamp())
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Prometheus remote write v2 sample start timestamps are not supported");
-            ++samples_written;
+            ++stats.samples;
         }
+        histograms_in_request += element.histograms_size();
     }
 
     const auto storage_id = time_series_storage->getStorageID();
-    const auto num_time_series = countFloatTimeSeries(request);
+    const auto num_time_series = countTimeSeriesRows(request);
     LOG_TRACE(
         log,
         "{}: Writing {} time series",
@@ -489,14 +580,24 @@ size_t PrometheusRemoteWriteProtocol::write(const io::prometheus::write::v2::Req
 
     auto metadata = time_series_storage->getInMemoryMetadataPtr(getContext(), false);
     const auto * samples_column_name = TimeSeriesColumnNames::getOuterSamples(time_series_storage->getVersion());
-    insertBlock(makeBlock(request, *metadata, samples_column_name), *time_series_storage, getContext());
+    auto block = makeBlock(request, *metadata, samples_column_name);
+    const auto converted_histograms = convertV2Histograms(request);
+    size_t metadata_rows = 0;
+    for (const auto & element : request.timeseries())
+        metadata_rows += element.has_metadata();
+    const auto histograms_block
+        = makePrometheusHistogramsBlock(converted_histograms, metadata_rows, *time_series_storage, *metadata);
+    if (!histograms_block.empty())
+        stats.histograms = histograms_in_request;
+    appendBlock(block, histograms_block);
+    insertBlock(std::move(block), *time_series_storage, getContext());
 
     LOG_TRACE(
         log,
         "{}: {} time series written",
         storage_id.getNameForLogs(),
         num_time_series);
-    return samples_written;
+    return stats;
 }
 
 }

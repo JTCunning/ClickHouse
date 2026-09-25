@@ -193,11 +193,13 @@ def check_remote_write_response(response):
         raise Exception(f"Got unexpected status code {response.status_code}")
 
 
-def assert_remote_write_v2_written_headers(response, samples_written):
+def assert_remote_write_v2_written_headers(response, samples_written, histograms_written=0):
     assert response.headers.get("X-Prometheus-Remote-Write-Samples-Written") == str(
         samples_written
     )
-    assert response.headers.get("X-Prometheus-Remote-Write-Histograms-Written") == "0"
+    assert response.headers.get("X-Prometheus-Remote-Write-Histograms-Written") == str(
+        histograms_written
+    )
     assert response.headers.get("X-Prometheus-Remote-Write-Exemplars-Written") == "0"
 
 

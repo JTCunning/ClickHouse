@@ -14,6 +14,7 @@ from .prometheus_test_utils import (
     get_response_to_remote_write,
     receive_protobuf_from_remote_read,
     send_protobuf_to_remote_write,
+    write_v2_pb2,
 )
 import re
 import requests
@@ -386,6 +387,27 @@ def test_remote_write_v2_zstd():
     assert series[0].samples[0].value == 42.0
 
 
+def _v2_integer_histogram(timestamp_ms, count=1):
+    histogram = write_v2_pb2.Histogram()
+    histogram.count_int = count
+    histogram.sum = float(count)
+    span = histogram.positive_spans.add()
+    span.offset = 0
+    span.length = 1
+    histogram.positive_deltas.append(count)
+    histogram.timestamp = timestamp_ms
+    return histogram
+
+
+def _histogram_count(metric_name):
+    return int(
+        node.query(
+            f"SELECT count() FROM timeSeriesHistograms(prometheus) "
+            f"WHERE id IN (SELECT id FROM timeSeriesTags(prometheus) WHERE metric_name = '{metric_name}')"
+        )
+    )
+
+
 @pytest.mark.parametrize(
     "case, include_float, separate_histogram_series",
     [
@@ -394,7 +416,7 @@ def test_remote_write_v2_zstd():
         ("samples_and_histograms_in_one_series", True, False),
     ],
 )
-def test_remote_write_v2_rejects_native_histograms(
+def test_remote_write_v2_stores_native_histograms(
     case, include_float, separate_histogram_series
 ):
     start_time = 1724118350
@@ -413,7 +435,7 @@ def test_remote_write_v2_rejects_native_histograms(
                 len(protobuf.symbols) - 1,
             ]
         )
-    histogram_series.histograms.add(timestamp=start_time * 1000)
+    histogram_series.histograms.append(_v2_integer_histogram(start_time * 1000, 4))
 
     response = get_response_to_remote_write(
         node.ip_address,
@@ -423,10 +445,19 @@ def test_remote_write_v2_rejects_native_histograms(
         content_type=WRITE_V2_CONTENT_TYPE,
         headers={"X-Prometheus-Remote-Write-Version": "2.0.0"},
     )
-    assert response.status_code == requests.codes.bad_request
-    assert_remote_write_v2_written_headers(response, 0)
-    assert _read_samples(metric_name, start_time, start_time + 1) == []
-    assert _read_samples(histogram_metric_name, start_time, start_time + 1) == []
+    assert response.status_code == requests.codes.no_content, response.text
+    samples_written = 1 if include_float else 0
+    assert_remote_write_v2_written_headers(response, samples_written, 1)
+    series = _read_samples(metric_name, start_time, start_time + 1)
+    if include_float:
+        assert len(series) == 1
+        assert series[0].samples[0].value == 42.0
+    else:
+        assert len(series) == 1
+        assert not series[0].samples
+        assert len(series[0].histograms) == 1
+        assert series[0].histograms[0].count_int == 4
+    assert _histogram_count(histogram_metric_name) == 1
 
 
 def test_remote_write_v2_invalid_first_symbol():
@@ -657,3 +688,58 @@ def test_remote_write_v2_rejects_exemplars():
     assert_remote_write_v2_written_headers(response, 0)
     series = _read_samples(metric_name, start_time, start_time + 1)
     assert series == []
+
+
+def test_remote_write_v2_rejects_invalid_native_histogram():
+    start_time = 1724119000
+    metric_name = "rw2_invalid_histogram"
+    protobuf = convert_time_series_to_write_v2_protobuf(
+        [({"__name__": metric_name}, {})]
+    )
+    histogram = _v2_integer_histogram(start_time * 1000, 1)
+    histogram.positive_spans[0].length = 2
+    histogram.positive_deltas.append(-2)
+    protobuf.timeseries[0].histograms.append(histogram)
+    response = get_response_to_remote_write(
+        node.ip_address,
+        9093,
+        "/write",
+        protobuf,
+        content_type=WRITE_V2_CONTENT_TYPE,
+        headers={"X-Prometheus-Remote-Write-Version": "2.0.0"},
+    )
+    assert response.status_code == requests.codes.bad_request, response.text
+    assert "negative count" in response.text
+    assert_remote_write_v2_written_headers(response, 0)
+    assert _histogram_count(metric_name) == 0
+
+
+def test_remote_write_v2_old_table_drops_histograms():
+    start_time = 1724119100
+    metric_name = "rw2_old_table"
+    protobuf = convert_time_series_to_write_v2_protobuf(
+        [({"__name__": metric_name}, {start_time: 9.0})]
+    )
+    protobuf.timeseries[0].histograms.append(_v2_integer_histogram(start_time * 1000, 2))
+    node.query("DROP TABLE prometheus SYNC")
+    node.query("CREATE TABLE prometheus ENGINE=TimeSeries SETTINGS version = 5")
+    try:
+        response = get_response_to_remote_write(
+            node.ip_address,
+            9093,
+            "/write",
+            protobuf,
+            content_type=WRITE_V2_CONTENT_TYPE,
+            headers={"X-Prometheus-Remote-Write-Version": "2.0.0"},
+        )
+        assert response.status_code == requests.codes.no_content, response.text
+        assert_remote_write_v2_written_headers(response, 1, 0)
+        series = _read_samples(metric_name, start_time, start_time + 1)
+        assert len(series) == 1
+        assert series[0].samples[0].value == 9.0
+        assert node.contains_in_log(
+            "Dropped 1 native histogram samples: the table has no histograms table because its version 5 is older than 7"
+        )
+    finally:
+        node.query("DROP TABLE prometheus SYNC")
+        node.query("CREATE TABLE prometheus ENGINE=TimeSeries")
