@@ -540,10 +540,21 @@ ASTPtr PrometheusHTTPProtocolAPI::makeSeriesIDsQuery(
     if (min_time && max_time && (*max_time < *min_time))
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "'start' must not be greater than 'end'");
 
-    /// Like the query path, filter by the [min_time, max_time] stored in the tags table; without stored bounds the range is ignored (a superset is allowed).
+    /// Version 8 filters with the series stats table. Earlier versions use the bounds stored on the tags table.
+    /// Without stored bounds the range is ignored (a superset is allowed).
     auto time_series_settings = time_series_storage->getStorageSettings();
-    if (!(*time_series_settings)[TimeSeriesSetting::filter_by_min_time_and_max_time]
-        || !(*time_series_settings)[TimeSeriesSetting::store_min_time_and_max_time])
+    StorageID series_stats_table_id = StorageID::createEmpty();
+    const bool filter_by_time = (*time_series_settings)[TimeSeriesSetting::filter_by_min_time_and_max_time];
+    const bool use_series_stats = filter_by_time
+        && (time_series_storage->getVersion() >= TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+        && time_series_storage->hasTarget(ViewTarget::SeriesStats)
+        && (min_time || max_time);
+    const bool use_tags_bounds = filter_by_time
+        && (*time_series_settings)[TimeSeriesSetting::store_min_time_and_max_time]
+        && (time_series_storage->getVersion() < TimeSeriesVersion::MIN_WITH_SERIES_STATS);
+    if (use_series_stats)
+        series_stats_table_id = time_series_storage->getTargetTableID(ViewTarget::SeriesStats, getContext());
+    else if (!use_tags_bounds)
     {
         min_time.reset();
         max_time.reset();
@@ -575,7 +586,7 @@ ASTPtr PrometheusHTTPProtocolAPI::makeSeriesIDsQuery(
                             quoteString(match_param));
 
         auto select_ids_query = StorageTimeSeriesSelector::makeSelectIDsQuery(
-            tags_table_id, *time_series_settings, table_timestamp_type, table_id_type, matchers, min_time, max_time, time_scale);
+            tags_table_id, series_stats_table_id, *time_series_settings, table_timestamp_type, table_id_type, matchers, min_time, max_time, time_scale);
         const auto & select_ids = typeid_cast<const ASTSelectWithUnionQuery &>(*select_ids_query);
         list_of_selects->children.push_back(select_ids.list_of_selects->children.at(0));
     }

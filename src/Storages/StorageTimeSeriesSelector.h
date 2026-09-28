@@ -47,6 +47,7 @@ public:
     /// reads from a `null` table (returns no ids) if no timestamp of the table is in the time range.
     static ASTPtr makeSelectIDsQuery(
         const StorageID & tags_table_id,
+        const StorageID & series_stats_table_id,
         const TimeSeriesSettings & time_series_settings,
         const DataTypePtr & table_timestamp_type,
         const DataTypePtr & table_id_type,

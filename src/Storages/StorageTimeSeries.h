@@ -59,14 +59,14 @@ public:
     bool isInnerTable(ViewTarget::Kind target_kind) const;
     bool hasInnerTables() const { return has_inner_tables; }
 
-    /// Whether this table has a target of the given kind (the RecentSamples target is optional).
+    /// Whether this table has a target of the given kind (RecentSamples and SeriesStats are optional).
     bool hasTarget(ViewTarget::Kind target_kind) const;
 
-    /// Returns all possible target kinds: Samples, RecentSamples, Tags, and MetricFamilies.
-    /// A concrete table can have no RecentSamples target (see hasTarget).
-    static constexpr std::array<ViewTarget::Kind, 4> getTargetKinds()
+    /// Returns all possible target kinds: Samples, RecentSamples, Tags, MetricFamilies, and SeriesStats.
+    /// A concrete table can have no RecentSamples target, and no SeriesStats target before version 8 (see hasTarget).
+    static constexpr std::array<ViewTarget::Kind, 5> getTargetKinds()
     {
-        return {ViewTarget::Samples, ViewTarget::RecentSamples, ViewTarget::Tags, ViewTarget::MetricFamilies};
+        return {ViewTarget::Samples, ViewTarget::RecentSamples, ViewTarget::Tags, ViewTarget::MetricFamilies, ViewTarget::SeriesStats};
     }
 
     /// Return the caches used to skip the rows already written to the "tags" and "metric families" tables,

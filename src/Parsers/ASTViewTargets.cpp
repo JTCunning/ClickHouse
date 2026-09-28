@@ -38,6 +38,7 @@ namespace
             case ViewTarget::RecentSamples: return Keyword::RECENT_SAMPLES; /// RECENT SAMPLES mydb.myrecentsamples
             case ViewTarget::Tags:    return Keyword::TAGS;    /// TAGS mydb.mytags
             case ViewTarget::MetricFamilies: return Keyword::METRIC_FAMILIES; /// METRIC FAMILIES mydb.mymetricfamilies
+            case ViewTarget::SeriesStats: return Keyword::SERIES_STATS; /// SERIES STATS mydb.myseriesstats
         }
         UNREACHABLE();
     }

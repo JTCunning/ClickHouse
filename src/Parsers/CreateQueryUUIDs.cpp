@@ -127,6 +127,9 @@ CreateQueryUUIDs::CreateQueryUUIDs(const ASTCreateQuery & query, bool generate_r
                 }
                 if (recent_samples_enabled)
                     generate_target_uuid(ViewTarget::RecentSamples);
+
+                if (time_series_version >= TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+                    generate_target_uuid(ViewTarget::SeriesStats);
             }
         }
     }

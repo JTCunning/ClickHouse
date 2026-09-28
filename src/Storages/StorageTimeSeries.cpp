@@ -116,11 +116,10 @@ std::vector<StorageTimeSeries::Target> StorageTimeSeries::findTargets(const ASTC
     std::vector<Target> targets;
     for (auto target_kind : getTargetKinds())
     {
-        /// The recent samples target exists only if the normalized create query has a RECENT SAMPLES clause.
-        /// The `recent_samples_ttl_seconds` setting itself cannot be checked here instead: a table created
-        /// before this feature existed has no recent samples table on disk while the setting reads as its
-        /// non-zero default, and ATTACH never creates inner tables.
-        if ((target_kind == ViewTarget::RecentSamples)
+        /// Recent samples and series stats exist only if the normalized create query has the clause.
+        /// The settings cannot be checked here instead: a table created before the feature existed has no
+        /// target on disk, and ATTACH never creates inner tables.
+        if (((target_kind == ViewTarget::RecentSamples) || (target_kind == ViewTarget::SeriesStats))
             && (!create_query.targets || !create_query.targets->tryGetTarget(target_kind)))
             continue;
 
@@ -297,8 +296,8 @@ StoragePtr StorageTimeSeries::getTargetTableImpl(ViewTarget::Kind target_kind, c
     const auto * target_ptr = tryGetTarget(target_kind);
     if (!target_ptr)
     {
-        /// The recent samples target is optional.
-        if (target_kind == ViewTarget::RecentSamples)
+        /// Recent samples and series stats are optional.
+        if ((target_kind == ViewTarget::RecentSamples) || (target_kind == ViewTarget::SeriesStats))
         {
             if (throw_if_not_found)
                 throw Exception(ErrorCodes::UNKNOWN_TABLE, "TimeSeries table {} has no {} target table",
@@ -383,8 +382,8 @@ bool StorageTimeSeries::isInnerTable(ViewTarget::Kind target_kind) const
     const auto * target = tryGetTarget(target_kind);
     if (!target)
     {
-        /// The recent samples target is optional.
-        if (target_kind == ViewTarget::RecentSamples)
+        /// Recent samples and series stats are optional.
+        if ((target_kind == ViewTarget::RecentSamples) || (target_kind == ViewTarget::SeriesStats))
             return false;
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected target kind {}", target_kind);
     }
@@ -403,11 +402,14 @@ void StorageTimeSeries::createOrDropTagsDeduplicationCache()
     size_t max_size_bytes = settings[TimeSeriesSetting::tags_deduplication_cache_size_bytes];
     UInt64 expiration_seconds = settings[TimeSeriesSetting::tags_deduplication_cache_expiration_seconds];
 
-    /// The cache is used only by supported versions. Every insert changes `min_time` and `max_time`,
-    /// so the rows of the tags table can be deduplicated only if these columns aren't stored.
+    /// The cache is used only by supported versions. Before version 8 every insert changes `min_time` and `max_time`
+    /// on the tags table, so those rows can be deduplicated only when the columns are not stored.
+    /// From version 8 the bounds live in the series stats table and the tags rows stay stable.
     UInt64 version = settings[TimeSeriesSetting::version];
+    bool tags_rows_are_stable = (version >= TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+        || !settings[TimeSeriesSetting::store_min_time_and_max_time];
     bool enabled = isTimeSeriesVersionSupported(version) && (version >= TimeSeriesVersion::MIN_WITH_DEDUPLICATION_CACHES)
-        && !settings[TimeSeriesSetting::store_min_time_and_max_time] && max_size_bytes && expiration_seconds;
+        && tags_rows_are_stable && max_size_bytes && expiration_seconds;
     if (!enabled)
     {
         tags_deduplication_cache = nullptr;
@@ -983,6 +985,7 @@ CREATE TABLE name [(columns)] ENGINE=TimeSeries
 [RECENT SAMPLES db.recent_samples_table_name | [RECENT SAMPLES INNER COLUMNS (...)] [RECENT SAMPLES INNER ENGINE engine(arguments)]]
 [TAGS db.tags_table_name | [TAGS INNER COLUMNS (...)] [TAGS INNER ENGINE engine(arguments)]]
 [METRIC FAMILIES db.metric_families_table_name | [METRIC FAMILIES INNER COLUMNS (...)] [METRIC FAMILIES INNER ENGINE engine(arguments)]]
+[SERIES STATS db.series_stats_table_name | [SERIES STATS INNER COLUMNS (...)] [SERIES STATS INNER ENGINE engine(arguments)]]
 ```
 
 <Note>
@@ -1165,7 +1168,7 @@ CREATE TABLE my_table
     `help` String
 )
 ENGINE = TimeSeries
-SETTINGS version = 7, recent_samples_ttl_seconds = 345600
+SETTINGS version = 8, recent_samples_ttl_seconds = 345600
 SAMPLES INNER COLUMNS
 (
     `id` Tuple(UInt64, LowCardinality(UUID)),
@@ -1185,11 +1188,17 @@ TAGS INNER COLUMNS
     `id` Tuple(UInt64, LowCardinality(UUID)) DEFAULT tuple(sipHash64(metric_name), toLowCardinality(reinterpretAsUUID(sipHash128(tags)))),
     `metric_name` LowCardinality(String),
     `tags` Map(LowCardinality(String), String),
-    `min_time` SimpleAggregateFunction(min, Nullable(DateTime64(3))),
-    `max_time` SimpleAggregateFunction(max, Nullable(DateTime64(3))),
     INDEX tags_idx tags TYPE text(tokenizer = 'keyValuePairs') GRANULARITY 100000000
 )
-TAGS INNER ENGINE = AggregatingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS allow_dimensions_outside_sorting_key = 1, index_granularity = 8192
+TAGS INNER ENGINE = ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192
+SERIES STATS INNER COLUMNS
+(
+    `id` Tuple(UInt64, LowCardinality(UUID)),
+    `min_time` SimpleAggregateFunction(min, DateTime64(3)),
+    `max_time` SimpleAggregateFunction(max, DateTime64(3)),
+    `sample_count` SimpleAggregateFunction(sum, UInt64)
+)
+SERIES STATS INNER ENGINE = AggregatingMergeTree ORDER BY id SETTINGS index_granularity = 8192
 METRIC FAMILIES INNER COLUMNS
 (
     `metric_family` String,
@@ -1200,14 +1209,15 @@ METRIC FAMILIES INNER COLUMNS
 METRIC FAMILIES INNER ENGINE = ReplacingMergeTree ORDER BY metric_family
 ```
 
-So the columns were generated automatically and also there are four inner target tables with their own column definitions
+So the columns were generated automatically and also there are five inner target tables with their own column definitions
 stored in the `INNER COLUMNS` clauses. The `recent_samples_ttl_seconds` setting was written into the `SETTINGS` clause
 with its default value: the setting defines the TTL of the recent samples table, so its effective value is fixed at creation.
 Also the latest schema version was pinned into the `version` setting (see [Schema versioning](#schema-versioning)).
 
 Inner target tables have names like `.inner_id.samples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
 `.inner_id.recentsamples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, `.inner_id.tags.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
-`.inner_id.metricfamilies.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+`.inner_id.metricfamilies.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
+`.inner_id.seriesstats.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 and each target table has its own set of columns:
 
 ```sql
@@ -1242,14 +1252,25 @@ CREATE TABLE default.`.inner_id.tags.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
     `id` Tuple(UInt64, LowCardinality(UUID)) DEFAULT tuple(sipHash64(metric_name), toLowCardinality(reinterpretAsUUID(sipHash128(tags)))),
     `metric_name` LowCardinality(String),
     `tags` Map(LowCardinality(String), String),
-    `min_time` SimpleAggregateFunction(min, Nullable(DateTime64(3))),
-    `max_time` SimpleAggregateFunction(max, Nullable(DateTime64(3))),
     INDEX tags_idx tags TYPE text(tokenizer = 'keyValuePairs') GRANULARITY 100000000
 )
-ENGINE = AggregatingMergeTree
+ENGINE = ReplacingMergeTree
 PRIMARY KEY metric_name
 ORDER BY (metric_name, id)
-SETTINGS allow_dimensions_outside_sorting_key = 1, index_granularity = 8192
+SETTINGS index_granularity = 8192
+```
+
+```sql
+CREATE TABLE default.`.inner_id.seriesstats.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+(
+    `id` Tuple(UInt64, LowCardinality(UUID)),
+    `min_time` SimpleAggregateFunction(min, DateTime64(3)),
+    `max_time` SimpleAggregateFunction(max, DateTime64(3)),
+    `sample_count` SimpleAggregateFunction(sum, UInt64)
+)
+ENGINE = AggregatingMergeTree
+ORDER BY id
+SETTINGS index_granularity = 8192
 ```
 
 ```sql
@@ -1368,10 +1389,8 @@ By default inner target tables use the following table engines:
 - the [samples](#samples-table) table uses [MergeTree](/reference/engines/table-engines/mergetree-family/mergetree);
 - the [recent samples](#recent-samples-table) table uses [MergeTree](/reference/engines/table-engines/mergetree-family/mergetree) partitioned by 5-hour buckets (see the [recent_samples_partition_by](#settings) setting) with a `TTL` derived from
 the [recent_samples_ttl_seconds](#settings) setting and with `ttl_only_drop_parts` enabled, so expired parts are dropped as a whole;
-- the [tags](#tags-table) table uses [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) because the same data is often inserted multiple times to this table so we need a way
-to remove duplicates, and also because it's required to do aggregation for columns `min_time` and `max_time`. If these columns aren't stored
-(see the `store_min_time_and_max_time` setting), most duplicates don't even reach the table: the deduplication cache of the `TimeSeries` table
-skips the time series written recently (see the `tags_deduplication_cache_expiration_seconds` setting);
+- the [tags](#tags-table) table uses [ReplacingMergeTree](/reference/engines/table-engines/mergetree-family/replacingmergetree) from version 8, because `min_time` and `max_time` live in the series stats table and a tags row no longer changes on every insert. Most duplicates don't reach the table: the deduplication cache of the `TimeSeries` table skips the time series written recently (see the `tags_deduplication_cache_expiration_seconds` setting). Tables of earlier versions use [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) when `min_time` and `max_time` are aggregated on the tags row;
+- the series stats table uses [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) with `ORDER BY id`. It stores `min_time`, `max_time`, and `sample_count` for version 8 and later;
 - the [metric families](#metric-families-table) table uses [ReplacingMergeTree](/reference/engines/table-engines/mergetree-family/replacingmergetree) because the same data is often inserted multiple times to this table so we need a way
 to remove duplicates. Most duplicates don't even reach the table: the deduplication cache of the `TimeSeries` table skips the metric families
 written recently (see the `metric_families_deduplication_cache_expiration_seconds` setting).
@@ -1461,18 +1480,18 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `version` | UInt64 | 7 | The version of the table: it identifies the set of the target tables and their structure. The version is pinned automatically when a table is created and can't be changed afterwards, normally it should be omitted in the `CREATE TABLE` query (see [Schema versioning](#schema-versioning)) |
+| `version` | UInt64 | 8 | The version of the table: it identifies the set of the target tables and their structure. The version is pinned automatically when a table is created and can't be changed afterwards, normally it should be omitted in the `CREATE TABLE` query (see [Schema versioning](#schema-versioning)) |
 | `id_type` | Data type | depends on the `id` column | The type of the `id` column of the target tables. Normally the type is declared in the `INNER COLUMNS` clauses of the inner tables or in an [external](#external-target-tables) tags table; the setting is recorded automatically at `CREATE` time if the type isn't kept in the definition otherwise: if the tags target is an external table, or if the `id_generator` setting is set. The setting can also be specified explicitly instead of `TAGS INNER COLUMNS (id <type>)`. Requires `version` to be at least 2 |
 | `id_generator` | Expression | depends on `id` type | Expression that computes the identifier (fingerprint) of a time series from its tags. If unset, the default expression for the `id` column is used. If the default expression for the `id` column is also unset then the expression is chosen automatically. For an external tags table the setting is recorded automatically at `CREATE` time if `version` is at least 2 (see [External target tables](#external-target-tables)) |
 | `tags_to_columns` | Map | {} | Map specifying which tags should be put to separate columns in the [tags](#tags-table) table. Syntax: `{'tag1': 'column1', 'tag2' : column2, ...}` |
 | `use_all_tags_column_to_generate_id` | Bool | false | Obsolete setting, does nothing |
-| `store_min_time_and_max_time` | Bool | true | If set to true then the table will store `min_time` and `max_time` for each time series |
-| `aggregate_min_time_and_max_time` | Bool | true | When creating an inner target `tags` table, this flag enables using `SimpleAggregateFunction(min, Nullable(DateTime64(3)))` instead of just `Nullable(DateTime64(3))` as the type of the `min_time` column, and the same for the `max_time` column |
-| `filter_by_min_time_and_max_time` | Bool | true | If set to true then the table will use the `min_time` and `max_time` columns for filtering time series |
+| `store_min_time_and_max_time` | Bool | true | If set to true then a table of version 7 or earlier stores `min_time` and `max_time` on the tags row. Version 8 and later reject an explicit value and store the bounds in the series stats table |
+| `aggregate_min_time_and_max_time` | Bool | true | When creating an inner tags table of version 7 or earlier, this flag enables using `SimpleAggregateFunction(min, Nullable(DateTime64(3)))` instead of just `Nullable(DateTime64(3))` as the type of the `min_time` column, and the same for the `max_time` column. Version 8 and later reject an explicit value |
+| `filter_by_min_time_and_max_time` | Bool | true | If set to true then the table uses `min_time` and `max_time` to filter time series. Version 8 reads those columns from the series stats table |
 | `metric_families_deduplication_cache_size_bytes` | UInt64 | 10485760 | Maximum size in bytes of the deduplication cache of the [metric families](#metric-families-table) table. The cache remembers the descriptions of the metric families written recently, so they aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). Set to 0 to disable the cache, see also `metric_families_deduplication_cache_expiration_seconds` |
 | `metric_families_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [metric families](#metric-families-table) table expires, counted from the moment the metric family was written. So every metric family is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. Set to 0 to disable the cache |
-| `tags_deduplication_cache_size_bytes` | UInt64 | 104857600 | Maximum size in bytes of the deduplication cache of the [tags](#tags-table) table. The cache remembers the time series written recently, so their tags aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). The cache is used only when `store_min_time_and_max_time` is disabled, because otherwise every insert changes `min_time` and `max_time`: the default value is ignored then, and an explicit non-zero value is rejected. Set to 0 to disable the cache, see also `tags_deduplication_cache_expiration_seconds` |
-| `tags_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [tags](#tags-table) table expires, counted from the moment the time series was written. So every time series is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. Used only when `store_min_time_and_max_time` is disabled, see `tags_deduplication_cache_size_bytes`. Set to 0 to disable the cache |
+| `tags_deduplication_cache_size_bytes` | UInt64 | 104857600 | Maximum size in bytes of the deduplication cache of the [tags](#tags-table) table. The cache remembers the time series written recently, so their tags aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). From version 8 the cache is on by default, because the tags row no longer stores `min_time` and `max_time`. For version 7 the cache is used only when `store_min_time_and_max_time` is disabled: the default value is ignored then, and an explicit non-zero value is rejected. Set to 0 to disable the cache, see also `tags_deduplication_cache_expiration_seconds` |
+| `tags_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [tags](#tags-table) table expires, counted from the moment the time series was written. So every time series is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. From version 8 the cache is on by default. For version 7 it is used only when `store_min_time_and_max_time` is disabled, see `tags_deduplication_cache_size_bytes`. Set to 0 to disable the cache |
 | `samples_index_granularity` | UInt64 | 32768 | Sets `index_granularity` of the inner [samples](#samples-table) table. When set explicitly, it overrides `index_granularity` from the engine declaration. Ignored for an external samples table and a non-MergeTree engine |
 | `recent_samples_ttl_seconds` | UInt64 | 345600 | Retention of the additional `recent samples` target table, which every inserted sample is written to as well. An inner recent samples table always gets `TTL toDateTime(timestamp) + toIntervalSecond(recent_samples_ttl_seconds)` derived from this setting (overriding any TTL from the engine declaration); an external recent samples table must retain at least this many seconds of data. Queries whose time range fits in the TTL window prefer the recent samples table to the main samples table (see the query-level setting `time_series_prefer_recent_samples_table`). The default is 4 days; the effective value is pinned into the table definition at CREATE time. Set to 0 to disable the recent samples table |
 | `recent_samples_partition_by` | Expression | `toStartOfInterval(toDateTime(timestamp), toIntervalHour(5))` | Partition key of the inner `recent samples` table, for example `toStartOfHour(timestamp)`. When set explicitly, it overrides the partition key from the engine declaration; if neither is set, one partition per 5 hours is used. Ignored for an external recent samples table. Requires `recent_samples_ttl_seconds` to be non-zero |
@@ -1484,8 +1503,8 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 The `TimeSeries` table engine and the PromQL execution layer are under active development:
 the set of the target tables and their structure can change between ClickHouse versions.
 To make such changes detectable, every `TimeSeries` table stores its version in the [version](#settings) setting.
-The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 7) -
-persists in the table metadata, and can't be changed by `ALTER`. Tables created before the setting was introduced are considered as version 0.
+The version is pinned automatically into the `CREATE` query when a table is created. Its value is the latest version known to the server (currently 8).
+The version persists in the table metadata, and can't be changed by `ALTER`. Tables created before the setting was introduced are considered as version 0.
 Normally the setting should just be omitted in the `CREATE TABLE` query - then the table gets the latest version.
 An explicit `version` is accepted if the server supports that version; then the table is defined the way that version does it (see [Version history](#version-history)).
 `CREATE TABLE ... AS other_table` doesn't copy the version of the other table, see [Creating a table AS existing table](#create-as).
@@ -1513,6 +1532,7 @@ the `promql` dialect, and the Prometheus HTTP query API):
 | 5 | New inner tags tables with a `MergeTree` family engine get a `keyValuePairs` text index on the `tags` map by default (see [Tags table](#tags-table)) |
 | 6 | The column `metric_family_name` of the [metric families](#metric-families-table) table was renamed to `metric_family`, the name of the corresponding outer column. Tables of earlier versions keep the old name of the column, and the [timeSeriesMetricFamilies](/reference/functions/table-functions/timeSeriesMetricFamilies) table function returns the column under the name the table uses. An external metric families table must name the column the way the version of the `TimeSeries` table does |
 | 7 | The deduplication caches of the [metric families](#metric-families-table) and [tags](#tags-table) tables were introduced together with their settings (see [`metric_families_deduplication_cache_expiration_seconds`](#settings) and [`tags_deduplication_cache_expiration_seconds`](#settings)). Tables of earlier versions don't use the caches. The stored data didn't change |
+| 8 | `min_time`, `max_time`, and `sample_count` moved to a series stats table keyed by `id`. The tags table no longer stores the bounds, so the tags deduplication cache is on by default. `store_min_time_and_max_time` and `aggregate_min_time_and_max_time` are rejected. `sample_count` is stored and is not read by queries |
 
 # Functions {#functions}
 
@@ -1520,6 +1540,7 @@ Here is a list of functions supporting a `TimeSeries` table as an argument:
 - [timeSeriesSamples](/reference/functions/table-functions/timeSeriesSamples)
 - [timeSeriesTags](/reference/functions/table-functions/timeSeriesTags)
 - [timeSeriesMetricFamilies](/reference/functions/table-functions/timeSeriesMetricFamilies)
+- `timeSeriesSeriesStats` returns the series stats table of a version 8 TimeSeries table
 )DOCS_MD",
         .syntax = "ENGINE = TimeSeries()"});
 }

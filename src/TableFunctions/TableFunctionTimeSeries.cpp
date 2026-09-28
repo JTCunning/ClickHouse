@@ -193,6 +193,19 @@ The function `timeSeriesMetricFamilies` has an alias `timeSeriesMetrics` which i
 
     factory.registerAlias("timeSeriesMetrics", "timeSeriesMetricFamilies");
 
+    factory.registerFunction<TableFunctionTimeSeriesTarget<ViewTarget::SeriesStats>>(
+        {.description = R"DOCS_MD(
+`timeSeriesSeriesStats(db_name.time_series_table)` - Returns the series stats table
+used by table `db_name.time_series_table` whose table engine is the [TimeSeries](/reference/engines/table-engines/integrations/time-series) engine.
+The table exists for TimeSeries version 8 and later. It stores `id`, `min_time`, `max_time`, and `sample_count`.
+
+```sql
+SELECT * FROM timeSeriesSeriesStats(db_name.time_series_table);
+SELECT * FROM timeSeriesSeriesStats('db_name.time_series_table');
+SELECT * FROM timeSeriesSeriesStats('db_name', 'time_series_table');
+```
+)DOCS_MD", .category = FunctionDocumentation::Category::TableFunction});
+
     factory.registerFunction<TableFunctionTimeSeriesSelector>(
         {.description = R"DOCS_MD(
 Reads time series from a TimeSeries table filtered by a selector and with timestamps in a specified interval.

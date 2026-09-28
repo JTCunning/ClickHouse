@@ -8,15 +8,17 @@
 namespace DB
 {
 
-/// Table functions timeSeriesSamples('mydb', 'my_ts_table'), timeSeriesTags('mydb', 'my_ts_table'), timeSeriesMetricFamilies('mydb', 'my_ts_table')
-/// return the "samples" table, the "tags" table, and the "metric families" table respectively associated with any TimeSeries table mydb.my_ts_table
+/// Table functions timeSeriesSamples, timeSeriesTags, timeSeriesMetricFamilies, and timeSeriesSeriesStats
+/// return the matching target table of a TimeSeries table.
 template <ViewTarget::Kind target_kind>
 class TableFunctionTimeSeriesTarget : public ITableFunction
 {
 public:
     static constexpr auto name = (target_kind == ViewTarget::Samples)
         ? "timeSeriesSamples"
-        : ((target_kind == ViewTarget::Tags) ? "timeSeriesTags" : "timeSeriesMetricFamilies");
+        : (target_kind == ViewTarget::Tags) ? "timeSeriesTags"
+        : (target_kind == ViewTarget::SeriesStats) ? "timeSeriesSeriesStats"
+        : "timeSeriesMetricFamilies";
 
     String getName() const override { return name; }
 

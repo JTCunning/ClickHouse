@@ -38,6 +38,7 @@
 #include <Storages/TimeSeries/TimeSeriesVersion.h>
 #include <base/EnumReflection.h>
 #include <algorithm>
+#include <functional>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -79,11 +80,14 @@ namespace ErrorCodes
 namespace
 {
     /// All target kinds of a TimeSeries table.
-    /// The RecentSamples target is optional: it's enabled by the `recent_samples_ttl_seconds` setting.
-    constexpr std::array<ViewTarget::Kind, 4> getTargetKinds()
+    /// RecentSamples is optional: it's enabled by the `recent_samples_ttl_seconds` setting.
+    /// SeriesStats is optional before version 8.
+    constexpr std::array<ViewTarget::Kind, 5> getTargetKinds()
     {
-        return {ViewTarget::Samples, ViewTarget::RecentSamples, ViewTarget::Tags, ViewTarget::MetricFamilies};
+        return {ViewTarget::Samples, ViewTarget::RecentSamples, ViewTarget::Tags, ViewTarget::MetricFamilies, ViewTarget::SeriesStats};
     }
+
+    constexpr UInt64 SERIES_STATS_INDEX_GRANULARITY = 8192;
 
     /// Whether the create query defines inner columns for the specified target.
     bool hasInnerColumns(const ASTCreateQuery & create_query, ViewTarget::Kind kind)
@@ -528,16 +532,23 @@ namespace
             old_settings.removeSettings({"metric_families_deduplication_cache_size_bytes", "metric_families_deduplication_cache_expiration_seconds",
                                         "tags_deduplication_cache_size_bytes", "tags_deduplication_cache_expiration_seconds"});
 
-        /// The default value of `recent_samples_ttl_seconds` is 345600 (4 days), so an absent setting doesn't disable the recent samples table.
-        if (const auto * value = get_new_value("recent_samples_ttl_seconds"); value && (SettingFieldUInt64{*value}.value == 0))
-            old_settings.removeSettings({"recent_samples_partition_by", "recent_samples_index_granularity"});
-
-        /// The default value of `store_min_time_and_max_time` is true, so an absent setting doesn't disable the columns.
-        /// The deduplication cache of the tags table is used only without these columns.
-        if (const auto * value = get_new_value("store_min_time_and_max_time"); value && !SettingFieldBool{*value}.value)
+        /// Version 8 stores the bounds in the series stats table, so the old tags-column settings are not copied.
+        /// An absent version in the new query means the latest version.
+        UInt64 new_version = TimeSeriesVersion::LATEST;
+        if (const auto * value = get_new_value("version"))
+            new_version = SettingFieldUInt64{*value}.value;
+        /// Version 8 stores the bounds in the series stats table. The tags deduplication cache stays enabled,
+        /// so its settings are kept. Earlier versions drop those settings when the bounds are stored on the tags row.
+        if (new_version >= TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+            old_settings.removeSettings({"store_min_time_and_max_time", "aggregate_min_time_and_max_time"});
+        else if (const auto * value = get_new_value("store_min_time_and_max_time"); value && !SettingFieldBool{*value}.value)
             old_settings.removeSettings({"aggregate_min_time_and_max_time", "filter_by_min_time_and_max_time"});
         else
             old_settings.removeSettings({"tags_deduplication_cache_size_bytes", "tags_deduplication_cache_expiration_seconds"});
+
+        /// The default value of `recent_samples_ttl_seconds` is 345600 (4 days), so an absent setting doesn't disable the recent samples table.
+        if (const auto * value = get_new_value("recent_samples_ttl_seconds"); value && (SettingFieldUInt64{*value}.value == 0))
+            old_settings.removeSettings({"recent_samples_partition_by", "recent_samples_index_granularity"});
     }
 
     /// Removes the settings copied from the old table which were written for its `id` type, if this table has another one.
@@ -573,8 +584,9 @@ namespace
         if (inner_table_kind != ViewTarget::Tags)
             return;
 
-        /// The columns "min_time" and "max_time" are not stored.
-        if (!new_settings[TimeSeriesSetting::store_min_time_and_max_time])
+        /// Version 8 stores the bounds in the series stats table. Earlier versions omit the columns when the setting is off.
+        if ((new_settings[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+            || !new_settings[TimeSeriesSetting::store_min_time_and_max_time])
         {
             remove_column(TimeSeriesColumnNames::MinTime);
             remove_column(TimeSeriesColumnNames::MaxTime);
@@ -728,6 +740,40 @@ namespace
                     const auto & column_name = tag_name_and_column_name.safeGet<Tuple>().at(1).safeGet<String>();
                     if (name == column_name)
                         return type_name == "String";
+                }
+
+                return false;
+            }
+
+            case ViewTarget::SeriesStats:
+            {
+                if (has_default || codec)
+                    return false;
+
+                if (name == TimeSeriesColumnNames::ID)
+                    return true;
+
+                auto is_simple_aggregate = [&](std::string_view function_name, const std::function<bool(const IDataType &)> & check_argument)
+                {
+                    const auto * simple_aggregate = typeid_cast<const DataTypeCustomSimpleAggregateFunction *>(type->getCustomName());
+                    if (!simple_aggregate || (simple_aggregate->getFunctionName() != function_name))
+                        return false;
+                    const auto & argument_types = simple_aggregate->getArgumentsDataTypes();
+                    return (argument_types.size() == 1) && check_argument(*argument_types[0]);
+                };
+
+                if ((name == TimeSeriesColumnNames::MinTime) || (name == TimeSeriesColumnNames::MaxTime))
+                {
+                    std::string_view expected_function = (name == TimeSeriesColumnNames::MinTime) ? "min" : "max";
+                    return is_simple_aggregate(expected_function, is_timestamp_type);
+                }
+
+                if (name == TimeSeriesColumnNames::SampleCount)
+                {
+                    return is_simple_aggregate("sum", [](const IDataType & argument)
+                    {
+                        return WhichDataType{argument}.isUInt64();
+                    });
                 }
 
                 return false;
@@ -920,8 +966,10 @@ namespace
 
             case ViewTarget::Tags:
             {
-                /// The generated engine kind follows the `aggregate_min_time_and_max_time` setting of the old table.
-                std::string_view generated_engine_name = settings[TimeSeriesSetting::aggregate_min_time_and_max_time]
+                /// Version 8 keeps a stable tags row, so the generated engine is ReplacingMergeTree.
+                /// Earlier versions follow `aggregate_min_time_and_max_time`, including when the bounds are not stored.
+                const bool bounds_live_on_tags = settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_SERIES_STATS;
+                std::string_view generated_engine_name = (bounds_live_on_tags && settings[TimeSeriesSetting::aggregate_min_time_and_max_time])
                     ? "AggregatingMergeTree"
                     : "ReplacingMergeTree";
                 if (engine_name != generated_engine_name)
@@ -933,7 +981,8 @@ namespace
 
                 /// The generated sorting key contains `min_time` and `max_time` if they are stored but not aggregated.
                 /// Version 0 tables were also generated with the short key regardless of these settings.
-                bool min_time_and_max_time_in_sorting_key = settings[TimeSeriesSetting::store_min_time_and_max_time]
+                bool min_time_and_max_time_in_sorting_key = bounds_live_on_tags
+                    && settings[TimeSeriesSetting::store_min_time_and_max_time]
                     && !settings[TimeSeriesSetting::aggregate_min_time_and_max_time];
                 bool sorting_key_is_generated = sorting_key_equals(
                     min_time_and_max_time_in_sorting_key ? "metric_name, id, min_time, max_time" : "metric_name, id");
@@ -962,6 +1011,16 @@ namespace
                     return;
                 if (sorting_key_equals(TimeSeriesColumnNames::getInnerMetricFamily(settings[TimeSeriesSetting::version])))
                     inner_engine.reset(inner_engine.order_by);
+                break;
+            }
+
+            case ViewTarget::SeriesStats:
+            {
+                if (engine_name != "AggregatingMergeTree")
+                    return;
+                if (sorting_key_equals(TimeSeriesColumnNames::ID))
+                    inner_engine.reset(inner_engine.order_by);
+                remove_settings({{"index_granularity", Field{static_cast<UInt64>(SERIES_STATS_INDEX_GRANULARITY)}}});
                 break;
             }
 
@@ -1071,8 +1130,15 @@ namespace
                 add_column_if_missing(TimeSeriesColumnNames::Tags,
                     makeASTDataType("Map", makeASTDataType("LowCardinality", makeASTDataType("String")), makeASTDataType("String")));
 
-                /// Columns "min_time" and "max_time".
-                if (time_series_settings[TimeSeriesSetting::store_min_time_and_max_time])
+                /// Columns "min_time" and "max_time". Version 8 stores them in the series stats table.
+                if ((time_series_settings[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_SERIES_STATS))
+                {
+                    if (original.erase(TimeSeriesColumnNames::MinTime))
+                        changed = true;
+                    if (original.erase(TimeSeriesColumnNames::MaxTime))
+                        changed = true;
+                }
+                else if (time_series_settings[TimeSeriesSetting::store_min_time_and_max_time])
                 {
                     if (time_series_settings[TimeSeriesSetting::aggregate_min_time_and_max_time])
                     {
@@ -1118,6 +1184,25 @@ namespace
                 add_column_if_missing(TimeSeriesColumnNames::Type, makeASTDataType("LowCardinality", makeASTDataType("String")));
                 add_column_if_missing(TimeSeriesColumnNames::Unit, makeASTDataType("LowCardinality", makeASTDataType("String")));
                 add_column_if_missing(TimeSeriesColumnNames::Help, makeASTDataType("String"));
+                break;
+            }
+
+            case ViewTarget::SeriesStats:
+            {
+                add_column_if_missing(TimeSeriesColumnNames::ID, dataTypeToAST(resolved_types.id_type));
+
+                auto make_agg_type = [&](const String & func_name, const DataTypePtr & argument_type) -> ASTPtr
+                {
+                    AggregateFunctionProperties properties;
+                    auto func = AggregateFunctionFactory::instance().get(func_name, NullsAction::EMPTY, {argument_type}, {}, properties);
+                    auto custom_name = std::make_unique<DataTypeCustomSimpleAggregateFunction>(func, DataTypes{argument_type}, Array{});
+                    auto type = DataTypeFactory::instance().getCustom(std::make_unique<DataTypeCustomDesc>(std::move(custom_name)));
+                    return dataTypeToAST(type);
+                };
+
+                add_column_if_missing(TimeSeriesColumnNames::MinTime, make_agg_type("min", resolved_types.timestamp_type));
+                add_column_if_missing(TimeSeriesColumnNames::MaxTime, make_agg_type("max", resolved_types.timestamp_type));
+                add_column_if_missing(TimeSeriesColumnNames::SampleCount, make_agg_type("sum", std::make_shared<DataTypeUInt64>()));
                 break;
             }
 
@@ -1223,9 +1308,8 @@ namespace
 
         for (auto inner_table_kind : getTargetKinds())
         {
-            /// Prealpha tables predate the recent samples table, so there is nothing to convert for it,
-            /// and no RECENT SAMPLES target should be added to an old table's definition.
-            if (inner_table_kind == ViewTarget::RecentSamples)
+            /// Prealpha tables predate the recent samples table and the series stats table.
+            if ((inner_table_kind == ViewTarget::RecentSamples) || (inner_table_kind == ViewTarget::SeriesStats))
                 continue;
             if (hasTargetTableID(create_query, inner_table_kind))
                 continue;
@@ -1573,7 +1657,10 @@ namespace
 
             case ViewTarget::Tags:
             {
-                const bool aggregate_min_time_and_max_time = settings[TimeSeriesSetting::aggregate_min_time_and_max_time];
+                /// Version 8 does not store bounds on the tags row, so the generated engine is ReplacingMergeTree.
+                /// Earlier versions follow `aggregate_min_time_and_max_time` even when the bounds are not stored.
+                const bool bounds_live_on_tags = settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_SERIES_STATS;
+                const bool aggregate_min_time_and_max_time = bounds_live_on_tags && settings[TimeSeriesSetting::aggregate_min_time_and_max_time];
                 if (!inner_engine.engine)
                     set_engine(aggregate_min_time_and_max_time ? "AggregatingMergeTree" : "ReplacingMergeTree");
 
@@ -1584,7 +1671,7 @@ namespace
                     ASTs key_columns;
                     key_columns.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
                     key_columns.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
-                    if (settings[TimeSeriesSetting::store_min_time_and_max_time] && !aggregate_min_time_and_max_time)
+                    if (bounds_live_on_tags && settings[TimeSeriesSetting::store_min_time_and_max_time] && !settings[TimeSeriesSetting::aggregate_min_time_and_max_time])
                     {
                         key_columns.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MinTime));
                         key_columns.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MaxTime));
@@ -1619,6 +1706,19 @@ namespace
 
                 if (needs_sorting_key())
                     set_sorting_key({make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::getInnerMetricFamily(settings[TimeSeriesSetting::version]))});
+                break;
+            }
+
+            case ViewTarget::SeriesStats:
+            {
+                if (!inner_engine.engine)
+                    set_engine("AggregatingMergeTree");
+
+                if (needs_sorting_key())
+                    set_sorting_key({make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID)});
+
+                if (is_merge_tree() && !has_engine_setting("index_granularity"))
+                    set_engine_setting("index_granularity", SERIES_STATS_INDEX_GRANULARITY);
                 break;
             }
 
@@ -1786,11 +1886,38 @@ namespace
                 check_column_is_string_map(TimeSeriesColumnNames::Tags);
                 check_column_is_string_map(TimeSeriesColumnNames::AllTags, /*if_exists=*/ true);
 
-                if (time_series_settings[TimeSeriesSetting::store_min_time_and_max_time])
+                if ((time_series_settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+                    && time_series_settings[TimeSeriesSetting::store_min_time_and_max_time])
                 {
                     check_column_min_max_time(TimeSeriesColumnNames::MinTime);
                     check_column_min_max_time(TimeSeriesColumnNames::MaxTime);
                 }
+                break;
+            }
+
+            case ViewTarget::SeriesStats:
+            {
+                check_column_type(TimeSeriesColumnNames::ID, resolved_types.id_type);
+                check_column_min_max_time(TimeSeriesColumnNames::MinTime);
+                check_column_min_max_time(TimeSeriesColumnNames::MaxTime);
+
+                check_column(TimeSeriesColumnNames::SampleCount);
+                const auto * sample_count = target_table_columns.tryGet(TimeSeriesColumnNames::SampleCount);
+                bool sample_count_ok = false;
+                if (WhichDataType{*sample_count->type}.isUInt64())
+                    sample_count_ok = true;
+                if (const auto * simple_aggregate = typeid_cast<const DataTypeCustomSimpleAggregateFunction *>(sample_count->type->getCustomName()))
+                {
+                    const auto & argument_types = simple_aggregate->getArgumentsDataTypes();
+                    sample_count_ok = (simple_aggregate->getFunctionName() == "sum") && (argument_types.size() == 1)
+                        && WhichDataType{*argument_types[0]}.isUInt64();
+                }
+                if (typeid_cast<const DataTypeAggregateFunction *>(sample_count->type.get()))
+                    sample_count_ok = true;
+                if (!sample_count_ok)
+                    throw Exception(ErrorCodes::BAD_TYPE_OF_FIELD,
+                        "{}: Column {} in the {} table has type {}, but expected UInt64 or SimpleAggregateFunction(sum, UInt64)",
+                        table_id.getNameForLogs(), TimeSeriesColumnNames::SampleCount, target_kind, sample_count->type->getName());
                 break;
             }
 
@@ -2057,6 +2184,11 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
         = hasInnerColumns(create_query, ViewTarget::RecentSamples) || hasInnerEngine(create_query, ViewTarget::RecentSamples)
         || hasTargetTableID(create_query, ViewTarget::RecentSamples);
 
+    /// Same rule as recent samples: a target copied from `AS` does not count as a user declaration.
+    bool has_series_stats_definition
+        = hasInnerColumns(create_query, ViewTarget::SeriesStats) || hasInnerEngine(create_query, ViewTarget::SeriesStats)
+        || hasTargetTableID(create_query, ViewTarget::SeriesStats);
+
     /// The definition of the table from the clause `AS <other_table>` if any, and its resolved types.
     /// The clause is used only for a new table: the stored definition of an existing table has no such clause.
     boost::intrusive_ptr<const ASTCreateQuery> old_create_query;
@@ -2136,6 +2268,16 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
         }
 
         const bool recent_samples_enabled = settings[TimeSeriesSetting::recent_samples_ttl_seconds] != 0;
+        const bool series_stats_enabled = settings[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_SERIES_STATS;
+
+        if (!series_stats_enabled)
+        {
+            if (has_series_stats_definition)
+                throw Exception(ErrorCodes::INCORRECT_QUERY,
+                    "The SERIES STATS target requires `version` to be at least {}", TimeSeriesVersion::MIN_WITH_SERIES_STATS);
+            if (create_query.targets)
+                create_query.targets->removeTarget(ViewTarget::SeriesStats);
+        }
 
         /// A RECENT SAMPLES declaration can't be used with `recent_samples_ttl_seconds = 0`
         if (!recent_samples_enabled)
@@ -2153,6 +2295,9 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
         {
             /// The recent samples target is on by default and disabled by an explicit `recent_samples_ttl_seconds = 0`.
             if ((kind == ViewTarget::RecentSamples) && !recent_samples_enabled)
+                continue;
+
+            if ((kind == ViewTarget::SeriesStats) && !series_stats_enabled)
                 continue;
 
             if (hasTargetTableID(create_query, kind))

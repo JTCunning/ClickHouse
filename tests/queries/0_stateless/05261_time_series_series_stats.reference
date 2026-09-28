@@ -1,0 +1,12 @@
+--- version 8 stores bounds in series stats and deduplicates tags ---
+8
+1	1
+2
+1	1	3
+2026-01-01 00:00:00.000	1
+2026-01-01 00:01:00.000	2
+0
+--- filter_by can be turned off ---
+2
+--- version 7 keeps bounds on the tags table ---
+0	1

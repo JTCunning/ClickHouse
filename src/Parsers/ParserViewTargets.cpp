@@ -142,6 +142,12 @@ bool ParserViewTargets::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
                     break;
                 }
 
+                case ViewTarget::SeriesStats:
+                {
+                    parsed |= tryParseViewTarget(kind, Keyword::SERIES_STATS, pos, expected, res);
+                    break;
+                }
+
                 case ViewTarget::To:
                 case ViewTarget::Inner:
                 {

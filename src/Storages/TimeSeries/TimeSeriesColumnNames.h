@@ -26,8 +26,10 @@ struct TimeSeriesColumnNames
     static constexpr const char * Tags = "tags";
 
     /// Contains the time range of a time series.
+    /// Version 8 and later store these columns, plus `sample_count`, in the series stats table.
     static constexpr const char * MinTime = "min_time";
     static constexpr const char * MaxTime = "max_time";
+    static constexpr const char * SampleCount = "sample_count";
 
     /// The "metric families" table contains general information (metadata) about metric families:
     static constexpr const char * MetricFamily = "metric_family";

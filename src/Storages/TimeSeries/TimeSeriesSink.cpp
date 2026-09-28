@@ -2,6 +2,7 @@
 
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnMap.h>
+#include <Columns/ColumnsNumber.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnTuple.h>
 #include <Common/logger_useful.h>
@@ -11,6 +12,7 @@
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionActions.h>
@@ -23,6 +25,7 @@
 #include <Storages/ColumnsDescription.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
+#include <Storages/TimeSeries/TimeSeriesVersion.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Storages/TimeSeries/normalizeTimeSeriesDefinition.h>
 #include <Storages/TimeSeries/splitTimeSeriesType.h>
@@ -175,6 +178,42 @@ namespace
                 out_value_column.insertRangeFrom(ts_values, ts_start, num_samples);
             }
 
+            ++id_index;
+        }
+    }
+
+    /// Fills one series-stats row per id that has at least one sample in this block.
+    /// `id_column` is aligned with the rows that passed `filter`, same as `fillSamplesColumns`.
+    void fillSeriesStatsColumns(
+        const PaddedPODArray<UInt8> & filter,
+        const IColumn & id_column,
+        const IColumn & ts_timestamps,
+        const ColumnArray::Offsets & ts_offsets,
+        IColumn & out_id_column,
+        IColumn & out_min_time_column,
+        IColumn & out_max_time_column,
+        IColumn & out_sample_count_column)
+    {
+        size_t id_index = 0;
+        for (size_t i = 0; i < filter.size(); ++i)
+        {
+            if (!filter[i])
+                continue;
+
+            size_t ts_start = (i == 0) ? 0 : ts_offsets[i - 1];
+            size_t ts_end = ts_offsets[i];
+            size_t num_samples = ts_end - ts_start;
+            if (num_samples == 0)
+            {
+                ++id_index;
+                continue;
+            }
+
+            out_id_column.insertFrom(id_column, id_index);
+            auto [min_time, max_time] = findMinMax(ts_timestamps, ts_start, ts_end);
+            out_min_time_column.insert(min_time);
+            out_max_time_column.insert(max_time);
+            out_sample_count_column.insert(Field{static_cast<UInt64>(num_samples)});
             ++id_index;
         }
     }
@@ -515,7 +554,10 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
     const auto * samples_column_name = TimeSeriesColumnNames::getOuterSamples(time_series_storage.getVersion());
     auto [timestamp_type, value_type] = splitTimeSeriesType(getHeader().getByName(samples_column_name).type);
 
-    if (settings[TimeSeriesSetting::store_min_time_and_max_time])
+    /// Version 8 stores the bounds in the series stats table, not on the tags row.
+    const bool store_bounds_on_tags = (time_series_storage.getVersion() < TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+        && settings[TimeSeriesSetting::store_min_time_and_max_time];
+    if (store_bounds_on_tags)
     {
         /// Use Nullable(timestamp_type) as min_max_time_type.
         /// This part is different from class PrometheusRemoteWriteProtocol.
@@ -582,6 +624,16 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
     /// The recent samples table (if any) receives a copy of every samples block.
     if (time_series_storage.hasTarget(ViewTarget::RecentSamples))
         recent_samples_pipeline = createTargetPipeline(ViewTarget::RecentSamples, samples_header);
+
+    if (time_series_storage.hasTarget(ViewTarget::SeriesStats))
+    {
+        Block series_stats_header;
+        series_stats_header.insert(ColumnWithTypeAndName{id_type, TimeSeriesColumnNames::ID});
+        series_stats_header.insert(ColumnWithTypeAndName{timestamp_type, TimeSeriesColumnNames::MinTime});
+        series_stats_header.insert(ColumnWithTypeAndName{timestamp_type, TimeSeriesColumnNames::MaxTime});
+        series_stats_header.insert(ColumnWithTypeAndName{std::make_shared<DataTypeUInt64>(), TimeSeriesColumnNames::SampleCount});
+        series_stats_pipeline = createTargetPipeline(ViewTarget::SeriesStats, series_stats_header);
+    }
 }
 
 
@@ -674,7 +726,9 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     MutableColumnPtr min_time_column;
     MutableColumnPtr max_time_column;
     DataTypePtr min_max_time_type;
-    if (settings[TimeSeriesSetting::store_min_time_and_max_time])
+    const bool store_bounds_on_tags = (time_series_storage.getVersion() < TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+        && settings[TimeSeriesSetting::store_min_time_and_max_time];
+    if (store_bounds_on_tags)
     {
         min_max_time_type = makeNullable(timestamp_type);
         min_time_column = min_max_time_type->createColumn();
@@ -724,6 +778,31 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     /// we don't end up with sample rows referencing IDs that were never written to the tags table.
     if (tags_block.rows())
         tags_pipeline->push(std::move(tags_block));
+
+    /// Series stats use the full id column, not the deduplicated tags block.
+    /// They are written before samples so a failed samples insert cannot hide written samples from the time filter.
+    if (series_stats_pipeline && total_samples)
+    {
+        auto stats_id_column = id_type->createColumn();
+        auto stats_min_column = timestamp_type->createColumn();
+        auto stats_max_column = timestamp_type->createColumn();
+        auto stats_count_column = ColumnUInt64::create();
+
+        fillSeriesStatsColumns(
+            filter,
+            *id_column, ts_timestamps, ts_offsets,
+            *stats_id_column, *stats_min_column, *stats_max_column, *stats_count_column);
+
+        if (stats_id_column->size())
+        {
+            Block series_stats_block;
+            series_stats_block.insert(ColumnWithTypeAndName{std::move(stats_id_column), id_type, TimeSeriesColumnNames::ID});
+            series_stats_block.insert(ColumnWithTypeAndName{std::move(stats_min_column), timestamp_type, TimeSeriesColumnNames::MinTime});
+            series_stats_block.insert(ColumnWithTypeAndName{std::move(stats_max_column), timestamp_type, TimeSeriesColumnNames::MaxTime});
+            series_stats_block.insert(ColumnWithTypeAndName{std::move(stats_count_column), std::make_shared<DataTypeUInt64>(), TimeSeriesColumnNames::SampleCount});
+            series_stats_pipeline->push(std::move(series_stats_block));
+        }
+    }
 
     /// Step 5. Assemble and push the samples block.
     if (total_samples)
@@ -842,6 +921,8 @@ void TimeSeriesSink::onFinish()
         if (tags_deduplication_cache && !pending_tags.empty())
             tags_deduplication_cache->markRowsAsWritten(std::move(pending_tags));
     }
+    if (series_stats_pipeline)
+        series_stats_pipeline->executor->finish();
     if (samples_pipeline)
         samples_pipeline->executor->finish();
     if (recent_samples_pipeline)

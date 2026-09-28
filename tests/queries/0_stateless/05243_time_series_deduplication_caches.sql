@@ -8,7 +8,7 @@ SET allow_experimental_time_series_table = 1;
 DROP TABLE IF EXISTS ts, ts2, ts3, ts_v6, ts_tags, ext_metric_families;
 
 -- The inner tables use MergeTree, so the counts below don't depend on background merges.
-CREATE TABLE ts ENGINE = TimeSeries TAGS INNER ENGINE = MergeTree ORDER BY (metric_name, id) METRIC FAMILIES INNER ENGINE = MergeTree ORDER BY metric_family;
+CREATE TABLE ts ENGINE = TimeSeries SETTINGS version = 7 TAGS INNER ENGINE = MergeTree ORDER BY (metric_name, id) METRIC FAMILIES INNER ENGINE = MergeTree ORDER BY metric_family;
 CREATE TABLE ext_metric_families (metric_family String, type LowCardinality(String), unit LowCardinality(String), help String, CONSTRAINT c CHECK metric_family != 'bad') ENGINE = MergeTree ORDER BY metric_family;
 
 SELECT '--- the same metric family is written once, a changed description is a new row, rows without a metric family are skipped ---';
@@ -84,7 +84,7 @@ SELECT count() FROM timeSeriesTags({CLICKHOUSE_DATABASE:Identifier}.ts);
 ALTER TABLE ts MODIFY SETTING tags_deduplication_cache_size_bytes = 10; -- { serverError INVALID_SETTING_VALUE }
 
 SELECT '--- the same time series is written to the tags table once if min_time and max_time are not stored ---';
-CREATE TABLE ts_tags ENGINE = TimeSeries SETTINGS store_min_time_and_max_time = 0 TAGS INNER ENGINE = MergeTree ORDER BY (metric_name, id);
+CREATE TABLE ts_tags ENGINE = TimeSeries SETTINGS version = 7, store_min_time_and_max_time = 0 TAGS INNER ENGINE = MergeTree ORDER BY (metric_name, id);
 INSERT INTO ts_tags (metric_name, tags, samples) VALUES ('http_requests', {'job': 'api'}, [(toDateTime64('2026-01-01 00:00:00', 3), 1.)]);
 INSERT INTO ts_tags (metric_name, tags, samples) VALUES ('http_requests', {'job': 'api'}, [(toDateTime64('2026-01-01 00:00:01', 3), 2.)]), ('http_requests', {'job': 'web'}, [(toDateTime64('2026-01-01 00:00:02', 3), 3.)]);
 SELECT count() FROM timeSeriesTags({CLICKHOUSE_DATABASE:Identifier}.ts_tags);

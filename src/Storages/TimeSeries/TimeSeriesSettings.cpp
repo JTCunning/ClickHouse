@@ -139,7 +139,17 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
     check_setting_requires_version("tags_deduplication_cache_size_bytes", TimeSeriesVersion::MIN_WITH_DEDUPLICATION_CACHES);
     check_setting_requires_version("tags_deduplication_cache_expiration_seconds", TimeSeriesVersion::MIN_WITH_DEDUPLICATION_CACHES);
 
-    if (settings[TimeSeriesSetting::store_min_time_and_max_time])
+    if (version >= TimeSeriesVersion::MIN_WITH_SERIES_STATS)
+    {
+        /// Version 8 stores the bounds in the series stats table. These settings describe the old tags columns.
+        if (settings[TimeSeriesSetting::store_min_time_and_max_time].isChanged())
+            throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+                "Setting `store_min_time_and_max_time` is not used by TimeSeries version {} or later", TimeSeriesVersion::MIN_WITH_SERIES_STATS);
+        if (settings[TimeSeriesSetting::aggregate_min_time_and_max_time].isChanged())
+            throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+                "Setting `aggregate_min_time_and_max_time` is not used by TimeSeries version {} or later", TimeSeriesVersion::MIN_WITH_SERIES_STATS);
+    }
+    else if (settings[TimeSeriesSetting::store_min_time_and_max_time])
     {
         /// Every insert changes `min_time` and `max_time` of a time series, so the rows of the tags table can't be deduplicated.
         /// Reject only an explicit enabling value, the defaults are just ignored and an explicit zero is harmless.

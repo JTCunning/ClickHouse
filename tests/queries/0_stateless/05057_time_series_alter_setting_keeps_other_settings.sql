@@ -8,7 +8,7 @@ SET allow_experimental_time_series_table = 1;
 DROP TABLE IF EXISTS ts;
 
 CREATE TABLE ts ENGINE = TimeSeries
-SETTINGS tags_to_columns = {'job': 'job'}, store_min_time_and_max_time = 0,
+SETTINGS version = 7, tags_to_columns = {'job': 'job'}, store_min_time_and_max_time = 0,
          filter_by_min_time_and_max_time = 0, samples_index_granularity = 1024;
 
 INSERT INTO ts (metric_name, tags, samples) VALUES ('m1', {'job': 'j1'}, [(1, 1.)]);
