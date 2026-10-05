@@ -2130,6 +2130,26 @@ honoured by rewriting the part, so the merges that clear expired columns are
 still assigned when this setting is enabled. Such a merge rewrites the part
 anyway, and therefore also removes the rows that have expired in it.
 )", 0) \
+    DECLARE(Bool, apply_ttl_delete_on_insert, false, R"(
+Removes the rows which are already expired by the table `TTL ... DELETE` rule
+on `INSERT`, instead of writing them to a part which only waits for a TTL merge
+to drop them. The TTL is evaluated against the current time of the insert, as
+a TTL merge evaluates it against the time of the merge. No part is created for
+a partition whose rows are all expired, and such a partition does not count
+towards `max_partitions_per_insert_block`.
+
+For the engines which merge rows (`ReplacingMergeTree`, `SummingMergeTree`,
+`CollapsingMergeTree`, etc.) the rule is applied to the rows produced by
+merging the inserted block, as a TTL merge applies it to the merged rows, so
+only when the block is merged on insert (see the query-level setting
+`optimize_on_insert`).
+
+This is useful when backfilling historical data into a table with a short TTL:
+the expired rows would otherwise create one part per partition which only waits
+for the background TTL merge. The inner recent samples table of a `TimeSeries`
+table enables this setting.
+)", 0, \
+        {"26.10", false, false, "New setting to remove the rows already expired by the table TTL DELETE rule on INSERT"}) \
     DECLARE(Bool, materialize_ttl_recalculate_only, false, R"(
 When enabled, `MATERIALIZE TTL` recalculates the stored `TTL` metadata for each data part without removing expired data during that operation. When disabled, normal TTL materialization usually applies the configured row, column, or `GROUP BY` TTL actions. For tables with only row TTL and `ttl_only_drop_parts` enabled, it instead recalculates `TTL` metadata and drops only fully expired parts.
 )", 0) \

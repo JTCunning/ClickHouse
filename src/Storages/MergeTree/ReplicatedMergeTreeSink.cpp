@@ -63,6 +63,7 @@ namespace Setting
 
 namespace MergeTreeSetting
 {
+    extern const MergeTreeSettingsBool apply_ttl_delete_on_insert;
     extern const MergeTreeSettingsMilliseconds sleep_before_commit_local_part_in_replicated_table_ms;
     extern const MergeTreeSettingsUInt64 replicated_deduplication_window;
 }
@@ -314,8 +315,11 @@ void ReplicatedMergeTreeSink::consume(Chunk & chunk)
 
     auto deduplication_info = chunk.getChunkInfos().getSafe<DeduplicationInfo>();
 
+    bool apply_ttl_delete = (*storage.getSettings())[MergeTreeSetting::apply_ttl_delete_on_insert]
+        && storage.merging_params.mode == MergeTreeData::MergingParams::Ordinary;
     IColumn::Selector partition_selector;
-    BlocksWithPartition part_blocks = MergeTreeDataWriter::splitBlockIntoParts(std::move(block), max_parts_per_block, metadata_snapshot, context, &partition_selector);
+    BlocksWithPartition part_blocks = MergeTreeDataWriter::splitBlockIntoParts(
+        std::move(block), max_parts_per_block, metadata_snapshot, context, &partition_selector, apply_ttl_delete);
 
     decltype(delayed_parts) current_parts;
 

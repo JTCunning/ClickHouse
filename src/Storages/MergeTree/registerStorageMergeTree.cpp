@@ -2154,9 +2154,12 @@ When ClickHouse detects that data is expired, it performs an off-schedule merge.
 
 If you perform the `SELECT` query between merges, you may get expired data. To avoid it, use the [OPTIMIZE](/reference/statements/optimize) query before `SELECT`.
 
+Rows which are already expired by the table `TTL ... DELETE` rule at the time of an `INSERT` can be removed on insert instead of being written: enable the [apply_ttl_delete_on_insert](/reference/settings/merge-tree-settings/other#apply_ttl_delete_on_insert) table setting. No part is created for a partition whose rows are all expired, and such a partition does not count towards `max_partitions_per_insert_block`. For the engines which merge rows on insert (`ReplacingMergeTree`, `CollapsingMergeTree`, and others) the expired rows are removed after the rows of the inserted block are merged, and only when `optimize_on_insert` is enabled.
+
 **See Also**
 
 - [ttl_only_drop_parts](/reference/settings/merge-tree-settings/other#ttl_only_drop_parts) setting
+- [apply_ttl_delete_on_insert](/reference/settings/merge-tree-settings/other#apply_ttl_delete_on_insert) setting
 
 ## Disk types {#disk-types}
 

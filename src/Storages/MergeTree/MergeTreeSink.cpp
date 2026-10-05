@@ -44,6 +44,7 @@ namespace Setting
 
 namespace MergeTreeSetting
 {
+    extern const MergeTreeSettingsBool apply_ttl_delete_on_insert;
     extern const MergeTreeSettingsUInt64 non_replicated_deduplication_window;
 }
 
@@ -140,8 +141,11 @@ void MergeTreeSink::consume(Chunk & chunk)
     auto block = getHeader().cloneWithColumns(chunk.getColumns());
 
     auto deduplication_info = chunk.getChunkInfos().getSafe<DeduplicationInfo>();
+    bool apply_ttl_delete = (*storage.getSettings())[MergeTreeSetting::apply_ttl_delete_on_insert]
+        && storage.merging_params.mode == MergeTreeData::MergingParams::Ordinary;
     IColumn::Selector partition_selector;
-    auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(std::move(block), max_parts_per_block, metadata_snapshot, context, &partition_selector);
+    auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(
+        std::move(block), max_parts_per_block, metadata_snapshot, context, &partition_selector, apply_ttl_delete);
 
     using DelayedPartitions = std::vector<MergeTreeDelayedChunk::Partition>;
     DelayedPartitions partitions;

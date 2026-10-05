@@ -72,13 +72,26 @@ public:
       * When out_selector is set, it receives the row -> partition-index mapping (empty when the block
       * is not split, i.e. a single resulting partition). Deduplication needs it to attribute each
       * source row to the partition it landed in.
+      * When apply_ttl_delete is set, the rows already expired by the table `TTL ... DELETE` rule
+      * are removed before the split (see `removeRowsExpiredByTTL`). The selector still covers every
+      * source row: a removed row maps to the index past the last partition.
       */
     static BlocksWithPartition splitBlockIntoParts(
         Block && block,
         size_t max_parts,
         const StorageMetadataPtr & metadata_snapshot,
         ContextPtr context,
-        IColumn::Selector * out_selector = nullptr);
+        IColumn::Selector * out_selector = nullptr,
+        bool apply_ttl_delete = false);
+
+    /// Removes from `block` the rows already expired by the table `TTL ... DELETE` rule of `metadata_snapshot`.
+    /// Returns the TTL infos (`table_ttl` and the part min/max) of the rows which remain.
+    /// When `out_kept_rows` is set, it receives one flag per source row: 1 if the row remains in `block`.
+    static IMergeTreeDataPart::TTLInfos removeRowsExpiredByTTL(
+        const ContextPtr & context,
+        const StorageInMemoryMetadata & metadata_snapshot,
+        Block & block,
+        IColumn::Filter * out_kept_rows = nullptr);
 
     /// This structure contains not completely written temporary part.
     /// Some writes may happen asynchronously, e.g. for blob storages.

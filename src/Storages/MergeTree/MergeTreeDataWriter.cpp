@@ -7,6 +7,7 @@
 #include <Core/UUID.h>
 #include <DataTypes/DataTypeDate.h>
 #include <DataTypes/DataTypeDateTime.h>
+#include <DataTypes/DataTypesNumber.h>
 #include <Disks/createVolume.h>
 #include <IO/HashingWriteBuffer.h>
 #include <IO/WriteHelpers.h>
@@ -42,6 +43,7 @@
 
 #include <Interpreters/parseIdentifiersOrStringLiteralsWithSettings.h>
 #include <Processors/TTL/ITTLAlgorithm.h>
+#include <Processors/TTL/TTLDeleteAlgorithm.h>
 #include <Processors/Merges/Algorithms/ReplacingSortedAlgorithm.h>
 #include <Processors/Merges/Algorithms/MergingSortedAlgorithm.h>
 #include <Processors/Merges/Algorithms/CollapsingSortedAlgorithm.h>
@@ -93,6 +95,7 @@ namespace Setting
 
 namespace MergeTreeSetting
 {
+    extern const MergeTreeSettingsBool apply_ttl_delete_on_insert;
     extern const MergeTreeSettingsBool assign_part_uuids;
     extern const MergeTreeSettingsBool fsync_after_insert;
     extern const MergeTreeSettingsBool fsync_part_directory;
@@ -495,8 +498,58 @@ void MergeTreeTemporaryPart::prewarmCaches()
     }
 }
 
+IMergeTreeDataPart::TTLInfos MergeTreeDataWriter::removeRowsExpiredByTTL(
+    const ContextPtr & context, const StorageInMemoryMetadata & metadata_snapshot, Block & block, IColumn::Filter * out_kept_rows)
+{
+    IMergeTreeDataPart::TTLInfos ttl_infos;
+    const size_t num_rows = block.rows();
+
+    if (out_kept_rows)
+        out_kept_rows->assign(num_rows, static_cast<UInt8>(1));
+
+    if (!metadata_snapshot.hasRowsTTL() || num_rows == 0)
+        return ttl_infos;
+
+    /// The row numbers go through the same filter as the data, so after it they tell which source rows remain.
+    static constexpr auto row_number_column_name = "__row_number_before_ttl_delete";
+    if (out_kept_rows)
+    {
+        auto row_numbers = ColumnUInt64::create(num_rows);
+        auto & row_numbers_data = row_numbers->getData();
+        for (size_t i = 0; i < num_rows; ++i)
+            row_numbers_data[i] = i;
+        block.insert({std::move(row_numbers), std::make_shared<DataTypeUInt64>(), row_number_column_name});
+    }
+
+    const auto & ttl_entry = metadata_snapshot.getRowsTTL();
+    auto expr_and_set = ttl_entry.buildExpression(context);
+    for (auto & subquery : expr_and_set.sets->getSubqueries())
+        subquery->buildSetInplace(context);
+
+    TTLDeleteAlgorithm algorithm(
+        TTLExpressions{expr_and_set.expression, nullptr}, ttl_entry, IMergeTreeDataPart::TTLInfo{}, time(nullptr), /*force_=*/ true);
+    algorithm.execute(block);
+
+    ttl_infos.table_ttl = algorithm.getNewTTLInfo();
+    ttl_infos.updatePartMinMaxTTL(ttl_infos.table_ttl);
+
+    if (out_kept_rows)
+    {
+        const auto & kept_row_numbers = assert_cast<const ColumnUInt64 &>(*block.getByName(row_number_column_name).column).getData();
+        if (kept_row_numbers.size() != num_rows)
+        {
+            out_kept_rows->assign(num_rows, static_cast<UInt8>(0));
+            for (UInt64 row_number : kept_row_numbers)
+                (*out_kept_rows)[row_number] = 1;
+        }
+        block.erase(row_number_column_name);
+    }
+
+    return ttl_infos;
+}
+
 BlocksWithPartition MergeTreeDataWriter::splitBlockIntoParts(
-    Block && block, size_t max_parts, const StorageMetadataPtr & metadata_snapshot, ContextPtr context, IColumn::Selector * out_selector)
+    Block && block, size_t max_parts, const StorageMetadataPtr & metadata_snapshot, ContextPtr context, IColumn::Selector * out_selector, bool apply_ttl_delete)
 {
     /// out_selector is left empty when the block is not split (a single resulting partition);
     /// the caller then knows every row belongs to the only partition.
@@ -511,10 +564,49 @@ BlocksWithPartition MergeTreeDataWriter::splitBlockIntoParts(
 
     metadata_snapshot->check(block, true);
 
+    /// Expired rows are removed before the split, so a partition whose rows are all expired is not
+    /// counted against `max_parts`. The selector must still describe every source row.
+    IColumn::Filter kept_rows;
+    size_t num_source_rows = block.rows();
+    if (apply_ttl_delete)
+    {
+        removeRowsExpiredByTTL(context, *metadata_snapshot, block, out_selector ? &kept_rows : nullptr);
+        if (block.rows() == 0)
+            return result;
+    }
+    const bool rows_removed = block.rows() != num_source_rows;
+
+    auto expand_selector = [&](IColumn::Selector && selector, size_t partitions_count)
+    {
+        if (!out_selector)
+            return;
+
+        if (!rows_removed)
+        {
+            *out_selector = std::move(selector);
+            return;
+        }
+
+        /// A removed row maps past the last partition, so it is attributed to none of them.
+        out_selector->resize(num_source_rows);
+        size_t kept_row = 0;
+        for (size_t row = 0; row < num_source_rows; ++row)
+        {
+            if (kept_rows[row])
+            {
+                (*out_selector)[row] = selector.empty() ? 0 : selector[kept_row];
+                ++kept_row;
+            }
+            else
+                (*out_selector)[row] = partitions_count;
+        }
+    };
+
     if (!metadata_snapshot->hasPartitionKey()) /// Table is not partitioned.
     {
         result.emplace_back(std::make_shared<Block>(std::move(block)), Row{});
         result[0].partition_id = result[0].partition.getID(metadata_snapshot->getPartitionKey().sample_block);
+        expand_selector({}, 1);
         return result;
     }
 
@@ -549,6 +641,7 @@ BlocksWithPartition MergeTreeDataWriter::splitBlockIntoParts(
         /// do not interfere with possible calculated primary key columns of the same name.
         result.emplace_back(std::make_shared<Block>(std::move(block)), get_partition(0));
         result[0].partition_id = result[0].partition.getID(metadata_snapshot->getPartitionKey().sample_block);
+        expand_selector({}, 1);
         return result;
     }
 
@@ -573,8 +666,7 @@ BlocksWithPartition MergeTreeDataWriter::splitBlockIntoParts(
         item.partition_id = item.partition.getID(metadata_snapshot->getPartitionKey().sample_block);
 
     /// Hand the row -> partition-index mapping to the caller (deduplication uses it).
-    if (out_selector)
-        *out_selector = std::move(selector);
+    expand_selector(std::move(selector), partitions_count);
 
     return result;
 }
@@ -815,32 +907,6 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
     if (patch_part_index && !patch_part_index->empty())
         new_part_info.mutation = patch_part_index->getMaxDataVersion();
 
-    String part_name;
-    if (data.format_version < MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
-    {
-        DayNum min_date(static_cast<DayNum::UnderlyingType>(minmax_idx->hyperrectangle[data.minmax_idx_date_column_pos].left.safeGet<UInt64>()));
-        DayNum max_date(static_cast<DayNum::UnderlyingType>(minmax_idx->hyperrectangle[data.minmax_idx_date_column_pos].right.safeGet<UInt64>()));
-
-        const auto & date_lut = DateLUT::serverTimezoneInstance();
-
-        auto min_month = date_lut.toNumYYYYMM(min_date);
-        auto max_month = date_lut.toNumYYYYMM(max_date);
-
-        if (min_month != max_month)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Part spans more than one month.");
-
-        part_name = new_part_info.getPartNameV0(min_date, max_date);
-    }
-    else
-        part_name = new_part_info.getPartNameV1();
-
-    std::string temp_prefix = "tmp_insert_";
-    const auto & temp_postfix = data.getPostfixForTempInsertName();
-    if (!temp_postfix.empty())
-        temp_prefix += temp_postfix + "_";
-
-    std::string part_dir = temp_prefix + part_name;
-
     auto indices = collectSkipIndicesToMaterialize(
         metadata_snapshot,
         global_settings[Setting::materialize_skip_indexes_on_insert],
@@ -896,10 +962,24 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
         perm_ptr = &perm;
     }
 
+    /// For the merging engines the expired rows are removed only after the rows are merged, so a row which
+    /// is already expired still takes part in the merge, as it would in a TTL merge.
+    std::optional<IMergeTreeDataPart::TTLInfos> delete_ttl_infos;
     if (optimize_on_insert)
     {
         ProfileEventTimeIncrement<Microseconds> watch(ProfileEvents::MergeTreeDataWriterMergingBlocksMicroseconds);
         block = mergeBlock(std::move(block), metadata_snapshot, sort_description, perm_ptr, data.merging_params);
+
+        if ((*data_settings)[MergeTreeSetting::apply_ttl_delete_on_insert] && metadata_snapshot->hasRowsTTL())
+        {
+            size_t rows_before = block.rows();
+            delete_ttl_infos = removeRowsExpiredByTTL(context, *metadata_snapshot, block);
+            if (block.rows() != rows_before)
+            {
+                minmax_idx = std::make_shared<IMergeTreeDataPart::MinMaxIndex>();
+                minmax_idx->update(block, minmax_columns);
+            }
+        }
     }
 
     ColumnsStatistics statistics;
@@ -929,6 +1009,32 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
     /// part only contains empty tuples. As a result, check rows instead.
     if (block.rows() == 0)
         return temp_part;
+
+    String part_name;
+    if (data.format_version < MERGE_TREE_DATA_MIN_FORMAT_VERSION_WITH_CUSTOM_PARTITIONING)
+    {
+        DayNum min_date(static_cast<DayNum::UnderlyingType>(minmax_idx->hyperrectangle[data.minmax_idx_date_column_pos].left.safeGet<UInt64>()));
+        DayNum max_date(static_cast<DayNum::UnderlyingType>(minmax_idx->hyperrectangle[data.minmax_idx_date_column_pos].right.safeGet<UInt64>()));
+
+        const auto & date_lut = DateLUT::serverTimezoneInstance();
+
+        auto min_month = date_lut.toNumYYYYMM(min_date);
+        auto max_month = date_lut.toNumYYYYMM(max_date);
+
+        if (min_month != max_month)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Part spans more than one month.");
+
+        part_name = new_part_info.getPartNameV0(min_date, max_date);
+    }
+    else
+        part_name = new_part_info.getPartNameV1();
+
+    std::string temp_prefix = "tmp_insert_";
+    const auto & temp_postfix = data.getPostfixForTempInsertName();
+    if (!temp_postfix.empty())
+        temp_prefix += temp_postfix + "_";
+
+    std::string part_dir = temp_prefix + part_name;
 
     DB::IMergeTreeDataPart::TTLInfos move_ttl_infos;
     const auto & move_ttl_entries = metadata_snapshot->getMoveTTLs();
@@ -1049,7 +1155,9 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
         sync_guard = disk->getDirectorySyncGuard(data_part_storage->getFullPath());
     }
 
-    if (metadata_snapshot->hasRowsTTL())
+    if (delete_ttl_infos)
+        new_data_part->ttl_infos.update(*delete_ttl_infos);
+    else if (metadata_snapshot->hasRowsTTL())
         updateTTL(context, metadata_snapshot->getRowsTTL(), new_data_part->ttl_infos, new_data_part->ttl_infos.table_ttl, block, true);
 
     for (const auto & ttl_entry : metadata_snapshot->getGroupByTTLs())
