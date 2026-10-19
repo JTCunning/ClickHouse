@@ -654,15 +654,17 @@ namespace
     }
 
     /// The bounds of `time_range_to_filter_samples` must have the scale of `table_timestamp_type`.
+    /// Exactly one of `select_query_from_tags_table` and `whole_metric_id_condition` is set: the samples are filtered
+    /// either by the set of the selected identifiers or by the range of the whole metric (see tryMakeWholeMetricIDCondition).
     ASTPtr makeWhereFilterForSamplesTable(
         ASTPtr select_query_from_tags_table,
         const TableTimeRange & time_range_to_filter_samples,
         const DataTypePtr & table_timestamp_type,
-        ASTPtr whole_metric_id_range_condition)
+        ASTPtr whole_metric_id_condition)
     {
         ASTs conditions;
 
-        /// Emit the timestamp range BEFORE the `id IN <set>` condition: on the default schema
+        /// Emit the timestamp range BEFORE the condition on `id`: on the default schema
         /// (ORDER BY (id, timestamp)) primary-key pruning already returns mostly granules of matched
         /// series, so the `id IN <set>` check passes almost all read rows, while the timestamp range
         /// is the selective condition (e.g. a few rows per 32768-row granule for a short lookback).
@@ -688,18 +690,22 @@ namespace
                 timeSeriesTimestampToAST(*time_range_to_filter_samples.max_time, table_timestamp_type)));
         }
 
-        /// id IN (SELECT id FROM (select_id_query))
-        /// Wrap the SELECT in ASTSubquery so it formats with surrounding parentheses.
-        auto select_as_subquery = make_intrusive<ASTSubquery>(std::move(select_query_from_tags_table));
-        conditions.push_back(makeASTFunction("in", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), std::move(select_as_subquery)));
-
-        /// For a whole-metric selector over a metric-clustered id layout one more condition is
-        /// added: indexHint(<raw id column> >= tuple(hash(metric_name), min) AND <raw id column>
-        /// <= tuple(hash(metric_name), max)). `indexHint` keeps it out of the row-level filter, so
-        /// its only purpose is to give the primary-key index analysis a continuous key range
-        /// instead of the large set (see readImpl).
-        if (whole_metric_id_range_condition)
-            conditions.push_back(std::move(whole_metric_id_range_condition));
+        if (select_query_from_tags_table)
+        {
+            /// id IN (SELECT id FROM (select_id_query))
+            /// Wrap the SELECT in ASTSubquery so it formats with surrounding parentheses.
+            auto select_as_subquery = make_intrusive<ASTSubquery>(std::move(select_query_from_tags_table));
+            conditions.push_back(makeASTFunction("in", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), std::move(select_as_subquery)));
+        }
+        else
+        {
+            /// For a whole-metric selector over a metric-clustered id layout the set is replaced with the range of the metric:
+            /// indexHint(<raw id column> >= tuple(hash(metric_name), min) AND <raw id column> <= tuple(hash(metric_name), max))
+            /// gives the primary-key index analysis a continuous key range, and tupleElement(<raw id column>, 1) = hash(metric_name)
+            /// is the row-level filter (see tryMakeWholeMetricIDCondition).
+            chassert(whole_metric_id_condition);
+            conditions.push_back(std::move(whole_metric_id_condition));
+        }
 
         return makeASTForLogicalAnd(std::move(conditions));
     }
@@ -708,7 +714,7 @@ namespace
                                            ASTPtr select_query_from_tags_table,
                                            const TableTimeRange & time_range_to_filter_samples,
                                            const DataTypePtr & table_timestamp_type,
-                                           ASTPtr whole_metric_id_range_condition)
+                                           ASTPtr whole_metric_id_condition)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -751,9 +757,10 @@ namespace
         /// where <select_query_from_tags_table> is roughly:
         ///   SELECT timeSeriesStoreTags(id, tags, '__name__', metric_name, ...) FROM tags_table WHERE <matchers>
         /// with the time ranges table joined to filter the time series by time (see addTimeRangesTableJoin).
+        /// For a whole-metric selector the `id IN` condition is replaced with <whole_metric_id_condition> (see makeWhereFilterForSamplesTable).
         {
             auto where_filter = makeWhereFilterForSamplesTable(
-                select_query_from_tags_table, time_range_to_filter_samples, table_timestamp_type, std::move(whole_metric_id_range_condition));
+                select_query_from_tags_table, time_range_to_filter_samples, table_timestamp_type, std::move(whole_metric_id_condition));
             select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_filter));
         }
 
@@ -853,28 +860,31 @@ namespace
         return res;
     }
 
-    /// Checks whether the selector can carry a primary-key range on the samples table's `id` column covering the whole metric,
-    /// and makes the range condition if it can:
-    /// `indexHint(tuple(hash(metric_name), min_S) <= id AND id <= tuple(hash(metric_name), max_S))`.
+    /// Checks whether the selector selects the whole metric and the samples table's `id` column carries a primary-key range
+    /// covering the metric, and makes the condition replacing `id IN <set>` in the WHERE of the samples query if it does:
+    /// `indexHint(tuple(hash(metric_name), min_S) <= id AND id <= tuple(hash(metric_name), max_S)) AND tupleElement(id, 1) = hash(metric_name)`.
     ///
     /// When the selector's matchers select ALL (time-eligible) series of the metric - the dominant shape of dashboard and
-    /// recording-rule queries - the large `id IN <set>` condition adds nothing to primary-key index analysis over the range
-    /// of the metric (see TimeSeriesIDRange), while costing a generic exclusion search over the set (hundreds of milliseconds per part
-    /// per query for tens of thousands of series, single-threaded). The range conditions returned here select the same granules
-    /// through the cheap continuous-range path.
+    /// recording-rule queries - the `id IN <set>` condition selects the same rows as the range of the metric (see TimeSeriesIDRange)
+    /// while costing a generic exclusion search over the set in the primary-key index analysis (hundreds of milliseconds per part
+    /// per query for tens of thousands of series, single-threaded) and a hash-set probe of every read sample.
+    /// The range in `indexHint` selects the same granules through the cheap continuous-range path,
+    /// and the equality on the first component of `id` rejects the rows of other metrics in the boundary granules with one comparison
+    /// per row. Both the probe below and the id generator guarantee that every series the set would select is inside the range.
     ///
-    /// The decision is advisory with respect to correctness: the returned range is a SUPERSET of the resolved id set
-    /// (verified over the existing series by the probe below and guaranteed for future inserts by the id generator),
-    /// and the `id IN <set>` condition is kept in the WHERE for exact row-level filtering. Any rows a hash collision could add
-    /// to the range are still rejected row-by-row.
+    /// Without the set, the tags subquery is not part of the samples query any more, so the caller runs it separately
+    /// (`timeSeriesStoreTags` must register the tags of the selected series). The samples are then selected by the range and the
+    /// timestamp range only: a sample whose identifier has no row in the tags table is returned instead of being dropped by the set
+    /// (`timeSeriesIdToGroup` reports it as an unknown identifier), and a stored time range that disagrees with the samples table
+    /// does not hide the samples of its series.
     ///
-    /// Returns nullptr (= emit today's SQL) unless ALL of the following hold:
+    /// Returns nullptr (= emit the `id IN <set>` condition) unless ALL of the following hold:
     /// 1. The matchers select exactly one metric (`metric_id_ranges` has one range).
     /// 2. The samples table physically stores `id` with exactly the type the range is made for.
     /// 3. A probe query on the tags table (and the time ranges table if any) finds NO time-eligible series of the metric that either
     ///    fails the matchers other than the one on `__name__` (the selector does not select the whole metric) or has an id outside
     ///    the range (rows written before an `ALTER ... MODIFY SETTING id_generator`).
-    ASTPtr tryMakeWholeMetricIDRangeConditions(
+    ASTPtr tryMakeWholeMetricIDCondition(
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
         const PrometheusQueryTree::MatcherList & matchers,
         const std::unordered_map<String, String> & column_name_by_tag_name,
@@ -915,7 +925,7 @@ namespace
         /// One such series means the id set is not the whole metric's primary-key range: fall back.
         /// No such series means every series the tags subquery can select lies in the range. The probe result cannot be raced
         /// into incorrectness: series inserted after the probe get their ids from the current (canonical) generator, so they stay
-        /// inside the range, and the `id IN <set>` condition keeps doing the exact row-level filtering either way.
+        /// inside the range.
         {
             PrometheusQueryTree::MatcherList name_matcher_only;
             ASTs other_matcher_conditions;
@@ -985,17 +995,22 @@ namespace
                 /// here must not fail a query that works without this optimization (and an error
                 /// the main query would also hit, e.g. a missing access right on the tags table,
                 /// still surfaces when the main query runs the tags subquery).
-                LOG_DEBUG(log, "Keeping the id set condition for index analysis: the whole-metric probe failed with {}", getCurrentExceptionMessage(false));
+                LOG_DEBUG(log, "Keeping the id set condition: the whole-metric probe failed with {}", getCurrentExceptionMessage(false));
                 return {};
             }
         }
 
-        /// The range conditions on the raw `id` column of the samples table, qualified so that they resolve to the table column
-        /// and not to the same-named alias of the SELECT list. Wrapped in `indexHint` so the range reaches index analysis but is not
-        /// evaluated per row: the `id IN <set>` condition the caller keeps is the exact filter, and on this path every id of that set
-        /// is inside the range (that is what the probe establishes).
+        /// The conditions on the raw `id` column of the samples table, qualified so that they resolve to the table column
+        /// and not to the same-named alias of the SELECT list. The range is wrapped in `indexHint` so it reaches index analysis
+        /// but is not evaluated per row: the equality on the first component is the row-level filter (the tuple comparisons
+        /// of the range would compare the second components too).
         ASTPtr qualified_id = make_intrusive<ASTIdentifier>(std::vector<String>{samples_table_id.database_name, samples_table_id.table_name, TimeSeriesColumnNames::ID});
-        return makeASTFunction("indexHint", makeIDInRangeCondition(qualified_id, metric_id_range));
+        return makeASTForLogicalAnd(
+            {makeASTFunction("indexHint", makeIDInRangeCondition(qualified_id, metric_id_range)),
+             makeASTFunction(
+                 "equals",
+                 makeASTFunction("tupleElement", qualified_id->clone(), make_intrusive<ASTLiteral>(UInt64{1})),
+                 metric_id_range.first_component->clone())});
     }
 }
 
@@ -1120,7 +1135,7 @@ void StorageTimeSeriesSelector::readImpl(
     const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
         matchers, getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type), config.table_id_type);
 
-    ASTPtr whole_metric_id_range_condition = tryMakeWholeMetricIDRangeConditions(
+    ASTPtr whole_metric_id_condition = tryMakeWholeMetricIDCondition(
         metric_id_ranges,
         matchers,
         column_name_by_tag_name,
@@ -1138,14 +1153,22 @@ void StorageTimeSeriesSelector::readImpl(
         tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
         config.table_timestamp_type);
 
-    if (whole_metric_id_range_condition)
+    if (whole_metric_id_condition)
     {
-        /// The `id IN <tags subquery>` condition stays in the WHERE for exact row-level filtering,
-        /// but its set is excluded from the primary-key index analysis: `KeyCondition` would run an expensive
-        /// exclusion search with the whole set, while the range conditions select the same granules cheaply.
-        modified_context->setSetting("use_index_for_in_with_subqueries_max_values", UInt64{1});
-        LOG_DEBUG(log, "Selector {} matches the whole metric: adding a primary-key range on id and excluding the id set from index analysis",
+        /// The samples are filtered by the range of the metric instead of `id IN <tags subquery>`, so the tags subquery
+        /// is executed here: `timeSeriesStoreTags` in its SELECT list registers the tags of the selected series in the query context.
+        LOG_DEBUG(log, "Selector {} matches the whole metric: filtering the samples by the primary-key range on id instead of the id set",
                   quoteString(config.selector.toString()));
+        LOG_DEBUG(log, "Will execute query to register the tags of the selected series:\n{}", select_query_from_tags_table->formatForLogging());
+
+        InterpreterSelectQueryAnalyzer tags_interpreter(select_query_from_tags_table, interpreter_context, SelectQueryOptions{});
+        auto io = tags_interpreter.execute();
+        PullingPipelineExecutor executor(io.pipeline);
+        Block block;
+        while (executor.pull(block))
+        {
+        }
+        select_query_from_tags_table = nullptr;
     }
 
     ASTPtr select_query_from_samples_table = makeSelectQueryFromSamplesTable(
@@ -1153,7 +1176,7 @@ void StorageTimeSeriesSelector::readImpl(
         select_query_from_tags_table,
         time_range_to_filter_samples,
         config.table_timestamp_type,
-        std::move(whole_metric_id_range_condition));
+        std::move(whole_metric_id_condition));
 
     ASTPtr select_query = makeSelectQuery(
         std::move(select_query_from_samples_table),

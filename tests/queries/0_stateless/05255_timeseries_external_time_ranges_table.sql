@@ -32,12 +32,14 @@ SELECT count() FROM timeSeriesSelector(ts_ext, 'm{host="h1"}', 0, 2500);
 SELECT count() FROM timeSeriesSelector(ts_ext, 'm{host="h1"}', 0, 1500);
 
 SELECT '-- the filter is applied: a time series is hidden from a range which its stored time range does not intersect';
--- The stored time range of h1 is moved out of the ranges requested below. The selectors trust the stored time ranges,
--- so a selector filtering by them hides h1: this is the only way to see that it filters by them.
+-- The stored time range of h1 is moved out of the ranges requested below. The tags subquery trusts the stored time ranges,
+-- so a selector filtering the samples by its id set hides h1: this is the only way to see that it filters by them.
 ALTER TABLE ext_time_ranges UPDATE min_time = toDateTime64(3000, 3), max_time = toDateTime64(3000, 3) WHERE min_time = toDateTime64(500, 3) SETTINGS mutations_sync = 1;
 SELECT min_time, max_time FROM ext_time_ranges ORDER BY min_time;
 
--- h1 is hidden from all the selectors: the correct results would be 5, 4 and 4.
+-- The second selector keeps the id set (h2 fails the matcher and is in range), so h1 is hidden: the correct result would be 4.
+-- The first and the third selectors match the whole metric: they read the samples by the primary-key range of the metric
+-- and the timestamp range without the id set, so the stored time range does not hide the samples of h1.
 SELECT count() FROM timeSeriesSelector(ts_ext, 'm', 0, 2500);
 SELECT count() FROM timeSeriesSelector(ts_ext, 'm{host="h1"}', 0, 2500);
 SELECT count() FROM timeSeriesSelector(ts_ext, 'm{host="h1"}', 0, 1500);

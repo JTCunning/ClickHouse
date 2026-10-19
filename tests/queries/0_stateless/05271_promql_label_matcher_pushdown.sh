@@ -106,6 +106,8 @@ $CLIENT -q "SELECT * FROM prometheusQueryRange('prometheus', 'lim / on(instance)
 
 # Prints the label values each selector filters by. EXPLAIN keeps the selector filters in the plan only for an empty table.
 # Only the filter lines are looked at: the join with the time ranges table lists `metric_name` among its input columns too.
+# The table uses a single-component id: with the default two-component id a selector that matches the whole metric
+# (every selector on an empty table) runs the tags subquery outside the plan, so its filters would not be visible.
 function selectors()
 {
     echo "$1"
@@ -116,7 +118,7 @@ function selectors()
         ORDER BY filter"
 }
 
-$CLIENT -n -q "DROP TABLE IF EXISTS prometheus_empty; CREATE TABLE prometheus_empty ENGINE = TimeSeries;"
+$CLIENT -n -q "DROP TABLE IF EXISTS prometheus_empty; CREATE TABLE prometheus_empty ENGINE = TimeSeries TAGS INNER COLUMNS (id UUID);"
 
 echo "-- the selectors read"
 selectors 'rate(lim[30s]) / on(instance) rate(req{instance="i1"}[30s])'

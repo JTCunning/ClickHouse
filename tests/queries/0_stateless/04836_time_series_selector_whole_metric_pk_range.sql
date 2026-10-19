@@ -4,11 +4,12 @@
 -- `timeSeriesSelector` (and every PromQL selector evaluated through it) filters the samples table with
 -- `id IN <tags subquery>`. With a two-component id layout `Tuple(hash(metric_name), hash(tags))`
 -- all series of one metric occupy one continuous primary-key range. When a selector matches the WHOLE
--- metric (verified by a probe on the tags table at query build time), the generated WHERE additionally
--- carries `id >= tuple(hash('metric'), min) AND id <= tuple(hash('metric'), max)` and the id set is
--- excluded from primary-key index analysis (`use_index_for_in_with_subqueries_max_values = 1`): index
--- analysis then works on the continuous range instead of running a generic exclusion search with the
--- whole set. The `id IN <set>` condition always stays in the WHERE, so the returned rows never change.
+-- metric (verified by a probe on the tags table at query build time), the generated WHERE carries
+-- `indexHint(id >= tuple(hash('metric'), min) AND id <= tuple(hash('metric'), max))` and
+-- `tupleElement(id, 1) = hash('metric')` instead of the id set: index analysis works on the
+-- continuous range instead of running a generic exclusion search with the whole set, and the rows are
+-- filtered by one comparison of the first id component instead of a hash-set probe. The tags subquery
+-- is executed separately to register the tags of the series, so PromQL evaluations still group by tags.
 -- The range is wrapped in `indexHint`, so it reaches index analysis without being evaluated per
 -- row. The range conditions contain the max-UUID literal. The checks below look for it in the
 -- `Condition:` line of `EXPLAIN indexes = 1`, that is, in what primary-key index analysis actually
@@ -38,18 +39,19 @@ INSERT INTO ts_clustered (metric_name, tags, samples) VALUES
     ('foo', map(), [(toDateTime64(100, 3), 5.)]),
     ('bar', map('env', 'dev'), [(toDateTime64(100, 3), 100.), (toDateTime64(300, 3), 300.)]);
 
-SELECT '-- whole-metric selector: same rows as a filtered read, and the WHERE carries the id range';
+SELECT '-- whole-metric selector: same rows as a filtered read, and the WHERE carries the id range instead of the id set';
 
 SELECT timestamp, value FROM timeSeriesSelector(ts_clustered, 'foo', 0, 1000) ORDER BY value, timestamp;
 
 SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range, plan LIKE '%IN subquery%' AS keeps_id_set
 FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN indexes = 1 SELECT sum(value) FROM timeSeriesSelector(ts_clustered, 'foo', 0, 1000)));
 
-SELECT '-- the range is an index condition only: it is not part of any row-level filter';
+SELECT '-- the range is an index condition only; the row-level filter is the equality on the first id component';
 
 SELECT
     countIf(explain ILIKE '%Condition:%' AND explain ILIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%') > 0 AS range_in_index_condition,
     countIf(explain ILIKE '%filter column:%' AND explain ILIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%') = 0 AS range_not_row_level,
+    countIf(explain ILIKE '%filter column:%' AND explain ILIKE '%tupleElement(%') > 0 AS first_component_row_level,
     -- control for the check above: filter descriptions are printed and this pattern does match them
     countIf(explain ILIKE '%filter column:%' AND explain ILIKE '%timestamp%') > 0 AS filter_lines_present
 FROM (EXPLAIN indexes = 1 SELECT sum(value) FROM timeSeriesSelector(ts_clustered, 'foo', 0, 1000));
@@ -58,7 +60,7 @@ SELECT '-- whole-metric-by-data selector (a matcher every series passes): the ra
 
 SELECT timestamp, value FROM timeSeriesSelector(ts_clustered, 'foo{env=~".*"}', 0, 1000) ORDER BY value, timestamp;
 
-SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range
+SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range, plan LIKE '%IN subquery%' AS keeps_id_set
 FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN indexes = 1 SELECT sum(value) FROM timeSeriesSelector(ts_clustered, 'foo{env=~".*"}', 0, 1000)));
 
 SELECT '-- partial-metric selector (a matcher filters some series out): falls back to the id set only';
@@ -66,14 +68,14 @@ SELECT '-- partial-metric selector (a matcher filters some series out): falls ba
 SELECT timestamp, value FROM timeSeriesSelector(ts_clustered, 'foo{env="prod"}', 0, 1000) ORDER BY value, timestamp;
 SELECT timestamp, value FROM timeSeriesSelector(ts_clustered, 'foo{env!=""}', 0, 1000) ORDER BY value, timestamp;
 
-SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range
+SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range, plan LIKE '%IN subquery%' AS keeps_id_set
 FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN indexes = 1 SELECT sum(value) FROM timeSeriesSelector(ts_clustered, 'foo{env="prod"}', 0, 1000)));
 
 SELECT '-- regex matcher on the metric name: falls back';
 
 SELECT timestamp, value FROM timeSeriesSelector(ts_clustered, '{__name__=~"foo|bar", env="dev"}', 0, 1000) ORDER BY value, timestamp;
 
-SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range
+SELECT plan LIKE '%ffffffff-ffff-ffff-ffff-ffffffffffff%' AS has_id_range, plan LIKE '%IN subquery%' AS keeps_id_set
 FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN indexes = 1 SELECT sum(value) FROM timeSeriesSelector(ts_clustered, '{__name__=~"foo|bar"}', 0, 1000)));
 
 SELECT '-- selector with no series in the time range: empty result either way';
@@ -87,12 +89,14 @@ SELECT * FROM prometheusQuery(ts_clustered, 'sum(foo)', 250) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts_clustered, 'sum by (env) (foo)', 100, 300, 100) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts_clustered, 'foo{env="dev"} or bar', 100, 300, 100) ORDER BY ALL;
 
-SELECT '-- the id set stays in the row-level filter: series of another metric are never returned';
+SELECT '-- the first id component is the row-level filter: series of another metric are never returned';
 
--- `foo` and `bar` have different first id components, so this holds by the range too; the check
--- documents that the kept `id IN <set>` condition is what guarantees it on any layout.
+-- `foo` and `bar` have different first id components: the equality on the first component rejects the
+-- rows of `bar` even when the index returns granules holding both metrics (a single part here).
 SELECT count() FROM timeSeriesSelector(ts_clustered, 'foo', 0, 1000)
 WHERE id IN (SELECT id FROM timeSeriesSelector(ts_clustered, 'bar', 0, 1000));
+SELECT count() FROM timeSeriesSelector(ts_clustered, 'foo', 0, 1000)
+WHERE tupleElement(id, 1) != sipHash64('foo');
 
 SELECT '-- single-component id layout: no metric clustering, no id range, same results';
 
@@ -157,10 +161,8 @@ FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN 
 SELECT '-- the index-only range still drops the part that holds another metric';
 
 -- Two parts, one metric each: `max_bytes_to_merge_at_max_space_in_pool = 1` keeps them apart.
--- `foo` has two series, so its id set holds two values and
--- `use_index_for_in_with_subqueries_max_values = 1` excludes it from index analysis: the range is
--- then the only condition that can drop the `bar` part, which `id_set_not_in_index_analysis`
--- asserts rather than assumes.
+-- The whole-metric selector carries no id set, so the range is the only condition that can drop
+-- the `bar` part, which `id_set_not_in_index_analysis` asserts rather than assumes.
 CREATE TABLE ts_prune ENGINE = TimeSeries TAGS INNER COLUMNS (id Tuple(UInt64, UUID))
 SAMPLES INNER ENGINE = MergeTree ORDER BY (id, timestamp)
     SETTINGS max_bytes_to_merge_at_max_space_in_pool = 1;

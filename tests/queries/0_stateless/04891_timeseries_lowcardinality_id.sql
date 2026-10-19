@@ -5,8 +5,8 @@
 
 -- A `TimeSeries` id of type `Tuple(UInt64, LowCardinality(UUID))` keeps the identifiers
 -- dictionary-encoded: the default id generator wraps the tags hash in `toLowCardinality`,
--- and the whole-metric primary-key range conditions are still emitted. Queries behave
--- exactly as with a plain `Tuple(UInt64, UUID)` id.
+-- and the whole-metric primary-key range conditions are still emitted instead of the id set.
+-- Queries behave exactly as with a plain `Tuple(UInt64, UUID)` id.
 
 SET allow_experimental_time_series_table = 1;
 SET session_timezone = 'UTC';
