@@ -7,7 +7,11 @@
 #include <Storages/TimeSeries/PrometheusQueryToSQL/NodeEvaluationRange.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/SelectQueryBuilder.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/applyFunctionOverRange.h>
+#include <Storages/TimeSeries/PrometheusQueryToSQL/applyFusedAggregationBinaryOperator.h>
 #include <Storages/TimeSeries/timeSeriesTypesToAST.h>
+#include <base/defines.h>
+
+#include <fmt/format.h>
 
 
 namespace DB::PrometheusQueryToSQL
@@ -16,6 +20,67 @@ namespace DB::PrometheusQueryToSQL
 namespace
 {
     constexpr UInt64 STALE_NAN_BITS = 0x7ff0000000000002ULL;
+
+    /// Two instant selectors share a grid only if they have the same text and the same evaluation range.
+    /// The range already includes the effect of `offset` and `@` modifiers.
+    String makeInstantSelectorKey(std::string_view instant_selector_text, const Node * node, const ConverterContext & context)
+    {
+        const auto & node_range = context.node_range_getter.get(node);
+        return fmt::format(
+            "{}\n{}\n{}\n{}\n{}",
+            instant_selector_text,
+            node_range.start_time.value,
+            node_range.end_time.value,
+            node_range.step.value,
+            node_range.window.value);
+    }
+
+    void countInstantSelectorUses(const Node * node, ConverterContext & context)
+    {
+        /// The instant selector inside a range selector is converted by fromRangeSelector(), not by fromSelector().
+        if (node->node_type == NodeType::RangeSelector)
+            return;
+
+        if (node->node_type == NodeType::InstantSelector)
+        {
+            auto instant_selector_text = node->toString(*context.promql_tree);
+            ++context.instant_selector_use_count[makeInstantSelectorKey(instant_selector_text, node, context)];
+            return;
+        }
+
+        /// A fused aggregation binary operator converts only the argument of its left aggregation.
+        if (node->node_type == NodeType::BinaryOperator)
+        {
+            const auto * binary_operator = static_cast<const PrometheusQueryTree::BinaryOperator *>(node);
+            if (canFuseAggregationBinaryOperator(binary_operator, context))
+            {
+                const auto * aggregation
+                    = static_cast<const PrometheusQueryTree::AggregationOperator *>(binary_operator->getLeftArgument());
+                countInstantSelectorUses(aggregation->getArguments().at(0), context);
+                return;
+            }
+        }
+
+        for (const auto * child : node->children)
+            countInstantSelectorUses(child, context);
+    }
+
+    /// SELECT group, values FROM <shared grid>
+    SQLQueryPiece readSharedGrid(const SharedInstantSelectorGrid & grid, const Node * node)
+    {
+        SQLQueryPiece res{node, ResultType::INSTANT_VECTOR, StoreMethod::VECTOR_GRID};
+        res.metric_name_dropped = grid.metric_name_dropped;
+        res.start_time = grid.start_time;
+        res.end_time = grid.end_time;
+        res.step = grid.step;
+
+        SelectQueryBuilder builder;
+        builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Group));
+        builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Values));
+        builder.from_table = grid.subquery_name;
+        res.select_query = builder.getSelectQuery();
+        return res;
+    }
 
     ASTPtr isStaleMarker(ASTPtr value)
     {
@@ -143,14 +208,53 @@ namespace
 }
 
 
+void countInstantSelectorUses(ConverterContext & context)
+{
+    countInstantSelectorUses(context.promql_tree->getRoot(), context);
+}
+
+
 SQLQueryPiece fromSelector(const PrometheusQueryTree::InstantSelector * instant_selector_node, ConverterContext & context)
 {
     auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
-    auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
-    auto vector_grid = applyFunctionOverRange(
-        instant_selector_node, "last_over_time", {std::move(range_selector)}, context);
-    return replaceStaleMarkersWithNulls(std::move(vector_grid), context);
+
+    auto make_vector_grid = [&]
+    {
+        auto range_selector = fromRangeSelector(
+            instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        auto vector_grid = applyFunctionOverRange(
+            instant_selector_node, "last_over_time", {std::move(range_selector)}, context);
+        return replaceStaleMarkersWithNulls(std::move(vector_grid), context);
+    };
+
+    auto key = makeInstantSelectorKey(instant_selector_text, instant_selector_node, context);
+    auto use_count_it = context.instant_selector_use_count.find(key);
+    if (use_count_it == context.instant_selector_use_count.end() || use_count_it->second <= 1)
+        return make_vector_grid();
+
+    auto shared_it = context.shared_instant_selector_grids.find(key);
+    if (shared_it != context.shared_instant_selector_grids.end())
+        return readSharedGrid(shared_it->second, instant_selector_node);
+
+    auto vector_grid = make_vector_grid();
+    if (vector_grid.store_method != StoreMethod::VECTOR_GRID)
+        return vector_grid;
+
+    context.subqueries.emplace_back(
+        context.subqueries.size(),
+        std::move(vector_grid.select_query),
+        SQLSubqueryType::MATERIALIZED_TABLE);
+
+    SharedInstantSelectorGrid grid;
+    grid.subquery_name = context.subqueries.back().name;
+    grid.metric_name_dropped = vector_grid.metric_name_dropped;
+    grid.start_time = vector_grid.start_time;
+    grid.end_time = vector_grid.end_time;
+    grid.step = vector_grid.step;
+
+    auto [it, inserted] = context.shared_instant_selector_grids.emplace(key, std::move(grid));
+    chassert(inserted);
+    return readSharedGrid(it->second, instant_selector_node);
 }
 
 

@@ -109,7 +109,7 @@ FROM (EXPLAIN SELECT * FROM prometheusQueryRange('prometheus', 'sum(rate(m[20]))
 SELECT '-- subqueries referenced once stay inlined: a binary operator reads each of its two operands once, nothing is materialized';
 SELECT countIf(explain LIKE '%ReadFromMergeTree%.inner_id.samples.%') AS samples_table_reads,
        countIf(explain LIKE '%MaterializingCTEs%') > 0 AS uses_materialized_cte
-FROM (EXPLAIN SELECT * FROM prometheusQuery('prometheus', 'sum by (dc) (m) / on (dc) count by (dc) (m)', 130));
+FROM (EXPLAIN SELECT * FROM prometheusQuery('prometheus', 'sum by (dc) (m) / on (dc) count by (dc) (n)', 130));
 
 -- The streaming topk plan reads its operand grid twice (the group-selecting aggregation and the join
 -- masking the non-selected values), so the grid is materialized and the samples table is read once.

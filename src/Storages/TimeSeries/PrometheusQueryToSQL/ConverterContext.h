@@ -6,9 +6,22 @@
 #include <Storages/TimeSeries/PrometheusQueryToSQL/SQLSubquery.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
 
+#include <unordered_map>
+
 
 namespace DB::PrometheusQueryToSQL
 {
+
+/// A vector grid of an instant selector which occurs more than once in a query with the same evaluation range.
+/// The grid is added to the subqueries as a materialized CTE and every occurrence of the selector reads from it.
+struct SharedInstantSelectorGrid
+{
+    String subquery_name;
+    bool metric_name_dropped = false;
+    TimestampType start_time = {};
+    TimestampType end_time = {};
+    DurationType step = {};
+};
 
 /// Contains information which is used to convert a prometheus query to SQL.
 struct ConverterContext
@@ -27,6 +40,13 @@ struct ConverterContext
     const ResultType result_type;
     const NodeEvaluationRangeGetter node_range_getter;
     SQLSubqueries subqueries;
+
+    /// How many times each instant selector occurs in the query, keyed by the selector text and its evaluation range
+    /// (see makeInstantSelectorKey()). Filled by countInstantSelectorUses() before the conversion starts.
+    std::unordered_map<String, size_t> instant_selector_use_count;
+
+    /// Grids shared between occurrences of the same instant selector, keyed like `instant_selector_use_count`.
+    std::unordered_map<String, SharedInstantSelectorGrid> shared_instant_selector_grids;
 
     ConverterContext(std::shared_ptr<const PrometheusQueryTree> promql_tree_,
                      const PrometheusQueryEvaluationSettings & settings_);

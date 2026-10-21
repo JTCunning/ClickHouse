@@ -1,0 +1,30 @@
+-- left side alone
+[('pod','p1'),('workload','j1')]	1
+[('pod','p2'),('workload','j2')]	1
+-- right side alone
+[('__name__','kube_pod_owner'),('job','ksm'),('owner_kind','Job'),('owner_name','j1'),('pod','p1'),('workload','j1')]	1
+[('__name__','kube_pod_owner'),('job','ksm'),('owner_kind','Job'),('owner_name','j2'),('pod','p2'),('workload','j2')]	1
+-- or: the same selector on both sides returns the union of both sides
+[('__name__','kube_pod_owner'),('job','ksm'),('owner_kind','Job'),('owner_name','j1'),('pod','p1'),('workload','j1')]	1
+[('__name__','kube_pod_owner'),('job','ksm'),('owner_kind','Job'),('owner_name','j2'),('pod','p2'),('workload','j2')]	1
+[('pod','p1'),('workload','j1')]	1
+[('pod','p2'),('workload','j2')]	1
+-- or: identical result with materialization disabled
+[('__name__','kube_pod_owner'),('job','ksm'),('owner_kind','Job'),('owner_name','j1'),('pod','p1'),('workload','j1')]	1
+[('__name__','kube_pod_owner'),('job','ksm'),('owner_kind','Job'),('owner_name','j2'),('pod','p2'),('workload','j2')]	1
+[('pod','p1'),('workload','j1')]	1
+[('pod','p2'),('workload','j2')]	1
+-- or: the same selector on both sides is read once
+1	1
+-- or: an empty selector on both sides returns no series
+0
+-- three occurrences of the same selector are read once
+[('job','ksm'),('owner_kind','Job'),('owner_name','j1'),('pod','p1')]	3
+[('job','ksm'),('owner_kind','Job'),('owner_name','j2'),('pod','p2')]	3
+1	1
+-- the same selector with a different offset is read separately
+[('job','ksm'),('owner_kind','Job'),('owner_name','j1'),('pod','p1')]	2
+[('job','ksm'),('owner_kind','Job'),('owner_name','j2'),('pod','p2')]	2
+2	0
+-- a selector which occurs once is not materialized
+1	0
