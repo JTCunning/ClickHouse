@@ -3,6 +3,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
+#include <Storages/StorageTimeSeriesSelector.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/ConverterContext.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/NodeEvaluationRange.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/SelectQueryBuilder.h>
@@ -25,13 +26,24 @@ namespace
             make_intrusive<ASTLiteral>(STALE_NAN_BITS));
     }
 
-    SQLQueryPiece fromRangeSelector(std::string_view instant_selector_text,
+    SQLQueryPiece fromRangeSelector(const PrometheusQueryTree::InstantSelector * instant_selector,
                                     const Node * node,
                                     bool filter_stale_markers,
                                     ConverterContext & context)
     {
         auto node_range = context.node_range_getter.get(node);
         if (node_range.empty())
+            return SQLQueryPiece{node, ResultType::RANGE_VECTOR, StoreMethod::EMPTY};
+
+        /// The range is (start_time - window, end_time] at the result scale. The table function converts the bounds to the scale
+        /// of the table itself, rounding them towards the inside of the range.
+        TimestampType min_time = node_range.start_time - node_range.window + 1;
+        TimestampType max_time = node_range.end_time;
+
+        /// No series matches the selector in the range: the result is empty, and no SQL is built for it.
+        if (StorageTimeSeriesSelector::storeSelectedIDs(
+                context.time_series_storage_id, instant_selector->matchers, min_time, max_time, context.result_timestamp_scale,
+                context.execution_context) == 0)
             return SQLQueryPiece{node, ResultType::RANGE_VECTOR, StoreMethod::EMPTY};
 
         SQLQueryPiece res{node, ResultType::RANGE_VECTOR, StoreMethod::RAW_DATA};
@@ -47,16 +59,11 @@ namespace
         builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Timestamp));
         builder.select_list.push_back(make_intrusive<ASTIdentifier>(ColumnNames::Value));
 
-        /// The range is (start_time - window, end_time] at the result scale. The table function converts the bounds to the scale
-        /// of the table itself, rounding them towards the inside of the range.
-        TimestampType min_time = node_range.start_time - node_range.window + 1;
-        TimestampType max_time = node_range.end_time;
-
         builder.from_table_function = makeASTFunction(
             "timeSeriesSelector",
             make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
             make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
-            make_intrusive<ASTLiteral>(String{instant_selector_text}),
+            make_intrusive<ASTLiteral>(instant_selector->toString(*context.promql_tree)),
             timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
             timeSeriesTimestampToAST(max_time, context.result_timestamp_type));
 
@@ -145,9 +152,8 @@ namespace
 
 SQLQueryPiece fromSelector(const PrometheusQueryTree::InstantSelector * instant_selector_node, ConverterContext & context)
 {
-    auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
     auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        instant_selector_node, instant_selector_node, /* filter_stale_markers = */ false, context);
     auto vector_grid = applyFunctionOverRange(
         instant_selector_node, "last_over_time", {std::move(range_selector)}, context);
     return replaceStaleMarkersWithNulls(std::move(vector_grid), context);
@@ -156,9 +162,8 @@ SQLQueryPiece fromSelector(const PrometheusQueryTree::InstantSelector * instant_
 
 SQLQueryPiece fromSelectorSampleTimestamps(const PrometheusQueryTree::InstantSelector * instant_selector_node, ConverterContext & context)
 {
-    auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
     auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        instant_selector_node, instant_selector_node, /* filter_stale_markers = */ false, context);
 
     if (range_selector.store_method == StoreMethod::RAW_DATA)
     {
@@ -196,9 +201,8 @@ SQLQueryPiece fromSelectorSampleTimestamps(const PrometheusQueryTree::InstantSel
 
 SQLQueryPiece fromSelector(const PrometheusQueryTree::RangeSelector * range_selector_node, ConverterContext & context)
 {
-    auto instant_selector_text = range_selector_node->getInstantSelector()->toString(*context.promql_tree);
     return fromRangeSelector(
-        instant_selector_text, range_selector_node, /* filter_stale_markers = */ true, context);
+        range_selector_node->getInstantSelector(), range_selector_node, /* filter_stale_markers = */ true, context);
 }
 
 }

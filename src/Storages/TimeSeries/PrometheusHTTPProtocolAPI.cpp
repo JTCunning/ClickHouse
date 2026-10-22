@@ -245,7 +245,7 @@ void PrometheusHTTPProtocolAPI::executePromQLQuery(
     }
 
     PrometheusQueryToSQL::Converter converter{query_tree, evaluation_settings};
-    auto sql_query = converter.getSQL();
+    auto sql_query = converter.getSQL(getContext());
 
     chassert(sql_query);
     LOG_TRACE(log, "SQL query to execute:\n{}", sql_query->formatForLogging());

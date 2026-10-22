@@ -203,7 +203,7 @@ void StoragePrometheusQuery::readImpl(
     auto evaluation_settings = config.evaluation_settings;
     evaluation_settings.push_down_label_matchers = context->getSettingsRef()[Setting::promql_push_down_label_matchers];
     PrometheusQueryToSQL::Converter converter{config.promql_query, evaluation_settings};
-    ASTPtr select_query = converter.getSQL();
+    ASTPtr select_query = converter.getSQL(context);
 
     LOG_INFO(log, "Will execute query:\n{}", select_query->formatForLogging());
     auto options = SelectQueryOptions(QueryProcessingStage::Complete, 0, false, query_info.settings_limit_offset_done);

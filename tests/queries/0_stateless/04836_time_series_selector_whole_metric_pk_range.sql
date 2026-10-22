@@ -54,7 +54,7 @@ SELECT
     countIf(explain ILIKE '%filter column:%' AND explain ILIKE '%timestamp%') > 0 AS filter_lines_present
 FROM (EXPLAIN indexes = 1 SELECT sum(value) FROM timeSeriesSelector(ts_clustered, 'foo', 0, 1000));
 
-SELECT '-- whole-metric-by-data selector (a matcher every series passes): the range is still emitted';
+SELECT '-- a matcher every series passes: no range, the id set only';
 
 SELECT timestamp, value FROM timeSeriesSelector(ts_clustered, 'foo{env=~".*"}', 0, 1000) ORDER BY value, timestamp;
 

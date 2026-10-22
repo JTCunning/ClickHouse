@@ -109,11 +109,20 @@ $CLIENT -q "SELECT * FROM prometheusQueryRange('prometheus', 'lim / on(instance)
 function selectors()
 {
     echo "$1"
-    $CLIENT -q "
-        SELECT DISTINCT arrayStringConcat(extractAll(explain, '= \'([a-z0-9]+)\''), ' ') AS filter
-        FROM (EXPLAIN SELECT * FROM prometheusQueryRange('prometheus_empty', '$1', 100, 130, 10))
-        WHERE explain LIKE '%Filter column:%metric_name%'
-        ORDER BY filter"
+    $CLIENT --send_logs_level=debug -q "SELECT * FROM prometheusQueryRange('prometheus_empty', '$1', 100, 130, 10) FORMAT Null" 2>&1 \
+        | grep -oE 'StorageTimeSeriesSelector: Selector \{.*\} over' \
+        | sed -E 's/^StorageTimeSeriesSelector: Selector \{(.*)\} over$/\1/' \
+        | awk -F', ' '{
+            name = ""; rest = "";
+            for (i = 1; i <= NF; i++)
+            {
+                if ($i !~ /^[a-z_]+="[a-z0-9]+"$/) continue;
+                v = $i; sub(/^[a-z_]+="/, "", v); sub(/"$/, "", v);
+                if ($i ~ /^__name__=/) name = v; else rest = rest " " v;
+            }
+            s = name rest; sub(/^ /, "", s); print s
+        }' \
+        | LC_ALL=C sort -u
 }
 
 $CLIENT -n -q "DROP TABLE IF EXISTS prometheus_empty; CREATE TABLE prometheus_empty ENGINE = TimeSeries;"
@@ -151,13 +160,16 @@ selectors "$(and_of_lim 21) / on(job) req{job=\"api\"}"
 echo "-- the setting turns the pushdown off"
 CLIENT="$CLIENT --promql_push_down_label_matchers=0" selectors 'rate(lim[30s]) / on(instance) rate(req{instance="i1"}[30s])'
 
-# Prints how many selectors the query reads and how many joins it makes.
-# Only the hash joins are counted: the PromQL operators are executed with a hash join, while each selector joins the time ranges table with a merge join.
+# Prints how many selectors the query looks up and how many hash joins it makes.
 function reads()
 {
-    $CLIENT -q "
-        SELECT countIf(explain LIKE '%metric_name = %'), countIf(explain LIKE '%Join (JOIN FillRightFirst)%')
-        FROM (EXPLAIN SELECT * FROM prometheusQueryRange('prometheus_empty', '$1', 100, 130, 10))"
+    local lookups joins
+    lookups=$($CLIENT --send_logs_level=debug -q "SELECT * FROM prometheusQueryRange('prometheus', '$1', 100, 130, 10) FORMAT Null" 2>&1 \
+        | grep -c 'StorageTimeSeriesSelector: Selector {')
+    joins=$($CLIENT -q "
+        SELECT countIf(explain LIKE '%Join (JOIN FillRightFirst)%')
+        FROM (EXPLAIN SELECT * FROM prometheusQueryRange('prometheus', '$1', 100, 130, 10))")
+    echo -e "$lookups\t$joins"
 }
 
 echo "-- the two sides become the same, so they are read once"

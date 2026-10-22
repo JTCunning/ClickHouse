@@ -64,6 +64,25 @@ public:
     /// over tables read in the order of `id`.
     static void applySettingsForSelectIDsQuery(Context & context);
 
+    /// Returns the name of the temporary table which keeps the ids found by `storeSelectedIDs` for these matchers and time bounds.
+    static String getSelectedIDsTableName(
+        const StorageID & time_series_storage_id,
+        const PrometheusQueryTree::MatcherList & matchers,
+        DateTime64 min_time,
+        DateTime64 max_time,
+        UInt32 time_scale);
+
+    /// Executes the query made by makeSelectIDsQuery and stores the found ids in a temporary table of the query context
+    /// named by getSelectedIDsTableName, so readImpl takes the ids from that table and does not read the tags table again.
+    /// The temporary table lives as long as the query context. Returns the number of the found ids.
+    static size_t storeSelectedIDs(
+        const StorageID & time_series_storage_id,
+        const PrometheusQueryTree::MatcherList & matchers,
+        DateTime64 min_time,
+        DateTime64 max_time,
+        UInt32 time_scale,
+        const ContextPtr & context);
+
     void readImpl(
         QueryPlan & query_plan,
         const Names & column_names,

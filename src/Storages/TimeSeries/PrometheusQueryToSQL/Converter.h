@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Interpreters/Context_fwd.h>
 #include <Parsers/IAST_fwd.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/TimeSeries/PrometheusQueryEvaluationSettings.h>
@@ -22,7 +23,9 @@ public:
     ColumnsDescription getResultColumns() const;
 
     /// Builds an AST to execute this prometheus query.
-    ASTPtr getSQL() const;
+    /// Finds the series of each selector with `context` and stores their ids in temporary tables of its query context,
+    /// so the returned AST must be executed with the same query context.
+    ASTPtr getSQL(const ContextPtr & context) const;
 
 private:
     const std::shared_ptr<const PrometheusQueryTree> promql_tree;

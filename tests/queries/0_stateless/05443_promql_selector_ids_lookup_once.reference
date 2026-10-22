@@ -1,0 +1,4 @@
+lookups: 1, tags table reads: 1 :: kube_pod_owner{owner_kind="ReplicaSet"}
+lookups: 1, tags table reads: 1 :: kube_pod_owner{owner_kind="ReplicaSet"} or label_join(kube_pod_owner{owner_kind="ReplicaSet"}, "workload", "/", "owner_name")
+lookups: 2, tags table reads: 2 :: sum(kube_pod_owner{owner_kind="ReplicaSet"}) + sum(kube_pod_owner{owner_kind="ReplicaSet"} offset 100)
+lookups: 1, tags table reads: 1 :: kube_pod_owner{owner_kind="Job"} or label_join(kube_pod_owner{owner_kind="Job"}, "workload", "/", "owner_name")

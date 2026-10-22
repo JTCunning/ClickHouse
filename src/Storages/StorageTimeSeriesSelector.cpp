@@ -3,6 +3,7 @@
 #include <Common/Exception.h>
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
+#include <Common/SipHash.h>
 #include <Columns/IColumn.h>
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeNullable.h>
@@ -24,8 +25,10 @@
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
+#include <Parsers/Prometheus/PrometheusQueryParsingUtil.h>
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
 #include <Parsers/makeASTForLogicalFunction.h>
+#include <Processors/Executors/CompletedPipelineExecutor.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/SelectQueryInfo.h>
@@ -871,9 +874,10 @@ namespace
     /// Returns nullptr (= emit today's SQL) unless ALL of the following hold:
     /// 1. The matchers select exactly one metric (`metric_id_ranges` has one range).
     /// 2. The samples table physically stores `id` with exactly the type the range is made for.
-    /// 3. A probe query on the tags table (and the time ranges table if any) finds NO time-eligible series of the metric that either
-    ///    fails the matchers other than the one on `__name__` (the selector does not select the whole metric) or has an id outside
-    ///    the range (rows written before an `ALTER ... MODIFY SETTING id_generator`).
+    /// 3. The selector has no matcher other than the one on `__name__`. A selector with another matcher keeps the `id IN <set>`
+    ///    condition only, even if every series of the metric passes that matcher.
+    /// 4. A probe query on the tags table (and the time ranges table if any) finds NO time-eligible series of the metric with an id
+    ///    outside the range (rows written before an `ALTER ... MODIFY SETTING id_generator`).
     ASTPtr tryMakeWholeMetricIDRangeConditions(
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
         const PrometheusQueryTree::MatcherList & matchers,
@@ -899,13 +903,19 @@ namespace
         if (!samples_table_id_column || (samples_table_id_column->type->getName() != table_id_type->getName()))
             return {};
 
-        /// 3. The probe: find one time-eligible series of the metric that contradicts the range emission,
-        /// i.e. fails the remaining matchers or does not hash into the range.
+        /// 3. Only the matcher on `__name__`. The range exists, so that matcher is an equality or a regex of one literal.
+        for (const auto & matcher : matchers)
+        {
+            if ((matcher.label_name != TimeSeriesTagNames::MetricName)
+                || ((matcher.matcher_type != PrometheusQueryTree::MatcherType::EQ) && (matcher.matcher_type != PrometheusQueryTree::MatcherType::RE)))
+                return {};
+        }
+
+        /// 4. The probe: find one time-eligible series of the metric that does not hash into the range.
         ///
         ///     SELECT 1 FROM (
         ///         SELECT id FROM tags_table [LEFT JOIN <time ranges> USING (id)]
-        ///         WHERE <__name__ matcher> AND <time range filter>
-        ///           AND (NOT (<other matchers>) OR tupleElement(id, 1) != <first_component>))
+        ///         WHERE <__name__ matcher> AND <time range filter> AND tupleElement(id, 1) != <first_component>)
         ///     LIMIT 1
         ///
         /// The time range filter is the same as in the tags subquery (see applyTimeRangeFilterToSelectIDsQuery); it keeps the series
@@ -917,28 +927,9 @@ namespace
         /// into incorrectness: series inserted after the probe get their ids from the current (canonical) generator, so they stay
         /// inside the range, and the `id IN <set>` condition keeps doing the exact row-level filtering either way.
         {
-            PrometheusQueryTree::MatcherList name_matcher_only;
-            ASTs other_matcher_conditions;
-            for (const auto & matcher : matchers)
-            {
-                /// The range exists, so there is exactly one matcher selecting the metric by name: an equality or a regex of one literal.
-                if ((matcher.label_name == TimeSeriesTagNames::MetricName)
-                    && ((matcher.matcher_type == PrometheusQueryTree::MatcherType::EQ) || (matcher.matcher_type == PrometheusQueryTree::MatcherType::RE)))
-                    name_matcher_only.push_back(matcher);
-                else
-                    other_matcher_conditions.push_back(matcherToAST(matcher, column_name_by_tag_name));
-            }
-
-            ASTPtr counterexample = makeIDOutOfRangeCondition(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), metric_id_range);
-            if (!other_matcher_conditions.empty())
-            {
-                counterexample = makeASTForLogicalOr(
-                    {makeASTFunction("not", makeASTForLogicalAnd(std::move(other_matcher_conditions))), std::move(counterexample)});
-            }
-
             ASTPtr probe_where = makeASTForLogicalAnd(
-                {makeWhereFilterForTagsTable(name_matcher_only, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type),
-                 std::move(counterexample)});
+                {makeWhereFilterForTagsTable(matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type),
+                 makeIDOutOfRangeCondition(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), metric_id_range)});
 
             /// SELECT id FROM tags_table WHERE <probe_where>
             auto probe_select_ids = make_intrusive<ASTSelectQuery>();
@@ -1052,6 +1043,98 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
 }
 
 
+String StorageTimeSeriesSelector::getSelectedIDsTableName(
+    const StorageID & time_series_storage_id,
+    const PrometheusQueryTree::MatcherList & matchers,
+    DateTime64 min_time,
+    DateTime64 max_time,
+    UInt32 time_scale)
+{
+    SipHash hash;
+    auto update_string = [&](const String & str)
+    {
+        hash.update(str.size());
+        hash.update(str);
+    };
+    update_string(time_series_storage_id.getDatabaseName());
+    update_string(time_series_storage_id.getTableName());
+    hash.update(matchers.size());
+    for (const auto & matcher : matchers)
+    {
+        update_string(matcher.label_name);
+        update_string(matcher.label_value);
+        hash.update(static_cast<UInt8>(matcher.matcher_type));
+    }
+    hash.update(min_time.value);
+    hash.update(max_time.value);
+    hash.update(time_scale);
+    return "_time_series_selector_ids_" + getHexUIntLowercase(hash.get128());
+}
+
+
+size_t StorageTimeSeriesSelector::storeSelectedIDs(
+    const StorageID & time_series_storage_id,
+    const PrometheusQueryTree::MatcherList & matchers,
+    DateTime64 min_time,
+    DateTime64 max_time,
+    UInt32 time_scale,
+    const ContextPtr & context)
+{
+    auto query_context = context->getQueryContext();
+    const String table_name = getSelectedIDsTableName(time_series_storage_id, matchers, min_time, max_time, time_scale);
+    if (auto existing_table = query_context->findExternalTable(table_name))
+        return *existing_table->getTable()->totalRows(query_context);
+
+    auto time_series_storage = storagePtrToTimeSeries(DatabaseCatalog::instance().getTable(time_series_storage_id, context));
+    checkTimeSeriesVersionSupportedByPromQL(*time_series_storage);
+    auto time_series_settings = time_series_storage->getStorageSettings();
+    auto time_series_metadata = time_series_storage->getInMemoryMetadataPtr(context, false);
+    auto table_timestamp_type = splitTimeSeriesType(
+        time_series_metadata->columns.get(TimeSeriesColumnNames::getOuterSamples(time_series_storage->getVersion())).type).first;
+    auto tags_table_id = time_series_storage->getTargetTableID(ViewTarget::Tags, context);
+    auto tags_table_metadata = time_series_storage->getTargetTable(ViewTarget::Tags, context)->getInMemoryMetadataPtr(context, false);
+    auto table_id_type = tags_table_metadata->columns.get(TimeSeriesColumnNames::ID).type;
+
+    auto select_ids_query = makeSelectIDsQuery(
+        *time_series_storage, tags_table_id, *time_series_settings, table_timestamp_type, table_id_type, matchers, min_time, max_time,
+        time_scale, context);
+
+    auto select_context = Context::createCopy(context);
+    applySettingsForSelectIDsQuery(*select_context);
+    InterpreterSelectQueryAnalyzer interpreter(select_ids_query, select_context, SelectQueryOptions{});
+    auto io = interpreter.execute();
+
+    auto ids_table = std::make_shared<TemporaryTableHolder>(
+        query_context, ColumnsDescription{io.pipeline.getHeader().getNamesAndTypesList()}, ConstraintsDescription{});
+    auto ids_storage = ids_table->getTable();
+    auto ids_metadata = ids_storage->getInMemoryMetadataPtr(query_context, false);
+    io.pipeline.complete(ids_storage->write(nullptr, ids_metadata, query_context, false));
+    CompletedPipelineExecutor executor(io.pipeline);
+    executor.execute();
+
+    size_t num_ids = *ids_storage->totalRows(query_context);
+    query_context->addExternalTable(table_name, std::move(ids_table));
+    String matchers_text;
+    for (const auto & matcher : matchers)
+    {
+        if (!matchers_text.empty())
+            matchers_text += ", ";
+        matchers_text += matcher.label_name;
+        switch (matcher.matcher_type)
+        {
+            case PrometheusQueryTree::MatcherType::EQ: matchers_text += "="; break;
+            case PrometheusQueryTree::MatcherType::NE: matchers_text += "!="; break;
+            case PrometheusQueryTree::MatcherType::RE: matchers_text += "=~"; break;
+            case PrometheusQueryTree::MatcherType::NRE: matchers_text += "!~"; break;
+        }
+        matchers_text += PrometheusQueryParsingUtil::quoteStringLiteral(matcher.label_value);
+    }
+    LOG_DEBUG(getLogger("StorageTimeSeriesSelector"), "Selector {{{}}} over [{}, {}] selects {} series",
+              matchers_text, min_time.value, max_time.value, num_ids);
+    return num_ids;
+}
+
+
 void StorageTimeSeriesSelector::readImpl(
     QueryPlan & query_plan,
     const Names & column_names,
@@ -1134,9 +1217,25 @@ void StorageTimeSeriesSelector::readImpl(
         interpreter_context,
         log);
 
-    ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
-        tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
-        config.table_timestamp_type);
+    ASTPtr select_query_from_tags_table;
+    const String selected_ids_table_name
+        = getSelectedIDsTableName(config.time_series_storage_id, matchers, config.min_time, config.max_time, config.time_scale);
+    if (!context->tryResolveStorageID(StorageID{"", selected_ids_table_name}, Context::ResolveExternal).empty())
+    {
+        /// storeSelectedIDs has found the ids and stored their tags: SELECT series_id FROM <selected ids table>
+        auto select = make_intrusive<ASTSelectQuery>();
+        auto select_list_exp = make_intrusive<ASTExpressionList>();
+        select_list_exp->children.push_back(make_intrusive<ASTIdentifier>("series_id"));
+        select->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+        select->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(selected_ids_table_name)));
+        select_query_from_tags_table = wrapIntoSelectWithUnionQuery(std::move(select));
+    }
+    else
+    {
+        select_query_from_tags_table = makeSelectQueryFromTagsTable(
+            tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
+            config.table_timestamp_type);
+    }
 
     if (whole_metric_id_range_condition)
     {

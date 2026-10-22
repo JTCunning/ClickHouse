@@ -1,6 +1,7 @@
 #pragma once
 
 #include <DataTypes/IDataType.h>
+#include <Interpreters/Context_fwd.h>
 #include <Interpreters/StorageID.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/NodeEvaluationRangeGetter.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/SQLSubquery.h>
@@ -28,8 +29,12 @@ struct ConverterContext
     const NodeEvaluationRangeGetter node_range_getter;
     SQLSubqueries subqueries;
 
+    /// The context the selectors find their series with (see StorageTimeSeriesSelector::storeSelectedIDs).
+    const ContextPtr execution_context;
+
     ConverterContext(std::shared_ptr<const PrometheusQueryTree> promql_tree_,
-                     const PrometheusQueryEvaluationSettings & settings_);
+                     const PrometheusQueryEvaluationSettings & settings_,
+                     ContextPtr execution_context_);
 };
 
 }

@@ -8,7 +8,8 @@ SET session_timezone = 'UTC';
 DROP TABLE IF EXISTS ts_recent;
 
 -- TTL 10 days. Samples are inserted close to now(), so the background TTL cannot drop them during the test.
-CREATE TABLE ts_recent ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 864000;
+-- No time ranges: a query far from the samples still selects the series, so its plan shows which samples table it reads.
+CREATE TABLE ts_recent ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 864000, store_time_ranges = 0;
 
 SELECT '-- the recent samples inner table exists';
 
