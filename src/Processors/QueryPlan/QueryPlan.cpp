@@ -46,6 +46,8 @@
 namespace ProfileEvents
 {
     extern const Event QueryPlanOptimizeMicroseconds;
+    extern const Event QueryPlanOptimizeFirstPassMicroseconds;
+    extern const Event QueryPlanOptimizeSecondPassMicroseconds;
 }
 
 namespace DB
@@ -929,8 +931,14 @@ void QueryPlan::optimize(const QueryPlanOptimizationSettings & optimization_sett
     if (effective_settings.remove_redundant_sorting)
         QueryPlanOptimizations::tryRemoveRedundantSorting(root);
 
-    QueryPlanOptimizations::optimizeTreeFirstPass(effective_settings, *root, nodes);
-    QueryPlanOptimizations::optimizeTreeSecondPass(effective_settings, *root, nodes, *this);
+    {
+        ProfileEventTimeIncrement<Microseconds> first_pass_watch(ProfileEvents::QueryPlanOptimizeFirstPassMicroseconds);
+        QueryPlanOptimizations::optimizeTreeFirstPass(effective_settings, *root, nodes);
+    }
+    {
+        ProfileEventTimeIncrement<Microseconds> second_pass_watch(ProfileEvents::QueryPlanOptimizeSecondPassMicroseconds);
+        QueryPlanOptimizations::optimizeTreeSecondPass(effective_settings, *root, nodes, *this);
+    }
 
     /// Defer set/CTE expansion: a distributed plan builds the sets on the initiator and ships
     /// their values with the worker tasks, so the non-serializable `CreatingSetsStep` expansion

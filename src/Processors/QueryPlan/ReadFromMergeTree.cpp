@@ -259,6 +259,7 @@ namespace ProfileEvents
 {
     extern const Event RuntimeFilterIndexAnalysisReads;
     extern const Event IndexAnalysisRounds;
+    extern const Event MergeTreeSelectRangesToReadMicroseconds;
     extern const Event SelectedParts;
     extern const Event SelectedPartsTotal;
     extern const Event SelectedRanges;
@@ -3704,6 +3705,7 @@ ReadFromMergeTree::AnalysisResultPtr ReadFromMergeTree::selectRangesToRead(
     bool supports_skip_indexes_on_data_read,
     bool check_row_limits)
 {
+    ProfileEventTimeIncrement<Microseconds> watch(ProfileEvents::MergeTreeSelectRangesToReadMicroseconds);
     ProfileEvents::increment(ProfileEvents::IndexAnalysisRounds);
 
     AnalysisResult result;

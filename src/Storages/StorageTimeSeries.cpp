@@ -472,11 +472,46 @@ TimeSeriesDeduplicationCachePtr StorageTimeSeries::getMetricFamiliesDeduplicatio
     return metric_families_deduplication_cache;
 }
 
+bool StorageTimeSeries::hasWholeMetricRangeProbeResult(
+    const std::shared_ptr<const void> & tags_snapshot_token, const String & key) const
+{
+    std::lock_guard lock{whole_metric_range_probe_cache_mutex};
+    if (whole_metric_range_probe_cache_snapshot != tags_snapshot_token)
+    {
+        whole_metric_range_probe_cache_snapshot = tags_snapshot_token;
+        whole_metric_range_probe_cache.clear();
+        return false;
+    }
+
+    return whole_metric_range_probe_cache.contains(key);
+}
+
+void StorageTimeSeries::cacheWholeMetricRangeProbeResult(
+    const std::shared_ptr<const void> & tags_snapshot_token, String key) const
+{
+    std::lock_guard lock{whole_metric_range_probe_cache_mutex};
+    if (whole_metric_range_probe_cache_snapshot != tags_snapshot_token)
+    {
+        whole_metric_range_probe_cache_snapshot = tags_snapshot_token;
+        whole_metric_range_probe_cache.clear();
+    }
+
+    static constexpr size_t max_cache_size = 4096;
+    if (whole_metric_range_probe_cache.size() >= max_cache_size)
+        whole_metric_range_probe_cache.clear();
+
+    whole_metric_range_probe_cache.emplace(std::move(key));
+}
+
 void StorageTimeSeries::clearCaches()
 {
     checkTimeSeriesVersionIsSupported(*this);
     createOrDropTagsDeduplicationCache();
     createOrDropMetricFamiliesDeduplicationCache();
+
+    std::lock_guard lock{whole_metric_range_probe_cache_mutex};
+    whole_metric_range_probe_cache_snapshot.reset();
+    whole_metric_range_probe_cache.clear();
 }
 
 

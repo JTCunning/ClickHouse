@@ -1,0 +1,6 @@
+[('__name__','recorded_requests_rate'),('job','api')]	1
+[('__name__','recorded_requests_rate'),('job','worker')]	2
+05446_1_promql_warm	4	1	1	1
+05446_2_promql_insert_select	3	1	1	1
+05446_3_promql_shared_snapshot_disabled	5	1	1	1
+9

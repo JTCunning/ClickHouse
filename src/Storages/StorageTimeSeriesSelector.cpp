@@ -28,6 +28,7 @@
 #include <Parsers/makeASTForLogicalFunction.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Storages/ColumnsDescription.h>
+#include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
@@ -68,6 +69,7 @@ namespace TimeSeriesSetting
 
 namespace Setting
 {
+    extern const SettingsBool enable_shared_storage_snapshot_in_query;
     extern const SettingsBool time_series_prefer_recent_samples_table;
 }
 
@@ -875,6 +877,7 @@ namespace
     ///    fails the matchers other than the one on `__name__` (the selector does not select the whole metric) or has an id outside
     ///    the range (rows written before an `ALTER ... MODIFY SETTING id_generator`).
     ASTPtr tryMakeWholeMetricIDRangeConditions(
+        const StorageTimeSeries & time_series_storage,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
         const PrometheusQueryTree::MatcherList & matchers,
         const std::unordered_map<String, String> & column_name_by_tag_name,
@@ -929,6 +932,44 @@ namespace
                     other_matcher_conditions.push_back(matcherToAST(matcher, column_name_by_tag_name));
             }
 
+            auto make_range_condition = [&]
+            {
+                ASTPtr qualified_id = make_intrusive<ASTIdentifier>(
+                    std::vector<String>{samples_table_id.database_name, samples_table_id.table_name, TimeSeriesColumnNames::ID});
+                return makeASTFunction("indexHint", makeIDInRangeCondition(qualified_id, metric_id_range));
+            };
+
+            std::shared_ptr<const void> tags_snapshot_token;
+            String probe_cache_key;
+            if (other_matcher_conditions.empty() && context->getSettingsRef()[Setting::enable_shared_storage_snapshot_in_query])
+            {
+                auto tags_storage = DatabaseCatalog::instance().getTable(tags_table_id, context);
+                if (dynamic_cast<const MergeTreeData *>(tags_storage.get()))
+                {
+                    auto tags_metadata = tags_storage->getInMemoryMetadataPtr(context, false);
+                    auto tags_snapshot = tags_storage->getStorageSnapshot(tags_metadata, context);
+                    const auto * snapshot_data = dynamic_cast<const MergeTreeData::SnapshotData *>(tags_snapshot->data.get());
+                    if (snapshot_data && snapshot_data->parts && snapshot_data->mutations_snapshot
+                        && !snapshot_data->mutations_snapshot->hasDataMutations()
+                        && !snapshot_data->mutations_snapshot->hasAlterMutations()
+                        && !snapshot_data->mutations_snapshot->hasPatchParts()
+                        && !snapshot_data->mutations_snapshot->hasLightweightDeletedMask()
+                        && !snapshot_data->uk_read_snapshot)
+                    {
+                        tags_snapshot_token = std::static_pointer_cast<const void>(snapshot_data->parts);
+                        probe_cache_key = metric_id_range.metric_name;
+                        probe_cache_key.append(1, '\0');
+                        probe_cache_key += metric_id_range.first_component->formatForLogging();
+                        probe_cache_key.append(1, '\0');
+                        probe_cache_key += metric_id_range.min_second_component->formatForLogging();
+                        probe_cache_key.append(1, '\0');
+                        probe_cache_key += metric_id_range.max_second_component->formatForLogging();
+                        if (time_series_storage.hasWholeMetricRangeProbeResult(tags_snapshot_token, probe_cache_key))
+                            return make_range_condition();
+                    }
+                }
+            }
+
             ASTPtr counterexample = makeIDOutOfRangeCondition(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), metric_id_range);
             if (!other_matcher_conditions.empty())
             {
@@ -936,8 +977,11 @@ namespace
                     {makeASTFunction("not", makeASTForLogicalAnd(std::move(other_matcher_conditions))), std::move(counterexample)});
             }
 
+            const StorageID probe_time_ranges_table_id = tags_snapshot_token ? StorageID::createEmpty() : time_ranges_table_id;
+            const TableTimeRange probe_time_range = tags_snapshot_token ? TableTimeRange::ALL_TIMESTAMPS : time_range_to_filter_ids;
             ASTPtr probe_where = makeASTForLogicalAnd(
-                {makeWhereFilterForTagsTable(name_matcher_only, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type),
+                {makeWhereFilterForTagsTable(
+                     name_matcher_only, column_name_by_tag_name, probe_time_ranges_table_id, probe_time_range, table_timestamp_type),
                  std::move(counterexample)});
 
             /// SELECT id FROM tags_table WHERE <probe_where>
@@ -949,7 +993,8 @@ namespace
                 probe_select_ids->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(tags_table_id)));
                 probe_select_ids->setExpression(ASTSelectQuery::Expression::WHERE, std::move(probe_where));
             }
-            applyTimeRangeFilterToSelectIDsQuery(*probe_select_ids, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type);
+            applyTimeRangeFilterToSelectIDsQuery(
+                *probe_select_ids, probe_time_ranges_table_id, probe_time_range, metric_id_ranges, table_timestamp_type);
 
             /// SELECT 1 FROM (<probe_select_ids>) LIMIT 1
             auto probe_select = make_intrusive<ASTSelectQuery>();
@@ -988,6 +1033,9 @@ namespace
                 LOG_DEBUG(log, "Keeping the id set condition for index analysis: the whole-metric probe failed with {}", getCurrentExceptionMessage(false));
                 return {};
             }
+
+            if (tags_snapshot_token)
+                time_series_storage.cacheWholeMetricRangeProbeResult(tags_snapshot_token, std::move(probe_cache_key));
         }
 
         /// The range conditions on the raw `id` column of the samples table, qualified so that they resolve to the table column
@@ -1121,6 +1169,7 @@ void StorageTimeSeriesSelector::readImpl(
         matchers, getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type), config.table_id_type);
 
     ASTPtr whole_metric_id_range_condition = tryMakeWholeMetricIDRangeConditions(
+        *time_series_storage,
         metric_id_ranges,
         matchers,
         column_name_by_tag_name,

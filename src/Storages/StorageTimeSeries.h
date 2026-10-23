@@ -7,6 +7,7 @@
 #include <base/defines.h>
 #include <array>
 #include <mutex>
+#include <unordered_set>
 
 
 namespace DB
@@ -75,7 +76,11 @@ public:
     TimeSeriesDeduplicationCachePtr getTagsDeduplicationCache() const;
     TimeSeriesDeduplicationCachePtr getMetricFamiliesDeduplicationCache() const;
 
-    /// Clears the caches used by inserts, so that the next insert writes all its rows to the target tables.
+    /// Checks and stores positive whole-metric probe results for one immutable tags snapshot.
+    bool hasWholeMetricRangeProbeResult(const std::shared_ptr<const void> & tags_snapshot_token, const String & key) const;
+    void cacheWholeMetricRangeProbeResult(const std::shared_ptr<const void> & tags_snapshot_token, String key) const;
+
+    /// Clears all caches. The next insert writes all its rows to the target tables.
     /// It's called by `TRUNCATE TABLE` and by `SYSTEM DROP TIME SERIES CACHES`.
     void clearCaches();
 
@@ -169,6 +174,10 @@ private:
     mutable std::mutex caches_mutex;
     TimeSeriesDeduplicationCachePtr tags_deduplication_cache TSA_GUARDED_BY(caches_mutex);
     TimeSeriesDeduplicationCachePtr metric_families_deduplication_cache TSA_GUARDED_BY(caches_mutex);
+
+    mutable std::mutex whole_metric_range_probe_cache_mutex;
+    mutable std::shared_ptr<const void> whole_metric_range_probe_cache_snapshot TSA_GUARDED_BY(whole_metric_range_probe_cache_mutex);
+    mutable std::unordered_set<String> whole_metric_range_probe_cache TSA_GUARDED_BY(whole_metric_range_probe_cache_mutex);
 };
 
 std::shared_ptr<StorageTimeSeries> storagePtrToTimeSeries(StoragePtr storage);
