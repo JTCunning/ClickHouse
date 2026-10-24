@@ -13,9 +13,6 @@ SET session_timezone = 'UTC';
 DROP TABLE IF EXISTS ts_whole;
 DROP TABLE IF EXISTS ts_recent;
 DROP TABLE IF EXISTS ts_orphan;
-DROP TABLE IF EXISTS ts_orphan_samples;
-DROP TABLE IF EXISTS ts_orphan_tags;
-DROP TABLE IF EXISTS ts_orphan_time_ranges;
 
 CREATE TABLE ts_whole ENGINE = TimeSeries TAGS INNER COLUMNS (id Tuple(UInt64, UUID));
 
@@ -66,20 +63,15 @@ SELECT tags, value FROM prometheusQuery(ts_recent, 'sum by (env) (foo)', now()) 
 
 SELECT '-- a sample without a row in the tags table is returned by the selector and rejected by the PromQL evaluation';
 
--- External target tables: a row can be written to the samples table without a row in the tags table.
-CREATE TABLE ts_orphan_tags (id Tuple(UInt64, UUID), metric_name LowCardinality(String), tags Map(LowCardinality(String), String))
-    ENGINE = ReplacingMergeTree ORDER BY (metric_name, id);
-CREATE TABLE ts_orphan_time_ranges (id Tuple(UInt64, UUID), min_time SimpleAggregateFunction(min, DateTime64(3)), max_time SimpleAggregateFunction(max, DateTime64(3)))
-    ENGINE = AggregatingMergeTree ORDER BY id;
-CREATE TABLE ts_orphan_samples (id Tuple(UInt64, UUID), timestamp DateTime64(3), value Float64)
-    ENGINE = MergeTree ORDER BY (id, timestamp);
-CREATE TABLE ts_orphan ENGINE = TimeSeries SAMPLES ts_orphan_samples TAGS ts_orphan_tags TIME RANGES ts_orphan_time_ranges;
+CREATE TABLE ts_orphan ENGINE = TimeSeries TAGS INNER COLUMNS (id Tuple(UInt64, UUID));
 
 INSERT INTO ts_orphan (metric_name, tags, samples) VALUES
     ('foo', map('env', 'prod'), [(toDateTime64(100, 3), 1.)]),
     ('foo', map('env', 'dev'), [(toDateTime64(200, 3), 2.)]);
 
-INSERT INTO ts_orphan_samples (id, timestamp, value) VALUES
+-- A row written directly into the samples table without a row in the tags table.
+-- The table name is qualified because an asynchronous insert through a table function resolves an unqualified name in the default database.
+INSERT INTO FUNCTION timeSeriesSamples({CLICKHOUSE_DATABASE:Identifier}.ts_orphan) (id, timestamp, value) VALUES
     ((sipHash64('foo'), toUUID('11111111-1111-1111-1111-111111111111')), toDateTime64(150, 3), 100.);
 
 SELECT count(), sum(value) FROM timeSeriesSelector(ts_orphan, 'foo', 0, 1000);
@@ -90,8 +82,5 @@ SELECT * FROM prometheusQuery(ts_orphan, 'sum(foo)', 300); -- { serverError BAD_
 SELECT * FROM prometheusQuery(ts_orphan, 'sum(foo{env="prod"})', 300) ORDER BY ALL;
 
 DROP TABLE ts_orphan;
-DROP TABLE ts_orphan_samples;
-DROP TABLE ts_orphan_tags;
-DROP TABLE ts_orphan_time_ranges;
 DROP TABLE ts_recent;
 DROP TABLE ts_whole;
