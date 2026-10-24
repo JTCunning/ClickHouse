@@ -12,6 +12,7 @@
 #include <Core/Settings.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/ContextTimeSeriesTagsCollector.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -701,8 +702,9 @@ namespace
         {
             /// For a whole-metric selector over a metric-clustered id layout the set is replaced with the range of the metric:
             /// indexHint(<raw id column> >= tuple(hash(metric_name), min) AND <raw id column> <= tuple(hash(metric_name), max))
-            /// gives the primary-key index analysis a continuous key range, and tupleElement(<raw id column>, 1) = hash(metric_name)
-            /// is the row-level filter (see tryMakeWholeMetricIDCondition).
+            /// gives the primary-key index analysis a continuous key range, tupleElement(<raw id column>, 1) = hash(metric_name)
+            /// is the row-level filter, and timeSeriesIdToGroup(<raw id column>) != UNKNOWN_GROUP drops the samples of the
+            /// series the tags query did not register (see tryMakeWholeMetricIDCondition).
             chassert(whole_metric_id_condition);
             conditions.push_back(std::move(whole_metric_id_condition));
         }
@@ -862,21 +864,23 @@ namespace
 
     /// Checks whether the selector selects the whole metric and the samples table's `id` column carries a primary-key range
     /// covering the metric, and makes the condition replacing `id IN <set>` in the WHERE of the samples query if it does:
-    /// `indexHint(tuple(hash(metric_name), min_S) <= id AND id <= tuple(hash(metric_name), max_S)) AND tupleElement(id, 1) = hash(metric_name)`.
+    /// `indexHint(tuple(hash(metric_name), min_S) <= id AND id <= tuple(hash(metric_name), max_S))
+    ///  AND tupleElement(id, 1) = hash(metric_name) AND timeSeriesIdToGroup(id) != UNKNOWN_GROUP`.
     ///
     /// When the selector's matchers select ALL (time-eligible) series of the metric - the dominant shape of dashboard and
     /// recording-rule queries - the `id IN <set>` condition selects the same rows as the range of the metric (see TimeSeriesIDRange)
     /// while costing a generic exclusion search over the set in the primary-key index analysis (hundreds of milliseconds per part
-    /// per query for tens of thousands of series, single-threaded) and a hash-set probe of every read sample.
-    /// The range in `indexHint` selects the same granules through the cheap continuous-range path,
-    /// and the equality on the first component of `id` rejects the rows of other metrics in the boundary granules with one comparison
-    /// per row. Both the probe below and the id generator guarantee that every series the set would select is inside the range.
+    /// per query for tens of thousands of series, single-threaded). The range in `indexHint` selects the same granules through
+    /// the cheap continuous-range path, and the equality on the first component of `id` rejects the rows of other metrics in the
+    /// boundary granules with one comparison per row. Both the probe below and the id generator guarantee that every series the set
+    /// would select is inside the range.
     ///
     /// Without the set, the tags subquery is not part of the samples query any more, so the caller runs it separately
-    /// (`timeSeriesStoreTags` must register the tags of the selected series). The samples are then selected by the range and the
-    /// timestamp range only: a sample whose identifier has no row in the tags table is returned instead of being dropped by the set
-    /// (`timeSeriesIdToGroup` reports it as an unknown identifier), and a stored time range that disagrees with the samples table
-    /// does not hide the samples of its series.
+    /// (`timeSeriesStoreTags` must register the tags of the selected series). The set selected exactly the registered series, so
+    /// the last condition keeps the result of the set: a sample whose identifier was not registered (no row in the tags table,
+    /// or a stored time range outside the queried range) is dropped. The lookup is a hash-map probe like the one of the set, and
+    /// `getGroupByID` returns `UNKNOWN_GROUP` for an unregistered identifier instead of an exception, so the planner may evaluate it
+    /// on the rows of other metrics before the equality removes them.
     ///
     /// Returns nullptr (= emit the `id IN <set>` condition) unless ALL of the following hold:
     /// 1. The matchers select exactly one metric (`metric_id_ranges` has one range).
@@ -1003,14 +1007,19 @@ namespace
         /// The conditions on the raw `id` column of the samples table, qualified so that they resolve to the table column
         /// and not to the same-named alias of the SELECT list. The range is wrapped in `indexHint` so it reaches index analysis
         /// but is not evaluated per row: the equality on the first component is the row-level filter (the tuple comparisons
-        /// of the range would compare the second components too).
+        /// of the range would compare the second components too), and the group lookup drops the samples of the series
+        /// the tags query did not register.
         ASTPtr qualified_id = make_intrusive<ASTIdentifier>(std::vector<String>{samples_table_id.database_name, samples_table_id.table_name, TimeSeriesColumnNames::ID});
         return makeASTForLogicalAnd(
             {makeASTFunction("indexHint", makeIDInRangeCondition(qualified_id, metric_id_range)),
              makeASTFunction(
                  "equals",
                  makeASTFunction("tupleElement", qualified_id->clone(), make_intrusive<ASTLiteral>(UInt64{1})),
-                 metric_id_range.first_component->clone())});
+                 metric_id_range.first_component->clone()),
+             makeASTFunction(
+                 "notEquals",
+                 makeASTFunction("timeSeriesIdToGroup", qualified_id->clone()),
+                 make_intrusive<ASTLiteral>(ContextTimeSeriesTagsCollector::UNKNOWN_GROUP))});
     }
 }
 

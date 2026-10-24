@@ -60,6 +60,9 @@ public:
     /// A group is just an integer.
     using Group = UInt64;
 
+    /// The group returned by getGroupByID for an identifier whose tags were not stored. Every function taking a group rejects it.
+    static constexpr Group UNKNOWN_GROUP = static_cast<Group>(-1);
+
     /// Adds mapping between identifiers from a column and sets of tags to the collector.
     /// `id_column` is allowed to be Nullable, in that case rows with NULL identifiers are skipped.
     /// `tags_vector` must contain one element per row of `id_column`.
@@ -94,7 +97,9 @@ public:
         PaddedPODArray<UInt8> & null_map) const;
 
     /// Fills `res` with the groups assigned to the sets of tags which were added to the collector
-    /// with identifiers from a column. Throws an exception if some identifier is unknown.
+    /// with identifiers from a column. An unknown identifier gets UNKNOWN_GROUP instead of an exception:
+    /// the planner can evaluate this lookup on rows of other time series before the filter of a selector
+    /// removes them, and only the functions taking the group reject it.
     /// `id_column` must not be Nullable. Any previous contents of `res` are discarded.
     /// Dictionary-encoded (LowCardinality) id components are read through the dictionary and use
     /// the same typed maps as plain components; only the identifiers of actual rows are looked up,
@@ -237,7 +242,7 @@ private:
                         size_t num_rows_to_store, const VectorWithMemoryTracking<TagNamesAndValuesPtr> & tags_vector);
 
     template <typename IDGetter>
-    void getGroupByIDTyped(const IDGetter & id_getter, const IColumn & id_data, size_t num_rows, PaddedPODArray<Group> & res) const;
+    void getGroupByIDTyped(const IDGetter & id_getter, size_t num_rows, PaddedPODArray<Group> & res) const;
 
     template <typename IDGetter>
     VectorWithMemoryTracking<TagNamesAndValuesPtr> getTagsByIDTyped(const IDGetter & id_getter, const IColumn & id_data, size_t num_rows) const;

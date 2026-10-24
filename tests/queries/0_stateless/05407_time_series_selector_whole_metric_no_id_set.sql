@@ -2,10 +2,10 @@
 -- Tag no-fasttest: PromQL needs ANTLR4, which is disabled in the fast-test build.
 -- Tag no-replicated-database: `DatabaseReplicated` does not drop `TimeSeries` inner tables synchronously; deferred DROPs are rejected.
 
--- A selector that matches the whole metric filters the samples table by the primary-key range of the metric
--- and the equality on the first id component instead of `id IN <tags subquery>`. The tags subquery is executed
--- separately so that the tags of the series are registered for the PromQL evaluation. A selector with a matcher
--- that filters some series out keeps the id set.
+-- A selector that matches the whole metric filters the samples table by the primary-key range of the metric,
+-- the equality on the first id component and the group lookup instead of `id IN <tags subquery>`. The tags subquery
+-- is executed separately so that the tags of the series are registered for the PromQL evaluation. A selector with
+-- a matcher that filters some series out keeps the id set.
 
 SET allow_experimental_time_series_table = 1;
 SET session_timezone = 'UTC';
@@ -46,6 +46,17 @@ SELECT * FROM prometheusQuery(ts_whole, 'sum(foo)', 250) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts_whole, 'sum by (env) (foo)', 100, 300, 100) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts_whole, 'rate(foo[200s])', 300, 300, 100) ORDER BY ALL;
 
+SELECT '-- the group lookup runs on the rows of other metrics when the planner merges it into the filter step';
+
+-- With PREWHERE disabled and the join order fixed, the planner merges the expression computing `timeSeriesIdToGroup(id)`
+-- and the runtime filter of the topk join into the filter step of the selector, so the lookup sees the rows of `bar`.
+SELECT * FROM prometheusQueryRange(ts_whole, 'topk(1, last_over_time(foo[100s]))', 100, 300, 100) ORDER BY ALL
+SETTINGS enable_materialized_cte = 0, optimize_move_to_prewhere = 0, query_plan_optimize_join_order_limit = 0;
+
+-- An identifier whose tags were not stored gets a group which `timeSeriesGroupToTags` rejects.
+SELECT timeSeriesIdToGroup((sipHash64('bar'), toUUID('11111111-1111-1111-1111-111111111111')) :: Tuple(UInt64, UUID)) = toUInt64(-1);
+SELECT timeSeriesGroupToTags(toUInt64(-1)); -- { serverError BAD_ARGUMENTS }
+
 SELECT '-- the recent samples table is read the same way';
 
 CREATE TABLE ts_recent ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 864000 TAGS INNER COLUMNS (id Tuple(UInt64, UUID));
@@ -61,7 +72,7 @@ FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN 
 SELECT count(), sum(value) FROM timeSeriesSelector(ts_recent, 'foo', now() - INTERVAL 10 MINUTE, now());
 SELECT tags, value FROM prometheusQuery(ts_recent, 'sum by (env) (foo)', now()) ORDER BY ALL;
 
-SELECT '-- a sample without a row in the tags table is returned by the selector and rejected by the PromQL evaluation';
+SELECT '-- a sample without a row in the tags table is dropped like the id set drops it';
 
 CREATE TABLE ts_orphan ENGINE = TimeSeries TAGS INNER COLUMNS (id Tuple(UInt64, UUID));
 
@@ -78,7 +89,8 @@ SELECT count(), sum(value) FROM timeSeriesSelector(ts_orphan, 'foo', 0, 1000);
 SELECT count(), sum(value) FROM timeSeriesSelector(ts_orphan, 'foo{env="prod"}', 0, 1000);
 
 -- The lookback window at 300 covers the orphan sample at 150.
-SELECT * FROM prometheusQuery(ts_orphan, 'sum(foo)', 300); -- { serverError BAD_ARGUMENTS }
+SELECT * FROM prometheusQuery(ts_orphan, 'sum(foo)', 300) ORDER BY ALL;
+SELECT * FROM prometheusQuery(ts_orphan, 'sum by (env) (foo)', 300) ORDER BY ALL;
 SELECT * FROM prometheusQuery(ts_orphan, 'sum(foo{env="prod"})', 300) ORDER BY ALL;
 
 DROP TABLE ts_orphan;

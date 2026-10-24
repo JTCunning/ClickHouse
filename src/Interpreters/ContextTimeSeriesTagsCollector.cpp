@@ -44,10 +44,12 @@ namespace
     using TagNamesAndValuesPtr = ContextTimeSeriesTagsCollector::TagNamesAndValuesPtr;
     using Group = ContextTimeSeriesTagsCollector::Group;
 
-    const Group INVALID_GROUP = static_cast<Group>(-1);
+    const Group INVALID_GROUP = ContextTimeSeriesTagsCollector::UNKNOWN_GROUP;
 
     [[noreturn]] void throwGroupOutOfBound(Group group, size_t num_groups)
     {
+        if (group == ContextTimeSeriesTagsCollector::UNKNOWN_GROUP)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown identifier: the group belongs to a time series whose tags were not stored");
         if (num_groups > 0)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Group {} is out of bounds, must be between 0 and {}", group, num_groups - 1);
         else
@@ -1342,7 +1344,7 @@ void ContextTimeSeriesTagsCollector::getGroupByID(const ColumnPtr & id_column, P
 
     bool dispatched = dispatchIDType(*unwrapped.data, [&](const auto & id_getter)
     {
-        getGroupByIDTyped(id_getter, *unwrapped.data, num_rows, res);
+        getGroupByIDTyped(id_getter, num_rows, res);
     });
     if (dispatched)
         return;
@@ -1351,7 +1353,7 @@ void ContextTimeSeriesTagsCollector::getGroupByID(const ColumnPtr & id_column, P
     {
         dispatched = dispatchIDType(*materialized, [&](const auto & id_getter)
         {
-            getGroupByIDTyped(id_getter, *materialized, num_rows, res);
+            getGroupByIDTyped(id_getter, num_rows, res);
         });
         if (!dispatched)
             getGroupByIDGeneric(*materialized, num_rows, res);
@@ -1363,8 +1365,7 @@ void ContextTimeSeriesTagsCollector::getGroupByID(const ColumnPtr & id_column, P
 
 
 template <typename IDGetter>
-void ContextTimeSeriesTagsCollector::getGroupByIDTyped(
-    const IDGetter & id_getter, const IColumn & id_data, size_t num_rows, PaddedPODArray<Group> & res) const
+void ContextTimeSeriesTagsCollector::getGroupByIDTyped(const IDGetter & id_getter, size_t num_rows, PaddedPODArray<Group> & res) const
 {
     using IDType = typename IDGetter::IDType;
 
@@ -1376,20 +1377,20 @@ void ContextTimeSeriesTagsCollector::getGroupByIDTyped(
 
     /// Id columns arrive in long runs of equal values (samples are sorted by id), so reuse the previous row's group.
     IDType prev_id{};
-    Group prev_group = INVALID_GROUP;
+    Group prev_group = UNKNOWN_GROUP;
+    bool has_prev = false;
     for (size_t i = 0; i != num_rows; ++i)
     {
         IDType id = id_getter.get(i);
-        if ((id == prev_id) && (prev_group != INVALID_GROUP))
+        if (has_prev && (id == prev_id))
         {
             out[i] = prev_group;
             continue;
         }
         const auto * it = id_map.find(id);
-        if (!it)
-            throwUnknownID(id_data, i);
         prev_id = id;
-        prev_group = it->getMapped();
+        prev_group = it ? it->getMapped() : UNKNOWN_GROUP;
+        has_prev = true;
         out[i] = prev_group;
     }
 }
@@ -1405,21 +1406,18 @@ void ContextTimeSeriesTagsCollector::getGroupByIDGeneric(const IColumn & id_data
     SharedLockGuard lock{mutex};
 
     /// Id columns arrive in long runs of equal values (samples are sorted by id), so reuse the previous row's group.
-    Group prev_group = INVALID_GROUP;
+    Group prev_group = UNKNOWN_GROUP;
     for (size_t i = 0; i != num_rows; ++i)
     {
         if ((i > 0) && id_data.compareAt(i, i - 1, id_data, /* nan_direction_hint = */ 1) == 0)
         {
-            chassert(prev_group != INVALID_GROUP);
             out[i] = prev_group;
             continue;
         }
         const char * begin = nullptr;
         auto id = id_data.serializeValueIntoArena(i, temp_arena, begin, /* settings = */ nullptr);
         const auto * it = generic_id_map.map.find(id);
-        if (!it)
-            throwUnknownID(id_data, i);
-        prev_group = it->getMapped();
+        prev_group = it ? it->getMapped() : UNKNOWN_GROUP;
         out[i] = prev_group;
     }
 }

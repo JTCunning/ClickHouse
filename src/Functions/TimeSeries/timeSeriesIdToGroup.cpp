@@ -110,7 +110,9 @@ See also function [timeSeriesStoreTags()](/reference/functions/regular-functions
         {"id", "Identifier of a time series. Must be of the same type which was used when calling [timeSeriesStoreTags()](/reference/functions/regular-functions/time-series-functions#timeSeriesStoreTags).", {"Any"}}
     };
     FunctionDocumentation::ReturnedValue returned_value = {
-        "Returns a group of tags associated with the identifier `id` of a time series.", {"UInt64"}
+        "Returns a group of tags associated with the identifier `id` of a time series. "
+        "An identifier whose tags were not stored with `timeSeriesStoreTags` gets a group which every function taking a group rejects, "
+        "for example `timeSeriesGroupToTags`.", {"UInt64"}
     };
     FunctionDocumentation::Examples examples = {
     {
