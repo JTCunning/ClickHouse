@@ -27,7 +27,7 @@
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
 #include <Parsers/makeASTForLogicalFunction.h>
-#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageTimeSeries.h>
@@ -985,7 +985,7 @@ namespace
             {
                 InterpreterSelectQueryAnalyzer interpreter(probe_query, context, SelectQueryOptions{});
                 auto io = interpreter.execute();
-                PullingPipelineExecutor executor(io.pipeline);
+                PullingAsyncPipelineExecutor executor(io.pipeline);
                 Block block;
                 while (executor.pull(block))
                 {
@@ -1172,7 +1172,7 @@ void StorageTimeSeriesSelector::readImpl(
 
         InterpreterSelectQueryAnalyzer tags_interpreter(select_query_from_tags_table, interpreter_context, SelectQueryOptions{});
         auto io = tags_interpreter.execute();
-        PullingPipelineExecutor executor(io.pipeline);
+        PullingAsyncPipelineExecutor executor(io.pipeline);
         Block block;
         while (executor.pull(block))
         {
