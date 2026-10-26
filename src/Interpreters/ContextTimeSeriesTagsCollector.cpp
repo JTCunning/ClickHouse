@@ -1785,4 +1785,21 @@ VectorWithMemoryTracking<Group> ContextTimeSeriesTagsCollector::replaceTag(const
 }
 
 
+std::optional<bool> ContextTimeSeriesTagsCollector::getWholeMetricProbeVerdict(const String & probe_key) const
+{
+    SharedLockGuard lock{mutex};
+    auto it = whole_metric_probe_verdicts.find(probe_key);
+    if (it == whole_metric_probe_verdicts.end())
+        return {};
+    return it->second;
+}
+
+
+void ContextTimeSeriesTagsCollector::setWholeMetricProbeVerdict(const String & probe_key, bool is_whole_metric)
+{
+    std::lock_guard lock{mutex};
+    whole_metric_probe_verdicts[probe_key] = is_whole_metric;
+}
+
+
 }

@@ -9,6 +9,8 @@
 #include <Core/Types.h>
 #include <city.h>
 
+#include <optional>
+
 
 namespace DB
 {
@@ -154,6 +156,13 @@ public:
     Group replaceTag(Group group, const String & dest_tag, const String & replacement, const String & src_tag, const String & regex);
     VectorWithMemoryTracking<Group> replaceTag(const VectorWithMemoryTracking<Group> & groups, const String & dest_tag, const String & replacement, const String & src_tag, const String & regex);
 
+    /// Remembers the verdict of a whole-metric probe of `StorageTimeSeriesSelector`, keyed by the exact probe query text.
+    /// One selector can reach the probe more than once within one query (a distributed `INSERT SELECT` interprets its
+    /// `SELECT` once to check that it can be distributed and once to build the pipeline), and the verdict only steers
+    /// an `indexHint`, so reusing it cannot change query results.
+    std::optional<bool> getWholeMetricProbeVerdict(const String & probe_key) const;
+    void setWholeMetricProbeVerdict(const String & probe_key, bool is_whole_metric);
+
 private:
     /// Transforms the set of tags assigned to a group using a one-argument function, returns the result group.
     /// If the result set of tags hasn't been added to the collector yet then this functions adds it and assigns a group to it.
@@ -259,6 +268,8 @@ private:
     VectorWithMemoryTracking<UInt64> sampling_keys TSA_GUARDED_BY(mutex);
 
     std::unordered_map<TagsKey, Group, Hash, Equal> groups_for_tags TSA_GUARDED_BY(mutex);
+
+    std::unordered_map<String, bool> whole_metric_probe_verdicts TSA_GUARDED_BY(mutex);
 
     /// Identifier maps: a typed map per common fixed-size id layout, and the generic map for other id types.
     IDMap<UInt64> id_map_uint64 TSA_GUARDED_BY(mutex);

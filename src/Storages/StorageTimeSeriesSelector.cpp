@@ -12,11 +12,13 @@
 #include <Core/Settings.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/ContextTimeSeriesTagsCollector.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Core/ConstantValue.h>
 #include <Interpreters/evaluateConstantExpression.h>
+#include <IO/WriteHelpers.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
@@ -964,29 +966,55 @@ namespace
             }
 
             ASTPtr probe_query = wrapIntoSelectWithUnionQuery(std::move(probe_select));
+            String probe_query_text = probe_query->formatForLogging();
 
-            LOG_DEBUG(log, "Probing whether selector matches the whole metric {}: {}", quoteString(metric_id_range.metric_name), probe_query->formatForLogging());
+            /// The verdict is kept on the query context: a distributed `INSERT SELECT` interprets its `SELECT` once to
+            /// check that it can be distributed and once to build the pipeline, and each interpretation reaches this
+            /// point. The key is the whole probe text, which carries the matchers and the time range, plus the identity
+            /// of the tags table.
+            String probe_key = toString(tags_table_id.uuid) + "|" + probe_query_text;
+            auto tags_collector = context->getQueryContext()->getTimeSeriesTagsCollector();
 
-            try
+            if (auto cached_verdict = tags_collector->getWholeMetricProbeVerdict(probe_key))
             {
-                InterpreterSelectQueryAnalyzer interpreter(probe_query, context, SelectQueryOptions{});
-                auto io = interpreter.execute();
-                PullingPipelineExecutor executor(io.pipeline);
-                Block block;
-                while (executor.pull(block))
-                {
-                    if (block.rows() > 0)
-                        return {};
-                }
+                LOG_DEBUG(log, "Reusing the whole-metric probe verdict for metric {}: {}", quoteString(metric_id_range.metric_name), *cached_verdict);
+                if (!*cached_verdict)
+                    return {};
             }
-            catch (...)
+            else
             {
-                /// The probe only chooses between two emissions with identical results; an error
-                /// here must not fail a query that works without this optimization (and an error
-                /// the main query would also hit, e.g. a missing access right on the tags table,
-                /// still surfaces when the main query runs the tags subquery).
-                LOG_DEBUG(log, "Keeping the id set condition for index analysis: the whole-metric probe failed with {}", getCurrentExceptionMessage(false));
-                return {};
+                LOG_DEBUG(log, "Probing whether selector matches the whole metric {}: {}", quoteString(metric_id_range.metric_name), probe_query_text);
+
+                bool is_whole_metric = true;
+                try
+                {
+                    InterpreterSelectQueryAnalyzer interpreter(probe_query, context, SelectQueryOptions{});
+                    auto io = interpreter.execute();
+                    PullingPipelineExecutor executor(io.pipeline);
+                    Block block;
+                    while (executor.pull(block))
+                    {
+                        if (block.rows() > 0)
+                        {
+                            is_whole_metric = false;
+                            break;
+                        }
+                    }
+                }
+                catch (...)
+                {
+                    /// The probe only chooses between two emissions with identical results; an error
+                    /// here must not fail a query that works without this optimization (and an error
+                    /// the main query would also hit, e.g. a missing access right on the tags table,
+                    /// still surfaces when the main query runs the tags subquery). A failed probe
+                    /// is not remembered, so a later interpretation probes again.
+                    LOG_DEBUG(log, "Keeping the id set condition for index analysis: the whole-metric probe failed with {}", getCurrentExceptionMessage(false));
+                    return {};
+                }
+
+                tags_collector->setWholeMetricProbeVerdict(probe_key, is_whole_metric);
+                if (!is_whole_metric)
+                    return {};
             }
         }
 

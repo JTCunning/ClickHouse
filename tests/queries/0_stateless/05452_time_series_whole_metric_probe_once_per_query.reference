@@ -1,0 +1,16 @@
+-- INSERT SELECT of a whole-metric selector: one probe, the second interpretation reuses the verdict
+probes: 1
+reuses: 1
+-- INSERT SELECT of a partial selector: one probe, the second interpretation reuses the verdict
+probes: 1
+reuses: 1
+-- plain SELECT: one probe, nothing to reuse
+probes: 1
+reuses: 0
+-- the inserted rows are the rows of the selectors
+100000	1
+200000	2
+150000	10
+100000	100
+same as plain SELECT	1
+same as plain SELECT	1
