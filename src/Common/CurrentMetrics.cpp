@@ -108,6 +108,9 @@
     M(MergeTreeDataSelectExecutorThreads, "Number of threads in the MergeTreeDataSelectExecutor thread pool.") \
     M(MergeTreeDataSelectExecutorThreadsActive, "Number of threads in the MergeTreeDataSelectExecutor thread pool running a task.") \
     M(MergeTreeDataSelectExecutorThreadsScheduled, "Number of queued or active jobs in the MergeTreeDataSelectExecutor thread pool.") \
+    M(QueryPlanKeySetBuildThreads, "Number of threads in the pool that builds primary key IN sets during query planning.") \
+    M(QueryPlanKeySetBuildThreadsActive, "Number of threads in the query plan key set build pool running a task.") \
+    M(QueryPlanKeySetBuildThreadsScheduled, "Number of queued or active jobs in the query plan key set build pool.") \
     M(MergeTreeStatisticsLoaderThreads, "Number of threads in the thread pool for loading the statistics of data parts.") \
     M(MergeTreeStatisticsLoaderThreadsActive, "Number of threads in the thread pool for loading the statistics of data parts running a task.") \
     M(MergeTreeStatisticsLoaderThreadsScheduled, "Number of queued or active jobs in the thread pool for loading the statistics of data parts.") \

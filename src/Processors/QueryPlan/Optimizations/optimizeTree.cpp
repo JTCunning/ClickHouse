@@ -308,6 +308,9 @@ void optimizeTreeSecondPass(
         });
     }
 
+    if (optimization_settings.query_plan_optimize_primary_key)
+        buildKeySetsConcurrently(root, optimization_settings);
+
     stack.push_back({.node = &root});
 
     while (!stack.empty())
@@ -1039,6 +1042,8 @@ void addStepsToBuildSets(
 
         stack.pop_back();
     }
+
+    liftIndependentSetBuilds(root, nodes, optimization_settings.max_threads);
 }
 
 

@@ -110,6 +110,8 @@ public:
     /// recursive `buildSetInplace` claims the same CTE first).
     void optimizePlans(const QueryPlanOptimizationSettings & optimization_settings);
 
+    const std::vector<MaterializedCTEPtr> & getMaterializedCTEs() const { return ctes; }
+
     /// Drop the CTEs in `ctes_to_erase` from this step, so that it no longer
     /// claims them. Returns true if the step is left owning nothing, i.e. the
     /// node can be spliced out of the plan.

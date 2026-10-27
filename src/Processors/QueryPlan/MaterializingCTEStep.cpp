@@ -4,6 +4,7 @@
 #include <Analyzer/TableNode.h>
 #include <Analyzer/traverseQueryTree.h>
 #include <Processors/QueryPlan/ITransformingStep.h>
+#include <Processors/QueryPlan/Optimizations/Optimizations.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Common/Logger.h>
@@ -124,6 +125,16 @@ QueryPipelineBuilderPtr DelayedMaterializingCTEsStep::updatePipeline(QueryPipeli
 
 void DelayedMaterializingCTEsStep::optimizePlans(const QueryPlanOptimizationSettings & optimization_settings)
 {
+    std::vector<QueryPlan *> plans_to_optimize;
+    plans_to_optimize.reserve(ctes.size());
+    for (const auto & cte : ctes)
+    {
+        if (!cte->plan || cte->is_plan_optimized.load())
+            continue;
+        plans_to_optimize.push_back(cte->plan.get());
+    }
+    QueryPlanOptimizations::buildKeySetsConcurrentlyForPlans(plans_to_optimize, optimization_settings);
+
     for (const auto & cte : ctes)
     {
         /// The plan is absent when `makePlansForCTEs` already moved it out, or when the

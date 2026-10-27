@@ -5,6 +5,7 @@
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <array>
 #include <expected>
+#include <functional>
 #include <unordered_map>
 
 class SipHash;
@@ -311,6 +312,31 @@ using Stack = std::vector<Frame>;
 
 /// Second pass optimizations
 void optimizePrimaryKeyConditionAndLimit(const Stack & stack);
+
+/// The filters `optimizePrimaryKeyConditionAndLimit` composes for the source at the top of `stack`.
+/// Storage PREWHERE and row-level filters are included only when `include_storage_filters` is set.
+/// `applyFilters` builds the sets of those two itself.
+void forEachIndexAnalysisFilter(
+    const Stack & stack,
+    const std::function<void(ActionsDAG, const String &)> & on_filter,
+    bool include_storage_filters);
+
+/// When the plan has two or more unbuilt primary-key `IN` subquery sets and `max_threads` is at least two,
+/// build those sets together before index analysis. One set stays on the per-read path.
+void buildKeySetsConcurrently(QueryPlan::Node & root, const QueryPlanOptimizationSettings & optimization_settings);
+
+/// Same build as `buildKeySetsConcurrently`, over several plans that are optimized one after another.
+/// A materialized CTE plan builds its `IN` set during its own `optimize`. Two such plans would
+/// otherwise build those sets one after another. Collect the sets first and build them together.
+void buildKeySetsConcurrentlyForPlans(
+    const std::vector<QueryPlan *> & plans,
+    const QueryPlanOptimizationSettings & optimization_settings);
+
+/// Set subplans that sit on separate branches each wait for the branch above them.
+/// Move them onto one `CreatingSetsStep` at the root so the pipeline starts them together.
+/// A plan that already holds every set on one step is left as it is.
+/// A set subplan that materializes a CTE stays on its branch.
+void liftIndependentSetBuilds(QueryPlan::Node & root, QueryPlan::Nodes & nodes, size_t max_threads);
 /// Register the applied `__applyFilter` conjuncts on the reading step at the top of the stack.
 void collectAppliedJoinRuntimeFilters(const Stack & stack);
 void processAndOptimizeTextIndexFunctions(
