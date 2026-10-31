@@ -1,0 +1,25 @@
+-- add (one row per sample)
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
+-- batch add (arrays of samples)
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
+-- merge of two partial states (odd and even minutes)
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
+-- states written to a table and read back (deserialize)
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
+-- rate over the same shapes: one value per populated bucket pair, NULL across the gap
+gap_late	6079	4002
+gap_mid	6198	3883
+gap_sparse	2998	7083
+late_start	6080	4001

@@ -106,6 +106,25 @@ public:
         TimeSeriesBucketsMap<Bucket> buckets;
     };
 
+    /// Returns the bucket at `bucket_index`, inserting an empty one if it is missing.
+    /// `TrivialHash` puts key `k` into cell `k % bufSize`, so keys below `bufSize` never collide and the grower lets
+    /// the map fill up to 3/4. A key at or above `bufSize` wraps around onto the cells of the low keys; when those form
+    /// a long run (a series with a gap in the middle of the grid), every insert of a wrapping key walks the whole run.
+    /// So a missing wrapping key whose home cell holds another key is inserted only after the map is doubled if it is
+    /// more than half full: colliding keys grow the map as they did with the 1/2 limit, and maps without such collisions
+    /// (contiguous series, also those starting late in the grid) keep the 3/4 limit.
+    static ALWAYS_INLINE Bucket & getOrInsertBucket(TimeSeriesBucketsMap<Bucket> & buckets, size_t bucket_index)
+    {
+        const size_t buffer_size = buckets.getBufferSizeInCells();
+        if (bucket_index >= buffer_size && buckets.size() * 2 > buffer_size && !buckets.isEmptyCell(buckets.hash(bucket_index)))
+        {
+            if (auto * it = buckets.find(bucket_index))
+                return it->getMapped();
+            buckets.reserve(buffer_size);
+        }
+        return buckets[bucket_index];
+    }
+
     /// Types of timestamps and intervals with the scale of the grid: grid points, bucket bounds, windows, cut-offs
     /// and sample timestamps converted to the scale of the grid.
     using GridScaleTimestampType = DateTime64;
@@ -326,7 +345,7 @@ public:
         buckets.reserve(rhs_buckets.size());
         for (const auto & rhs_bucket : rhs_buckets)
         {
-            auto & bucket = buckets[rhs_bucket.getKey()];
+            auto & bucket = getOrInsertBucket(buckets, rhs_bucket.getKey());
             bucket.merge(rhs_bucket.getMapped());
         }
     }
@@ -378,7 +397,7 @@ public:
             if (bucket_index >= bucket_count)
                 throw Exception(ErrorCodes::INCORRECT_DATA, "Cannot deserialize data with index {} greater than bucket count {}", bucket_index, bucket_count);
 
-            auto & bucket = data(place)->buckets[bucket_index];
+            auto & bucket = getOrInsertBucket(data(place)->buckets, bucket_index);
             bucket.deserialize(buf);
 
             /// Validate that each deserialized sample falls into this bucket's timestamp range.
@@ -1121,7 +1140,7 @@ private:
         if (bucket_index == NO_BUCKET)
             return;  /// The sample can't contribute to any bucket.
 
-        auto & bucket = data(place)->buckets[bucket_index];
+        auto & bucket = getOrInsertBucket(data(place)->buckets, bucket_index);
         bucket.add(timestamp, value);
     }
 
@@ -1231,7 +1250,7 @@ private:
             /// against an infinite loop.
             const size_t count = std::max<size_t>(run, static_cast<size_t>(1));
             if (sample_class.bucket_index != NO_BUCKET)
-                state->buckets[sample_class.bucket_index].addMany(timestamps + i, values + i, count);
+                getOrInsertBucket(state->buckets, sample_class.bucket_index).addMany(timestamps + i, values + i, count);
             i += count;
         }
     })

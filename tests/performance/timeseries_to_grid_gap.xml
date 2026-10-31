@@ -1,0 +1,46 @@
+<test>
+    <settings>
+        <enable_time_series_aggregate_functions>1</enable_time_series_aggregate_functions>
+        <max_threads>1</max_threads>
+    </settings>
+
+    <!--
+        Benchmarks `timeSeries*ToGrid` on series with a gap in the middle of the grid. The bucket map of a state is a
+        hash map with an identity hash, so the bucket indexes after the gap can wrap around onto the cells of the
+        buckets before it. 200 series, one sample per minute, 7-day grid at a 60 s step (10081 points):
+          - contiguous: minutes [0, 6200), the baseline with the same number of samples;
+          - gap: minutes [0, 3100) and [6981, 10081);
+          - late start: minutes [4000, 10081), whose indexes wrap without colliding.
+    -->
+
+    <create_query>
+        CREATE TABLE ts_gap (shape LowCardinality(String), id UInt32, timestamp DateTime64(3), value Float64) ENGINE = MergeTree ORDER BY (shape, id, timestamp)
+    </create_query>
+
+    <fill_query>
+        INSERT INTO ts_gap
+        SELECT 'contiguous', id, toDateTime64(m * 60, 3), m
+        FROM (SELECT number % 200 AS id, intDiv(number, 200) AS m FROM numbers(200 * 6200))
+    </fill_query>
+    <fill_query>
+        INSERT INTO ts_gap
+        SELECT 'gap', id, toDateTime64(m * 60, 3), m
+        FROM (SELECT number % 200 AS id, intDiv(number, 200) AS m FROM numbers(200 * 10081))
+        WHERE m &lt; 3100 OR m &gt;= 6981
+    </fill_query>
+    <fill_query>
+        INSERT INTO ts_gap
+        SELECT 'late_start', id, toDateTime64(m * 60, 3), m
+        FROM (SELECT number % 200 AS id, intDiv(number, 200) AS m FROM numbers(200 * 10081))
+        WHERE m &gt;= 4000
+    </fill_query>
+    <fill_query>OPTIMIZE TABLE ts_gap FINAL</fill_query>
+
+    <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'contiguous' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'gap' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'late_start' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'contiguous' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'gap' GROUP BY id FORMAT Null</query>
+
+    <drop_query>DROP TABLE IF EXISTS ts_gap</drop_query>
+</test>
