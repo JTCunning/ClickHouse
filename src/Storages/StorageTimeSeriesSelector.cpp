@@ -514,8 +514,15 @@ namespace
             select_list_exp->children.back()->setAlias(matched_column);
             subquery_select->setExpression(ASTSelectQuery::Expression::SELECT, select_list_exp);
             subquery_select->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(time_ranges_table_id)));
+            /// The comparisons of `id` with the bounds of the ranges are for the primary key only, so they are wrapped in `indexHint`:
+            /// as a row filter they cost two tuple comparisons per range for every row read, which dominates the query
+            /// when the metric name is a list of many alternatives. A range covers every value of the second component of `id`,
+            /// so the rows are filtered by the first component instead, with one lookup in the set of the ranges' first components.
             if (metric_id_ranges)
-                time_range_conditions.push_back(makeIDInRangesCondition(id, *metric_id_ranges));
+            {
+                time_range_conditions.push_back(makeASTFunction("indexHint", makeIDInRangesCondition(id, *metric_id_ranges)));
+                time_range_conditions.push_back(makeASTFunction("not", makeIDOutOfRangesCondition(id, *metric_id_ranges)));
+            }
             subquery_select->setExpression(ASTSelectQuery::Expression::WHERE, makeASTForLogicalAnd(std::move(time_range_conditions)));
         }
 
