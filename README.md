@@ -6,5 +6,6 @@ This branch (`lilred/research`) shares no history with ClickHouse. lil red's fix
 
 - `reports/`: one report per investigation
 - `prs/`: upstream-ready PR descriptions for the `lilred/perf-*` branches
+- `ab-plans/`: the A/B tests to run once lil red can build (one plan per experiment, backlog in `ab-plans/README.md`)
 - `weekly/`: Monday digests
 - `handoff-to-lil-red/`: the Cursor skill James uses to hand work to lil red
