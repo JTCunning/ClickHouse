@@ -1,0 +1,19 @@
+{"metric": "metric_0", "master": "[]\t6666.666666663233", "hand_tags": "[6666.666666663233]", "hand_ids": "[6666.6666666619185]", "tags_noname": "[6666.6666666619185]", "tags_byid": "[6666.6666666619185]"}
+{"round": 0, "case": "master", "metric": "metric_0", "n": 6, "med": 356.5, "mn": 349.0, "mx": 379.0, "cpu_med": 351.88649999999996, "read_rows": 321504, "read_mib": 84.6, "mem_mib": 134.2}
+{"round": 0, "case": "hand_tags", "metric": "metric_0", "n": 6, "med": 424.0, "mn": 411.0, "mx": 433.0, "cpu_med": 324.21349999999995, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 172.6}
+{"round": 0, "case": "hand_ids", "metric": "metric_0", "n": 6, "med": 298.0, "mn": 291.0, "mx": 345.0, "cpu_med": 159.661, "read_rows": 321504, "read_mib": 73.7, "mem_mib": 126.1}
+{"round": 0, "case": "tags_noname", "metric": "metric_0", "n": 6, "med": 337.5, "mn": 320.0, "mx": 361.0, "cpu_med": 234.414, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 0, "case": "tags_byid", "metric": "metric_0", "n": 6, "med": 348.0, "mn": 338.0, "mx": 361.0, "cpu_med": 239.8525, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 183.7}
+{"round": 0, "case": "master_by", "metric": "metric_0", "n": 6, "med": 399.5, "mn": 381.0, "mx": 416.0, "cpu_med": 413.065, "read_rows": 321504, "read_mib": 84.6, "mem_mib": 132.4}
+{"round": 1, "case": "master", "metric": "metric_0", "n": 6, "med": 343.5, "mn": 323.0, "mx": 380.0, "cpu_med": 338.40999999999997, "read_rows": 321504, "read_mib": 84.6, "mem_mib": 132.1}
+{"round": 1, "case": "hand_tags", "metric": "metric_0", "n": 6, "med": 420.5, "mn": 402.0, "mx": 468.0, "cpu_med": 357.4755, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 172.4}
+{"round": 1, "case": "hand_ids", "metric": "metric_0", "n": 6, "med": 307.0, "mn": 294.0, "mx": 326.0, "cpu_med": 179.1365, "read_rows": 321504, "read_mib": 73.7, "mem_mib": 126.1}
+{"round": 1, "case": "tags_noname", "metric": "metric_0", "n": 6, "med": 351.5, "mn": 331.0, "mx": 365.0, "cpu_med": 216.216, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 1, "case": "tags_byid", "metric": "metric_0", "n": 6, "med": 364.5, "mn": 351.0, "mx": 375.0, "cpu_med": 246.28300000000002, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 183.7}
+{"round": 1, "case": "master_by", "metric": "metric_0", "n": 6, "med": 492.0, "mn": 452.0, "mx": 512.0, "cpu_med": 501.7165, "read_rows": 321504, "read_mib": 84.6, "mem_mib": 132.4}
+{"round": 2, "case": "master", "metric": "metric_0", "n": 6, "med": 405.5, "mn": 388.0, "mx": 418.0, "cpu_med": 401.7695, "read_rows": 321504, "read_mib": 84.6, "mem_mib": 132.4}
+{"round": 2, "case": "hand_tags", "metric": "metric_0", "n": 6, "med": 508.0, "mn": 494.0, "mx": 545.0, "cpu_med": 403.0105, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 172.6}
+{"round": 2, "case": "hand_ids", "metric": "metric_0", "n": 6, "med": 374.0, "mn": 337.0, "mx": 396.0, "cpu_med": 222.1375, "read_rows": 321504, "read_mib": 73.7, "mem_mib": 126.1}
+{"round": 2, "case": "tags_noname", "metric": "metric_0", "n": 6, "med": 430.5, "mn": 396.0, "mx": 445.0, "cpu_med": 308.0365, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 2, "case": "tags_byid", "metric": "metric_0", "n": 6, "med": 358.5, "mn": 348.0, "mx": 508.0, "cpu_med": 259.3295, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 183.7}
+{"round": 2, "case": "master_by", "metric": "metric_0", "n": 6, "med": 397.0, "mn": 385.0, "mx": 412.0, "cpu_med": 416.7975, "read_rows": 321504, "read_mib": 84.6, "mem_mib": 134.0}

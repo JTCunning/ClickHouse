@@ -1,0 +1,13 @@
+{"drop_groupby_check": "[6666.666666663233]", "drop_projection": "[6666.6666666619185]", "marker_projection": "[6666.6666666619185]", "no_drop": "[6666.6666666619185]"}
+{"round": 0, "case": "drop_groupby_check", "metric": "metric_0", "n": 6, "med": 441.0, "mn": 413.0, "mx": 465.0, "cpu_med": 319.81600000000003, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 172.4}
+{"round": 0, "case": "drop_projection", "metric": "metric_0", "n": 6, "med": 353.0, "mn": 339.0, "mx": 362.0, "cpu_med": 218.735, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 0, "case": "marker_projection", "metric": "metric_0", "n": 6, "med": 350.5, "mn": 337.0, "mx": 369.0, "cpu_med": 232.8685, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 0, "case": "no_drop", "metric": "metric_0", "n": 6, "med": 343.5, "mn": 331.0, "mx": 353.0, "cpu_med": 218.9515, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 1, "case": "drop_groupby_check", "metric": "metric_0", "n": 6, "med": 426.0, "mn": 395.0, "mx": 490.0, "cpu_med": 326.7, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 172.6}
+{"round": 1, "case": "drop_projection", "metric": "metric_0", "n": 6, "med": 337.5, "mn": 330.0, "mx": 347.0, "cpu_med": 227.075, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 1, "case": "marker_projection", "metric": "metric_0", "n": 6, "med": 338.5, "mn": 320.0, "mx": 349.0, "cpu_med": 245.253, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 1, "case": "no_drop", "metric": "metric_0", "n": 6, "med": 342.0, "mn": 320.0, "mx": 351.0, "cpu_med": 223.025, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 2, "case": "drop_groupby_check", "metric": "metric_0", "n": 6, "med": 420.5, "mn": 386.0, "mx": 446.0, "cpu_med": 322.97749999999996, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 172.6}
+{"round": 2, "case": "drop_projection", "metric": "metric_0", "n": 6, "med": 336.5, "mn": 315.0, "mx": 346.0, "cpu_med": 239.2545, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 2, "case": "marker_projection", "metric": "metric_0", "n": 6, "med": 341.5, "mn": 334.0, "mx": 357.0, "cpu_med": 212.458, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
+{"round": 2, "case": "no_drop", "metric": "metric_0", "n": 6, "med": 340.0, "mn": 326.0, "mx": 374.0, "cpu_med": 228.1085, "read_rows": 321504, "read_mib": 84.7, "mem_mib": 171.7}
