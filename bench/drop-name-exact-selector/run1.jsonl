@@ -1,0 +1,20 @@
+{"case": "sum_rate", "values_equal": true, "value": "[]\t2026-11-01 04:00:00.000\t6666.6666666619185\n"}
+{"case": "sum_by_rate", "values_equal": true, "value": "[('cluster','c0'),('job','job0')]\t2026-11-01 04:00:00.000\t130.86666666666437\n[('cluster','c0'),('job','job1')]\t2026-11-01 04:00:00.000\t135.4666666666641\n[('cluster','c0'),('job','job2')]\t2026-11-01 04"}
+{"case": "sum_abs", "values_equal": true, "value": "[]\t2026-11-01 04:00:00.000\t53850000\n"}
+{"case": "rate_narrow", "values_equal": true, "value": "2041\t136.0666666666665\n"}
+{"case": "range_sum_rate", "values_equal": true, "value": "[]\t[('2026-11-01 03:51:00.000',6666.6666666619185),('2026-11-01 03:51:15.000',6666.6666666619185),('2026-11-01 03:51:30.000',6666.6666666619185),('2026-11-01 03:51:45.000',6666.6666666619185),('2026-1"}
+{"case": "range_sum_rate", "variant": "branch", "wall_ms": 894, "cpu_ms": 850.5, "cpu_round_medians": [850.493, 811.389, 853.324], "mem_mib": [326, 326], "read_rows": 321504}
+{"case": "range_sum_rate", "variant": "handm", "wall_ms": 1281, "cpu_ms": 1220.4, "cpu_round_medians": [1219.127, 1220.42, 1256.959], "mem_mib": [342, 343], "read_rows": 321504}
+{"case": "range_sum_rate", "variant": "master", "wall_ms": 1261, "cpu_ms": 1216.7, "cpu_round_medians": [1218.592, 1212.629, 1216.707], "mem_mib": [341, 342], "read_rows": 321504}
+{"case": "rate_narrow", "variant": "branch", "wall_ms": 31, "cpu_ms": 29.2, "cpu_round_medians": [29.248, 28.748, 30.318], "mem_mib": [6, 6], "read_rows": 13806}
+{"case": "rate_narrow", "variant": "handm", "wall_ms": 31, "cpu_ms": 30.3, "cpu_round_medians": [29.917, 30.485, 30.27], "mem_mib": [6, 6], "read_rows": 13806}
+{"case": "rate_narrow", "variant": "master", "wall_ms": 33, "cpu_ms": 32.5, "cpu_round_medians": [32.577, 30.525, 32.458], "mem_mib": [6, 6], "read_rows": 13806}
+{"case": "sum_abs", "variant": "branch", "wall_ms": 462, "cpu_ms": 437.7, "cpu_round_medians": [419.866, 444.351, 437.687], "mem_mib": [131, 131], "read_rows": 321504}
+{"case": "sum_abs", "variant": "handm", "wall_ms": 594, "cpu_ms": 556.5, "cpu_round_medians": [562.556, 556.516, 549.537], "mem_mib": [136, 136], "read_rows": 321504}
+{"case": "sum_abs", "variant": "master", "wall_ms": 586, "cpu_ms": 546.6, "cpu_round_medians": [546.618, 539.351, 552.888], "mem_mib": [134, 136], "read_rows": 321504}
+{"case": "sum_by_rate", "variant": "branch", "wall_ms": 622, "cpu_ms": 590.7, "cpu_round_medians": [598.19, 590.651, 572.652], "mem_mib": [172, 172], "read_rows": 321504}
+{"case": "sum_by_rate", "variant": "handm", "wall_ms": 690, "cpu_ms": 654.7, "cpu_round_medians": [654.711, 639.261, 657.185], "mem_mib": [172, 173], "read_rows": 321504}
+{"case": "sum_by_rate", "variant": "master", "wall_ms": 668, "cpu_ms": 651.1, "cpu_round_medians": [657.33, 626.482, 651.096], "mem_mib": [172, 172], "read_rows": 321504}
+{"case": "sum_rate", "variant": "branch", "wall_ms": 472, "cpu_ms": 446.5, "cpu_round_medians": [452.254, 436.742, 446.517], "mem_mib": [172, 172], "read_rows": 321504}
+{"case": "sum_rate", "variant": "handm", "wall_ms": 586, "cpu_ms": 559.5, "cpu_round_medians": [559.463, 553.479, 566.725], "mem_mib": [172, 173], "read_rows": 321504}
+{"case": "sum_rate", "variant": "master", "wall_ms": 571, "cpu_ms": 548.3, "cpu_round_medians": [548.308, 539.21, 559.719], "mem_mib": [172, 172], "read_rows": 321504}
