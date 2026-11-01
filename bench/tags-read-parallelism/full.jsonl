@@ -1,0 +1,8 @@
+{"shape": 0, "selector": "metric_1{job=\"job3\"}", "max_threads": 1, "med": 22.0, "mn": 21.0, "mx": 22.0, "cpu": 21.7055, "read_rows": 29440, "mem_mib": 5.4}
+{"shape": 1, "selector": "metric_0", "max_threads": 1, "med": 232.5, "mn": 228.0, "mx": 275.0, "cpu": 226.6165, "read_rows": 313088, "mem_mib": 67.0}
+{"shape": 2, "selector": "{job=\"job3\"}", "max_threads": 1, "med": 1021.0, "mn": 996.0, "mx": 1033.0, "cpu": 977.7574999999999, "read_rows": 3000000, "mem_mib": 76.1}
+{"shape": 3, "selector": "{__name__=~\"metric_1.*\"}", "max_threads": 1, "med": 1523.0, "mn": 1497.0, "mx": 1611.0, "cpu": 1444.9035, "read_rows": 2021184, "mem_mib": 373.4}
+{"shape": 0, "selector": "metric_1{job=\"job3\"}", "max_threads": 2, "med": 21.0, "mn": 20.0, "mx": 22.0, "cpu": 20.7215, "read_rows": 29440, "mem_mib": 5.4}
+{"shape": 1, "selector": "metric_0", "max_threads": 2, "med": 146.0, "mn": 143.0, "mx": 265.0, "cpu": 247.93650000000002, "read_rows": 313088, "mem_mib": 68.5}
+{"shape": 2, "selector": "{job=\"job3\"}", "max_threads": 2, "med": 876.0, "mn": 669.0, "mx": 1028.0, "cpu": 1112.8765, "read_rows": 3000000, "mem_mib": 76.4}
+{"shape": 3, "selector": "{__name__=~\"metric_1.*\"}", "max_threads": 2, "med": 1510.0, "mn": 1463.0, "mx": 1582.0, "cpu": 1435.52, "read_rows": 2021184, "mem_mib": 371.8}
