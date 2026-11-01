@@ -1,0 +1,6 @@
+{"label": "master", "i": 0, "expr": "metric_1{pod=\"pod-1\"}", "median_ms": 21.5, "min_ms": 20, "max_ms": 49, "read_rows": 18592}
+{"label": "master", "i": 1, "expr": "metric_1{pod=\"pod-1\"} + metric_1{pod=\"pod-1\"}", "median_ms": 45.0, "min_ms": 42, "max_ms": 79, "read_rows": 37184}
+{"label": "master", "i": 2, "expr": "metric_1{pod=\"pod-1\"} + metric_1{pod=\"pod-1\"} + metric_1{pod=\"pod-1\"}", "median_ms": 67.5, "min_ms": 63, "max_ms": 109, "read_rows": 55776}
+{"label": "master", "i": 3, "expr": "rate(metric_1{pod=\"pod-1\"}[5m]) / rate(metric_1{pod=\"pod-1\"}[5m] offset 10m)", "median_ms": 49.0, "min_ms": 42, "max_ms": 57, "read_rows": 37184}
+{"label": "master", "i": 4, "expr": "metric_1{job=\"job3\"}", "median_ms": 39.0, "min_ms": 36, "max_ms": 68, "read_rows": 22494}
+{"label": "master", "i": 5, "expr": "metric_1{job=\"job3\"} + metric_1{job=\"job3\"}", "median_ms": 80.0, "min_ms": 74, "max_ms": 108, "read_rows": 44988}
