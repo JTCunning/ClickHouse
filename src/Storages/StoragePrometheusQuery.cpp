@@ -8,6 +8,7 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
+#include <Interpreters/PreparedSets.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Core/ConstantValue.h>
@@ -36,6 +37,7 @@ namespace Setting
 {
     extern const SettingsBool enable_adaptive_aggregator;
     extern const SettingsBool enable_materialized_cte;
+    extern const SettingsBool make_distributed_plan;
     extern const SettingsBool promql_push_down_label_matchers;
 }
 
@@ -199,6 +201,12 @@ void StoragePrometheusQuery::applySettingsForPrometheusQuery(Context & context)
         context.setSetting("enable_adaptive_aggregator", false);
 
     context.setSetting("empty_result_for_aggregation_by_empty_set", false);
+
+    /// Selectors with the same matchers and time range build the same set of series ids: build it once per query.
+    /// The sets are built in one pipeline, so the cache must not wait for a set being built. A distributed plan ships
+    /// the values of each set to its workers and doesn't use the cache. A cache of the outer query (a mutation) is kept.
+    if (!context.getPreparedSetsCache() && !context.getSettingsRef()[Setting::make_distributed_plan])
+        context.setPreparedSetsCache(std::make_shared<PreparedSetsCache>(/* wait_for_sets_being_built_ = */ false));
 }
 
 
