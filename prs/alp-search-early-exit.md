@@ -1,5 +1,9 @@
 # [unbuilt] Stop evaluating an `ALP` parameter pair once it cannot beat the best one
 
+Branch: `lilred-perf-alp-search-early-exit` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-alp-search-early-exit
+
+<!-- upstream:start (the PR body is everything between these markers; the title is the heading above without [unbuilt]) -->
+
 `ALP` chooses its exponent/fraction pair by brute force. For every compressed block it takes up to 8 samples of 32 values and computes the estimated encoded size of every pair on each sample: 190 pairs for `Float64`, 55 for `Float32`, so about 48,600 trial encodings per block, whether the block holds 256 values or a million. This search is most of `ALP`'s encode time even at 8,192-value blocks. It dominates with small blocks: compact parts compress every granule separately, and the inner samples tables of `TimeSeries` use `ALP, ZSTD(3)` with `index_granularity = 256`.
 
 The estimate is `values × bit-width of the encoded range + exceptions × exception size`. The bit-width and the exception count only grow as values are added, so the estimate over the values seen so far is a lower bound of the final one. `estimateEncodedSize` now gets the best estimate of the sample so far as a limit, and returns as soon as the lower bound reaches it. Such a pair could never be chosen, because only a strictly smaller estimate replaces the best one. The chosen parameters, the `AUTO` choice between `STD` and `RD`, and the compressed bytes are exactly the same as before. Only the search in `estimateParamCandidates` uses the limit; the per-block choice among the candidates (`selectBlockParams`) still evaluates in full.
@@ -60,6 +64,8 @@ Related: https://github.com/ClickHouse/ClickHouse/pull/120454
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
 The `ALP` codec chooses its encoding parameters with less work and the same result, so the compressed data is unchanged. The `ALP` encoder uses roughly 35–90% less CPU on decimal-like values, most of all with small compressed blocks such as the 256-row granules of compact parts and `TimeSeries` tables.
+
+<!-- upstream:end -->
 
 <details><summary>Self-review (lil red, 2026-11-01)</summary>
 

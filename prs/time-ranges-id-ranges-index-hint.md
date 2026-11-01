@@ -1,8 +1,8 @@
 # [unbuilt] Do not filter every row of the TimeSeries time ranges table by the id ranges of the selected metrics
 
-Branch: `lilred/perf-time-ranges-id-ranges-index-hint` · Compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred/perf-time-ranges-id-ranges-index-hint
+Branch: `lilred-perf-time-ranges-id-ranges-index-hint` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-time-ranges-id-ranges-index-hint
 
----
+<!-- upstream:start (the PR body is everything between these markers; the title is the heading above without [unbuilt]) -->
 
 When the metric name of a PromQL selector is a literal or a list of alternatives (`{__name__=~"a|b|c|..."}`), the selector reads the time ranges table by the id ranges of the selected metrics. The subquery joined to the tags table gets `WHERE ... AND (id >= (sipHash64('a'), min) AND id <= (sipHash64('a'), max) OR ...)`. The primary key uses this condition to pick the granules, but it also stays a row filter, so every row read is compared with two tuples per selected metric. With 100 metric names that is 200 tuple comparisons per row, and the selector gets 2.5× slower than the equivalent regular expression, which reads the same rows without id ranges.
 
@@ -46,6 +46,8 @@ Related: https://github.com/ClickHouse/ClickHouse/pull/121924
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
 A PromQL selector whose metric name is a list of alternatives, such as `{__name__=~"a|b|c"}`, no longer compares every row of the `TimeSeries` time ranges table with the id range of each listed metric. With 100 metric names the selector is about 1.9× faster.
+
+<!-- upstream:end -->
 
 <details>
 <summary>Self-review (preflight) — not part of the upstream text</summary>

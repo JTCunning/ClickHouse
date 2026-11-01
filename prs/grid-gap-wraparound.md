@@ -1,6 +1,8 @@
 # [unbuilt] Grow the timeSeries*ToGrid bucket map before a colliding wrapping index
 
-Branch: `lilred/perf-grid-gap-wraparound` · Compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred/perf-grid-gap-wraparound
+Branch: `lilred-perf-grid-gap-wraparound` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-grid-gap-wraparound
+
+<!-- upstream:start (the PR body is everything between these markers; the title is the heading above without [unbuilt]) -->
 
 The bucket map of the `timeSeries*ToGrid` states is a `HashMap` with `TrivialHash` and linear probing, so bucket index `k` lives in cell `k % bufSize`. Since #124773 the map fills up to 3/4 before it grows. That is collision-free while every index is below the buffer size, but on a series with a gap in the middle of the grid the indexes after the gap wrap around onto the cells of the first run of buckets, and while the map is between 1/2 and 3/4 full every insert of such an index walks the whole run (about 3,100 probes per bucket after the gap in the case below). This PR doubles the map before inserting a missing index that wraps and collides with another index, when the map is more than half full, so colliding indexes grow the map exactly as they did with the 1/2 limit before #124773. Maps without such collisions (contiguous series, including those that start late in the grid) keep the 3/4 limit and its memory saving. The add, batch add, merge and deserialize paths all go through the same helper; the serialized state is unchanged.
 
@@ -57,6 +59,8 @@ Related: https://github.com/ClickHouse/ClickHouse/pull/124777
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
 Fixed a performance regression in 26.10: the `timeSeries*ToGrid` aggregate functions (and the PromQL range functions built on them) were up to 6× slower on a series with a gap in the middle of the time range than on a contiguous series with the same number of samples.
+
+<!-- upstream:end -->
 
 <details><summary>Self-review (clickhouse-gh rules, run locally)</summary>
 

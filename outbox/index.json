@@ -1,0 +1,175 @@
+{
+  "schema": 1,
+  "updated": "2026-11-01T17:30:00Z",
+  "repo": "JTCunning/ClickHouse",
+  "research_branch": "lilred-research",
+  "statuses": {
+    "ready-to-build": "Build base and head, run the tests and the A/B, post the results on the issue.",
+    "results-in": "James posted results; lil red is turning them into the final PR text. Nothing to do.",
+    "needs-work": "The results missed the pass rule or a test failed; lil red is reworking the branch or dropping it. Nothing to do.",
+    "ready-to-submit": "The PR text has real numbers and passed lil red's review-bot preflight. James can submit.",
+    "fixes-ready": "Submitted upstream; lil red pushed new commits for review feedback. Sync them into James's branch.",
+    "submitted": "James opened the upstream PR. Nothing to do unless review feedback comes in.",
+    "dropped": "Not worth submitting; see the issue."
+  },
+  "items": [
+    {
+      "slug": "promql-shared-selector-sets",
+      "title": "Build the id set of a repeated PromQL selector once per query",
+      "status": "ready-to-build",
+      "priority": 1,
+      "branch": "lilred-perf-promql-shared-selector-sets",
+      "head": "9f437b64375f4001fc3e272f4637103179e6b0bf",
+      "base": "c189bd99fbda59c78489a6734c49397533bdd591",
+      "issue": 5,
+      "pr_text": "prs/promql-shared-selector-sets.md",
+      "report": "reports/2026-11-01-promql-shared-selector-sets.md",
+      "ab_plan": null,
+      "tests": {
+        "stateless": [
+          "05481_promql_repeated_selector_shares_id_set"
+        ],
+        "integration": [
+          "test_prometheus_protocols/test_query_api.py::test_repeated_selector_builds_id_set_once"
+        ],
+        "gtest_filter": "PreparedSetsCache.*",
+        "also_run": [
+          "02581_share_big_sets_between_mutation_tasks",
+          "02581_share_big_sets_between_multiple_mutations_tasks_long",
+          "02863_mutation_where_in_set_result_cache_pipeline_stuck_bug"
+        ]
+      },
+      "perf_tests": [
+        "tests/performance/promql_repeated_selector.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/promql_selector_pk_range.xml"
+      ],
+      "claim": "A repeated one-series selector builds its id set once: x + x about 45 -> 32 ms, x + x + x about 67.5 -> 42 ms (12-14 ms off each repeat). Single-use and offset controls unchanged.",
+      "pass_if": "05481 prints 1, 1, 2, 2 for SetsBuiltFromSubquery; the repeated-selector queries of promql_repeated_selector.xml are faster by at least 8 ms per repeat; no control or guard query is reported slower.",
+      "notes": "Related upstream: 118801 (broader, MaterializedCTE). Independent of it."
+    },
+    {
+      "slug": "promql-drop-name-exact-selector",
+      "title": "PromQL: skip the duplicate series check when dropping the metric name of one metric",
+      "status": "ready-to-build",
+      "priority": 2,
+      "branch": "lilred-perf-promql-drop-name-exact-selector",
+      "head": "dadc843ffb7478938ad1712ee757df247f78d093",
+      "base": "c189bd99fbda59c78489a6734c49397533bdd591",
+      "issue": 8,
+      "pr_text": "prs/promql-drop-name-exact-selector.md",
+      "report": "reports/2026-11-01-drop-name-exact-selector.md",
+      "ab_plan": null,
+      "tests": {
+        "stateless": [
+          "05482_promql_drop_metric_name_single_metric"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": []
+      },
+      "perf_tests": [
+        "tests/performance/promql_drop_metric_name_single_metric.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/promql_selector_pk_range.xml"
+      ],
+      "claim": "At 100k series: sum(rate) -19% CPU, sum(abs) -20%, sum by (job) -9%, a 37-step range query -30%, with identical results. The regex-selector control is unchanged.",
+      "pass_if": "05482 passes; the sum(rate), sum(abs) and range queries are faster by at least 10%; the regex control is not slower.",
+      "notes": "Overlaps upstream 121069 (the same rule, range functions only) and James's own 126763: land only one of them. Decide before submitting. The last 2 reference lines of 05482 were predicted (one less than master prints): check them first."
+    },
+    {
+      "slug": "time-ranges-id-ranges-index-hint",
+      "title": "Do not filter every row of the TimeSeries time ranges table by the id ranges of the selected metrics",
+      "status": "ready-to-build",
+      "priority": 3,
+      "branch": "lilred-perf-time-ranges-id-ranges-index-hint",
+      "head": "c4af28626b55e50470733ce2a23754aaadb384d5",
+      "base": "26f120e95b51e12c5f30eec3662c4791edf0fa3a",
+      "issue": 6,
+      "pr_text": "prs/time-ranges-id-ranges-index-hint.md",
+      "report": "reports/2026-10-31-name-regex-in-list.md",
+      "ab_plan": null,
+      "tests": {
+        "stateless": [
+          "05479_time_series_selector_id_ranges_index_hint"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": []
+      },
+      "perf_tests": [
+        "tests/performance/promql_selector_name_alternatives.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/promql_selector_pk_range.xml",
+        "tests/performance/promql_selector_id_range_row_cost.xml"
+      ],
+      "claim": "A 100-name alternation selector goes from about 437 to 233 ms (-45%). The single-metric and regex controls are not slower; the two guard tests may get slightly faster.",
+      "pass_if": "05479 passes (prints 1 2); the 100-name alternation is faster by at least 25%; no control or guard query is reported slower.",
+      "notes": "The last 2 reference lines of 05479 were predicted, not run: check them first."
+    },
+    {
+      "slug": "grid-gap-wraparound",
+      "title": "Grow the timeSeries*ToGrid bucket map before a colliding wrapping index",
+      "status": "ready-to-build",
+      "priority": 4,
+      "branch": "lilred-perf-grid-gap-wraparound",
+      "head": "46291048116bdeeacd63aac63df0da25d4b5466d",
+      "base": "52529f0c711566d696917678bf15e7068772fdde",
+      "issue": 10,
+      "pr_text": "prs/grid-gap-wraparound.md",
+      "report": "reports/2026-10-31-grid-gap-wraparound.md",
+      "ab_plan": null,
+      "tests": {
+        "stateless": [
+          "05474_timeseries_to_grid_gap_wraparound"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": []
+      },
+      "perf_tests": [
+        "tests/performance/timeseries_to_grid_gap.xml"
+      ],
+      "guard_perf_tests": [],
+      "claim": "The gap and late-start cases lose their slowdown against the contiguous case (6.1x timeSeriesLastToGrid, 4.1x timeSeriesRateToGrid on master) and run about as fast as it. The contiguous case is unchanged.",
+      "pass_if": "05474 passes; the gap queries are at least 3x faster; the contiguous queries are not slower.",
+      "notes": "Closes upstream issue 125759. Related upstream: 124773 (caused it), 124777."
+    },
+    {
+      "slug": "alp-search-early-exit",
+      "title": "Stop evaluating an ALP parameter pair once it cannot beat the best one",
+      "status": "ready-to-build",
+      "priority": 5,
+      "branch": "lilred-perf-alp-search-early-exit",
+      "head": "d4c58e0009b46e9e99a7eff37103452154534a4b",
+      "base": "c189bd99fbda59c78489a6734c49397533bdd591",
+      "issue": 11,
+      "pr_text": "prs/alp-search-early-exit.md",
+      "report": "reports/2026-11-01-alp-search-early-exit.md",
+      "ab_plan": null,
+      "tests": {
+        "stateless": [
+          "05480_alp_codec_small_compress_blocks"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": [
+          "04612_alp_codec_float32_decimal_ratio",
+          "05054_adaptive_codec_float_alp"
+        ]
+      },
+      "perf_tests": [
+        "tests/performance/codecs_float_alp_small_blocks.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/codecs_float_insert.xml"
+      ],
+      "claim": "ALP encode CPU -40-90% on decimal-like values and -2-9% on full-precision ones; compressed bytes identical.",
+      "pass_if": "05480 passes with its exact sizes; the 04612 and 05054 tests pass unchanged; codecs_float_alp_small_blocks INSERTs are faster; no codecs_float_insert query is reported slower.",
+      "notes": "ALP is a beta codec behind enable_alp_codec; codec owners should review."
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 # [unbuilt] PromQL: skip the duplicate series check when dropping the metric name of one metric
 
-<!-- Upstream-ready text starts here. Copy everything above the <details> block at the end. -->
+Branch: `lilred-perf-promql-drop-name-exact-selector` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-promql-drop-name-exact-selector
+
+<!-- upstream:start (the PR body is everything between these markers; the title is the heading above without [unbuilt]) -->
 
 Functions and operators such as `rate`, `abs`, `clamp`, `x * 2` and `histogram_quantile` drop the metric name `__name__`. `dropMetricName` did that with a `GROUP BY timeSeriesRemoveTag(group, '__name__')` over every series, with `anyForEach(values)` and the per-step duplicate check `timeSeriesThrowDuplicateSeriesIf(...)`, because two series that differ only by name get the same tags after the drop. When the only vector argument of the function or operator is a selector with an equality matcher on `__name__` (`m`, `{__name__="m"}`, possibly with `offset`, `@` or as a subquery `m[5m:1m]`), all its series have the same name, so dropping it can't create duplicates. In that case `dropMetricName` now emits a plain projection: no GROUP BY, no `anyForEach`, no check. Other arguments (several names, regular expressions, label functions, aggregations, binary operators over two vectors) keep the existing query, so their SQL is unchanged.
 
@@ -38,6 +40,8 @@ Related: https://github.com/ClickHouse/ClickHouse/pull/123419
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
 PromQL functions and operators applied to a selector of one metric (for example `sum(rate(http_requests_total[5m]))` or `abs(m)`) no longer regroup all series to drop the metric name, which reduces the CPU time of such queries over many series.
+
+<!-- upstream:end -->
 
 <details>
 <summary>Self-review (preflight) and notes for James</summary>

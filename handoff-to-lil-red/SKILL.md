@@ -7,7 +7,7 @@ description: Hand a ClickHouse PromQL / TimeSeries performance lead to lil red (
 
 lil red is James Cunningham's Nerve agent (GitHub `@lilredbot`). It works on simple but meaningful performance improvements in ClickHouse's PromQL support and TimeSeries engine.
 
-- **Where it works:** James's public fork `JTCunning/ClickHouse`, on `lilred/*` branches only. It never touches upstream, `master` or James's branches.
+- **Where it works:** James's public fork `JTCunning/ClickHouse`, on `lilred-*` branches only. It never touches upstream, `master` or James's branches.
 - **How a handoff works:**
   1. You open a GitHub issue on that fork that mentions `@lilredbot`.
   2. lil red picks it up within minutes and replies "Picked up as task …".
@@ -31,7 +31,7 @@ lil red is James Cunningham's Nerve agent (GitHub `@lilredbot`). It works on sim
      --label handoff
    ```
    The body **must** end with the line `@lilredbot please pick this up.` The mention is what notifies lil red.
-4. **Show James** the issue URL. Follow-up comments by `jtcunning` on the issue reach lil red too: more context, "also try X", or measurements from a local build of a `lilred/*` branch.
+4. **Show James** the issue URL. Follow-up comments by `jtcunning` on the issue reach lil red too: more context, "also try X", or measurements from a local build of a `lilred-*` branch.
 
 ## Issue body template
 
@@ -68,11 +68,11 @@ lil red is James Cunningham's Nerve agent (GitHub `@lilredbot`). It works on sim
 
 ## What lil red delivers
 
-- **A plain-language report:** what happens, numbers, cause, proposed fix, overlap with upstream. It's posted on the issue and stored at `reports/` on the branch `lilred/research`: https://github.com/JTCunning/ClickHouse/tree/lilred/research
+- **A plain-language report:** what happens, numbers, cause, proposed fix, overlap with upstream. It's posted on the issue and stored at `reports/` on the branch `lilred-research`: https://github.com/JTCunning/ClickHouse/tree/lilred-research
 - **When there's a simple fix:**
-  - a branch `lilred/perf-<slug>`, based on upstream master
-  - a compare link: `https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred/perf-<slug>`
-  - an upstream-ready PR description at `prs/<slug>.md` on `lilred/research`, written to pass the clickhouse-gh review bot
+  - a branch `lilred-perf-<slug>`, based on upstream master
+  - a compare link: `https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-<slug>`
+  - an upstream-ready PR description at `prs/<slug>.md` on `lilred-research`, written to pass the clickhouse-gh review bot
 
   lil red opens no PRs. You copy the branch and the description when you want to.
 - **Builds:** lil red can't build ClickHouse yet, so "after" numbers stay pending until a build exists. If you build a branch, post the numbers as a comment on the issue.

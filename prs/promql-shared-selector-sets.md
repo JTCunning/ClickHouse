@@ -1,8 +1,8 @@
 # [unbuilt] Build the id set of a repeated PromQL selector once per query
 
-Branch: `lilred/perf-promql-shared-selector-sets` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred/perf-promql-shared-selector-sets
+Branch: `lilred-perf-promql-shared-selector-sets` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-promql-shared-selector-sets
 
----
+<!-- upstream:start (the PR body is everything between these markers; the title is the heading above without [unbuilt]) -->
 
 Each `timeSeriesSelector` in a PromQL query reads the samples table with `id IN (<tags lookup>)`, and on a table with bucketed samples (version 11) the primary-key analysis builds that set in place while the query is planned. When a query repeats a selector with the same matchers and time range (`x + x`, `x / ignoring(pod) group_left x`, `x > 0 and x < 10`), each occurrence runs the same tags lookup again. The set key is already the hash of the subquery, so the two keys are equal. They are not shared because each selector is planned by its own interpreter, with its own prepared sets.
 
@@ -48,6 +48,8 @@ Related: #118801 (a broader approach: one tags scan per metric through `Material
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
 A PromQL query that repeats a selector with the same label matchers and time range, such as `x + x`, looks up the matching series in the tags table of a `TimeSeries` table once instead of once per occurrence.
+
+<!-- upstream:end -->
 
 <details>
 <summary>Self-review (lil red, not for upstream)</summary>
