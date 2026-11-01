@@ -1,0 +1,22 @@
+<clickhouse>
+  <logger><level>information</level><log>server.log</log><errorlog>err.log</errorlog></logger>
+  <tcp_port>19000</tcp_port><http_port>18123</http_port>
+  <listen_host>127.0.0.1</listen_host>
+  <path>./db/</path><tmp_path>./tmp/</tmp_path><user_files_path>./uf/</user_files_path>
+  <max_server_memory_usage>2800000000</max_server_memory_usage>
+  <mark_cache_size>268435456</mark_cache_size>
+  <query_log><database>system</database><table>query_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></query_log>
+  <users><default><password></password><networks><ip>127.0.0.1</ip></networks><profile>default</profile><quota>default</quota><access_management>1</access_management></default></users>
+  <profiles><default><max_memory_usage>2500000000</max_memory_usage><enable_time_series_table>1</enable_time_series_table><allow_experimental_time_series_table>1</allow_experimental_time_series_table><log_queries>1</log_queries><query_profiler_cpu_time_period_ns>0</query_profiler_cpu_time_period_ns><query_profiler_real_time_period_ns>0</query_profiler_real_time_period_ns><allow_introspection_functions>1</allow_introspection_functions></default></profiles>
+  <trace_log><database>system</database><table>trace_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></trace_log>
+  <quotas><default/></quotas>
+  <prometheus>
+    <port>19093</port>
+    <handlers>
+      <w1><url>/write</url><handler><type>write</type><table>default.prometheus</table></handler></w1>
+      <w3><url>/write_zstd</url><handler><type>write</type><table>default.prometheus_zstd</table></handler></w3>
+      <w4><url>/write_uuid</url><handler><type>write</type><table>default.prometheus_uuid</table></handler></w4>
+      <w2><url>/write_nocache</url><handler><type>write</type><table>default.prometheus_nocache</table></handler></w2>
+    </handlers>
+  </prometheus>
+</clickhouse>
