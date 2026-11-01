@@ -622,7 +622,8 @@ private:
                 for (UInt8 fraction = 0; fraction <= exponent; ++fraction)
                 {
                     const Estimation estimation{{exponent, fraction}, 1};
-                    const size_t estimated_size = estimateEncodedSize(sample, sample_float_count, estimation.params);
+                    // Stop evaluating a pair once it cannot beat the best pair of this sample: the result is the same as a full evaluation.
+                    const size_t estimated_size = estimateEncodedSize(sample, sample_float_count, estimation.params, sample_best_size);
 
                     if (estimated_size < sample_best_size)
                     {
@@ -676,8 +677,15 @@ private:
 
     /**
      * Estimate the encoded size in bits for a given set of parameters on a sample.
+     * Returns `size_limit` as soon as the estimate cannot be less than `size_limit`. The bit-width of the encoded range and
+     * the number of exceptions only grow with every value, so the estimate computed from the values seen so far is a lower bound.
+     * A caller that passes a limit must compare the result with strict `<`: a cut-off result equals `size_limit`.
      */
-    static size_t estimateEncodedSize(const T * const source, const UInt32 float_count, const EncodingParams & params)
+    static size_t estimateEncodedSize(
+        const T * const source,
+        const UInt32 float_count,
+        const EncodingParams & params,
+        const size_t size_limit = std::numeric_limits<size_t>::max())
     {
         Int64 min = std::numeric_limits<Int64>::max();
         Int64 max = std::numeric_limits<Int64>::min();
@@ -696,6 +704,11 @@ private:
             }
             else
                 ++exception_count;
+
+            const UInt8 bits_lower_bound
+                = min <= max ? ALPUtils<T>::calculateBitWidth(static_cast<UInt64>(max) - static_cast<UInt64>(min)) : 0;
+            if (float_count * bits_lower_bound + exception_count * ((sizeof(UInt16) + sizeof(T)) * 8) >= size_limit)
+                return size_limit;
         }
 
         const UInt8 bits = calculateEncodeBits(min, max);
