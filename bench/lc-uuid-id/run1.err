@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "/root/nerve-workspace/research/bench/lc-uuid-id/bench.py", line 119, in <module>
+    perf_test(name, rid)
+  File "/root/nerve-workspace/research/bench/lc-uuid-id/bench.py", line 88, in perf_test
+    q(with_settings(re.sub(rf"\b{table}\b", t, f), "max_insert_threads = 2, max_threads = 2"))
+  File "/root/nerve-workspace/research/bench/lc-uuid-id/bench.py", line 20, in q
+    raise RuntimeError(sql[:300] + "\n" + r.stderr[:1500])
+RuntimeError: INSERT INTO promql_row_cost_ts (metric_name, tags, samples)
+        SELECT
+            'rowcost_metric',
+            map('instance', toString(number), 'dc', toString(number % 8)),
+            arrayMap(step -> (toDateTime64(1000000 + step * 15, 3), toFloat64(step % 977)), range(4096))
+        FROM nu
+Received exception from server (version 26.11.1):
+Code: 241. DB::Exception: Received from localhost:19100. DB::Exception: (total) memory limit exceeded: would use 2.54 GiB (attempt to allocate chunk of 400.00 MiB), current RSS: 2.22 GiB, maximum: 2.61 GiB. OvercommitTracker decision: Query was selected to stop by OvercommitTracker. Untracked memory across all threads: -2.93 MiB.. (MEMORY_LIMIT_EXCEEDED)
+(query: INSERT INTO promql_row_cost_ts (metric_name, tags, samples)
+        SELECT
+            'rowcost_metric',
+            map('instance', toString(number), 'dc', toString(number % 8)),
+            arrayMap(step -> (toDateTime64(1000000 + step * 15, 3), toFloat64(step % 977)), range(4096))
+        FROM numbers_mt(12800) SETTINGS max_insert_threads = 2, max_threads = 2)
+
+rc=1
