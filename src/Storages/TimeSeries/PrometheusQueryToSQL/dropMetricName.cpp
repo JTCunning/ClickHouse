@@ -25,6 +25,7 @@ namespace
     /// Returns true if all series selected by `node` have the same metric name: `node` is an instant or range selector with
     /// an equality matcher on `__name__` (`http_requests_total` or `{__name__="http_requests_total"}`), maybe wrapped in
     /// offset or @ modifiers or a subquery. Other nodes can rename or combine series, so the function returns false for them.
+    /// pushDownLabelMatchers.cpp has the same rule in hasSingleMetricName(), over the nodes its pass walks through.
     bool selectsSingleMetricName(const Node * node)
     {
         while (true)

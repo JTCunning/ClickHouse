@@ -2,7 +2,7 @@
 -- Tag no-fasttest: PromQL needs ANTLR4, which is disabled in the fast-test build.
 
 -- Functions and operators drop the metric name `__name__`. If their vector argument selects one metric name
--- (`m`, `{__name__="m"}`, with offset or as a subquery), its series can't get the same tags without the name,
+-- (`m`, `{__name__="m"}`, with offset or @ or as a subquery), its series can't get the same tags without the name,
 -- so the converter skips the GROUP BY with the duplicate series check. The results must stay the same,
 -- and selectors over several metric names must still merge or reject the series which get the same tags.
 
@@ -25,6 +25,7 @@ SELECT '-- one metric name: every form';
 SELECT * FROM prometheusQueryRange(ts, 'rate(m[20s])', 100, 130, 10) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts, 'rate({__name__="m"}[20s])', 100, 130, 10) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts, 'rate(m[20s] offset 10s)', 110, 130, 10) ORDER BY ALL;
+SELECT * FROM prometheusQueryRange(ts, 'rate(m[20s] @ 130)', 100, 130, 10) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts, 'max_over_time(m[20s:10s])', 100, 130, 10) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts, 'abs(m)', 100, 130, 10) ORDER BY ALL;
 SELECT * FROM prometheusQueryRange(ts, 'clamp_max(m, 5)', 100, 130, 10) ORDER BY ALL;
