@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-01T18:21:21Z",
+  "updated": "2026-11-01T20:01:14Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -82,7 +82,7 @@
     {
       "slug": "time-ranges-id-ranges-index-hint",
       "title": "Do not filter every row of the TimeSeries time ranges table by the id ranges of the selected metrics",
-      "status": "ready-to-build",
+      "status": "results-in",
       "priority": 3,
       "branch": "lilred-perf-time-ranges-id-ranges-index-hint",
       "head": "c4af28626b55e50470733ce2a23754aaadb384d5",

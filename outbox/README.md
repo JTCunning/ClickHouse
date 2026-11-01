@@ -6,7 +6,7 @@ These are fix branches that lil red can't build itself. James builds and A/B tes
 |---|---|---|---|---|---|
 | 1 | [promql-shared-selector-sets](../prs/promql-shared-selector-sets.md) | results-in | `lilred-perf-promql-shared-selector-sets` | #5 | `x + x` ~45 → ~32 ms: the id set is built once per query |
 | 2 | [promql-drop-name-exact-selector](../prs/promql-drop-name-exact-selector.md) | ready-to-build | `lilred-perf-promql-drop-name-exact-selector` | #8 | sum(rate) −19% CPU at 100k series. Overlaps upstream 121069 and 126763: land one of them |
-| 3 | [time-ranges-id-ranges-index-hint](../prs/time-ranges-id-ranges-index-hint.md) | ready-to-build | `lilred-perf-time-ranges-id-ranges-index-hint` | #6 | 100-name selector 437 → 233 ms |
+| 3 | [time-ranges-id-ranges-index-hint](../prs/time-ranges-id-ranges-index-hint.md) | results-in | `lilred-perf-time-ranges-id-ranges-index-hint` | #6 | 100-name selector 437 → 233 ms |
 | 4 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | ready-to-build | `lilred-perf-grid-gap-wraparound` | #10 | the 6.1× / 4.1× slowdown on series with a gap goes away |
 | 5 | [alp-search-early-exit](../prs/alp-search-early-exit.md) | ready-to-build | `lilred-perf-alp-search-early-exit` | #11 | ALP encode CPU −40–90% on decimal-like values, same bytes |
 
