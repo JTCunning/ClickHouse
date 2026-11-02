@@ -26,7 +26,7 @@ Host: 2 vCPU / 4 GiB VM, `max_threads = 2`. Base: master build `a7f713612c80`. W
 | `metric_1{job="job3"}`, ~200 series (control) | 39.0 ms | 36–68 | 1 | pending build |
 | `y + y`, y = `metric_1{job="job3"}` | 80.0 ms | 74–108 | 2 | pending build |
 
-What a cache hit saves, measured on master by running a selector's generated SQL (100,000-series dataset, median of 10): the one-series selector takes 26.5 ms, its tags lookup alone 14 ms, and the same SQL with the lookup replaced by its literal result 6 ms. The subquery is still analysed and planned on a hit (EXPLAIN PLAN of it: ~5 ms). Expected: about 12–14 ms off each repeated occurrence (`x + x` ~45 → ~32 ms), and no change on the controls.
+What a cache hit saves, measured on master by running a selector's generated SQL (100,000-series dataset, median of 10): the one-series selector takes 26.5 ms, its tags lookup alone 14 ms, and the same SQL with the lookup replaced by its literal result 6 ms. The subquery is still analysed and planned on a hit (EXPLAIN PLAN of it: ~5 ms). Expected: the cost of one tags lookup off each repeated occurrence, and no change on the controls. A first A/B run on a 64-vCPU host saved 5.2–6.8 ms per repeat (`x + x` 41.6 → 35.4 ms, −15%; `x + x + x` 59.1 → 48.6 ms, −18%); the 14 ms "lookup alone" figure above includes per-query overhead that a hit does not remove.
 
 Commands (branch column):
 ```

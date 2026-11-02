@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-01T20:01:14Z",
+  "updated": "2026-11-02T11:02:01Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -16,10 +16,10 @@
     {
       "slug": "promql-shared-selector-sets",
       "title": "Build the id set of a repeated PromQL selector once per query",
-      "status": "results-in",
+      "status": "ready-to-build",
       "priority": 1,
       "branch": "lilred-perf-promql-shared-selector-sets",
-      "head": "9f437b64375f4001fc3e272f4637103179e6b0bf",
+      "head": "15ec8bc23e76a041e889809cfebe48c3dfe3450a",
       "base": "c189bd99fbda59c78489a6734c49397533bdd591",
       "issue": 5,
       "pr_text": "prs/promql-shared-selector-sets.md",
@@ -45,9 +45,9 @@
       "guard_perf_tests": [
         "tests/performance/promql_selector_pk_range.xml"
       ],
-      "claim": "A repeated one-series selector builds its id set once: x + x about 45 -> 32 ms, x + x + x about 67.5 -> 42 ms (12-14 ms off each repeat). Single-use and offset controls unchanged.",
-      "pass_if": "05481 prints 1, 1, 2, 2 for SetsBuiltFromSubquery; the repeated-selector queries of promql_repeated_selector.xml are faster by at least 8 ms per repeat; no control or guard query is reported slower.",
-      "notes": "Related upstream: 118801 (broader, MaterializedCTE). Independent of it."
+      "claim": "A repeated one-series selector builds its id set once. Measured run 1 (64-vCPU host, 16 pinned cores): about 6 ms off each repeat (x + x 41.6 -> 35.4 ms, -15%; x + x + x 59.1 -> 48.6 ms, -18%; ~200-series y + y -12%). A hit skips only the tags lookup's execution; the subquery is still planned and the samples are still read per selector. Single-use and offset controls unchanged.",
+      "pass_if": "05481 prints 1, 1, 2, 2 (and only those four rows); the repeated-selector queries of promql_repeated_selector.xml are significantly faster by at least 4 ms per repeat; no control or guard query is reported slower (rerun promql_selector_pk_range to settle the +1.1-1.8% seen in run 1).",
+      "notes": "Run 1 failed the old 8 ms/repeat floor: that floor came from my 12-14 ms prediction, which wrongly counted per-query overhead as lookup cost; the 6 ms saved matches the lookup-only cost. Commit 15ec8bc fixes the 05481 log_comment filter (test-only; C++ unchanged). Decide: submit at ~6 ms/repeat (my recommendation: yes) or tell me drop. gtests PreparedSetsCache.* need ENABLE_TESTS=ON (or upstream CI). Related upstream: 118801 (broader, MaterializedCTE)."
     },
     {
       "slug": "promql-drop-name-exact-selector",
