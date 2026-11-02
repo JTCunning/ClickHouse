@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-02T11:02:01Z",
+  "updated": "2026-11-02T16:32:44Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -16,7 +16,7 @@
     {
       "slug": "promql-shared-selector-sets",
       "title": "Build the id set of a repeated PromQL selector once per query",
-      "status": "ready-to-build",
+      "status": "results-in",
       "priority": 1,
       "branch": "lilred-perf-promql-shared-selector-sets",
       "head": "15ec8bc23e76a041e889809cfebe48c3dfe3450a",
