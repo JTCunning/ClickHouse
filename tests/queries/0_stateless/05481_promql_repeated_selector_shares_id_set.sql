@@ -38,7 +38,8 @@ SYSTEM FLUSH LOGS query_log;
 
 SELECT log_comment, ProfileEvents['SetsBuiltFromSubquery']
 FROM system.query_log
-WHERE current_database = currentDatabase() AND type = 'QueryFinish' AND log_comment LIKE '05481\_%'
+WHERE current_database = currentDatabase() AND type = 'QueryFinish'
+    AND log_comment IN ('05481_same_twice', '05481_same_three_times', '05481_other_time_range', '05481_other_matchers')
 ORDER BY event_time_microseconds;
 
 DROP TABLE ts;
