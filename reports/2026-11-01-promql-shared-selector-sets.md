@@ -2,6 +2,7 @@
 
 **Verdict:** worth fixing, with a smaller mechanism than the temp-table branch. Fix branch `lilred/perf-promql-shared-selector-sets` (unbuilt). It reuses ClickHouse's existing per-query set cache (today only mutations use it), so a repeated selector adopts the id set the first one built. Expected: ~12–14 ms off each repeated occurrence (`x + x` 45 → ~32 ms on this machine), and no change for selectors used once.
 **Task:** 2026-10-31-handoff-run-the-tags-lookup-once-per-di · handoff https://github.com/JTCunning/ClickHouse/issues/5 · **Build:** 26.11.1.974, master `a7f713612c80` (branch based on `c189bd99fbda`) · **Date:** 2026-11-01
+**A/B plan:** ../ab-plans/promql-shared-selector-sets.md
 
 ## What happens (plain language)
 In a PromQL query, every selector looks up "which series ids match these labels in this time window" in the tags table, then reads the samples of those ids. On v11 tables that lookup runs while the query is being planned, so the planner can use the id list for the samples table's primary key. When the same selector appears twice (`x + x`, `x / ignoring(pod) group_left x`, `x > 0 and x < 10`), the lookup runs twice. ClickHouse already names each IN-set by a hash of its subquery, and the two lookups get the same name. They just don't share, because each selector is planned separately and keeps its own sets.

@@ -8,7 +8,7 @@ Order: fix branches first (they need a build anyway), then report conclusions th
 
 | # | experiment | kind | task | what has to be proven | plan |
 |---|---|---|---|---|---|
-| 1 | [promql-shared-selector-sets](../reports/2026-11-01-promql-shared-selector-sets.md) (handoff #5) | branch `lilred-perf-promql-shared-selector-sets` | 2026-10-31-handoff-run-the-tags-lookup-once-per-di | a repeated selector builds its id set once (−12–14 ms per repeat); no single-use cost | todo |
+| 1 | [promql-shared-selector-sets](../reports/2026-11-01-promql-shared-selector-sets.md) (handoff #5) | branch `lilred-perf-promql-shared-selector-sets` | 2026-10-31-handoff-run-the-tags-lookup-once-per-di | a repeated selector builds its id set once (−5–7 ms per repeat, run 1); no single-use cost; pk_range guard settled | [plan](promql-shared-selector-sets.md) |
 | 2 | [drop-name-exact-selector](../reports/2026-11-01-drop-name-exact-selector.md) (handoff #8) | branch `lilred-perf-promql-drop-name-exact-selector` | 2026-10-31-handoff-skip-the-tags-read-for-label-fr | sum(rate) −19% CPU at 100k series; identical results | todo |
 | 3 | [name-regex-in-list](../reports/2026-10-31-name-regex-in-list.md) (handoff #6) | branch `lilred-perf-time-ranges-id-ranges-index-hint` | 2026-10-31-handoff-rewrite-name-regex-to-a-met | 100-name selector 437 → 233 ms | todo |
 | 4 | [grid-gap-wraparound](../reports/2026-10-31-grid-gap-wraparound.md) (#125759) | branch `lilred-perf-grid-gap-wraparound` | 2026-10-31-timeseriestogrid-gap-slowdown-125759 | the 6.1× / 4.1× gap slowdown goes away; no-gap cases unchanged | todo |
