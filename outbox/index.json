@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-02T16:32:44Z",
+  "updated": "2026-11-03T15:45:01Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -82,7 +82,7 @@
     {
       "slug": "time-ranges-id-ranges-index-hint",
       "title": "Do not filter every row of the TimeSeries time ranges table by the id ranges of the selected metrics",
-      "status": "results-in",
+      "status": "ready-to-submit",
       "priority": 3,
       "branch": "lilred-perf-time-ranges-id-ranges-index-hint",
       "head": "c4af28626b55e50470733ce2a23754aaadb384d5",
@@ -108,7 +108,7 @@
       ],
       "claim": "A 100-name alternation selector goes from about 437 to 233 ms (-45%). The single-metric and regex controls are not slower; the two guard tests may get slightly faster.",
       "pass_if": "05479 passes (prints 1 2); the 100-name alternation is faster by at least 25%; no control or guard query is reported slower.",
-      "notes": "The last 2 reference lines of 05479 were predicted, not run: check them first."
+      "notes": "Judged a pass 2026-11-03 though the 25% floor was missed on the original table (-19.9%; -35 to -39% at 50-300 names of 500 series); the floor came from an over-optimistic emulation. Optional before submit: a read_rows assertion in 05479 that pins primary-key pruning (code change, would need another build). Upstream now has unrelated 05479_* tests; renumber only if the check asks."
     },
     {
       "slug": "grid-gap-wraparound",
