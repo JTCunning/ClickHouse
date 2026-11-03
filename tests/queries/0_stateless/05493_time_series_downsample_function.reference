@@ -1,0 +1,12 @@
+-- a sample on a boundary belongs to the interval that ends there
+1
+-- the greatest value wins, and a NaN loses
+1
+1
+1
+-- the same interval from either merge order
+1
+-- a coarser interval after a finer one matches the coarser interval alone
+1
+-- the same function a second time does not change the result
+1

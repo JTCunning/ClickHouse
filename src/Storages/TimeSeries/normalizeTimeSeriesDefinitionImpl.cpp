@@ -21,6 +21,7 @@
 #include <DataTypes/DataTypeUUID.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Storages/ColumnsDescription.h>
+#include <Parsers/ASTAssignment.h>
 #include <Parsers/ASTCodecDeclaration.h>
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTCreateQuery.h>
@@ -32,6 +33,7 @@
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTTTLElement.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
+#include <Storages/TimeSeries/TimeSeriesDownsamplingPeriods.h>
 #include <Parsers/Prometheus/CreateQueryTimeSeriesSettings.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
@@ -57,6 +59,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsASTFunction recent_samples_partition_by;
     extern const TimeSeriesSettingsUInt64 recent_samples_ttl_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsString samples_downsampling_periods;
     extern const TimeSeriesSettingsUInt64 samples_index_granularity;
     extern const TimeSeriesSettingsUInt64 samples_index_granularity_bytes;
     extern const TimeSeriesSettingsASTFunction samples_partition_by;
@@ -695,6 +698,95 @@ namespace
         return makeASTOperator("plus", std::move(time), makeASTFunction("toIntervalSecond", make_intrusive<ASTLiteral>(ttl_seconds)));
     }
 
+    /// A sorting-key prefix that groups buckets into one epoch-aligned span.
+    ASTPtr makeBucketSpanKey(UInt64 span_seconds)
+    {
+        return makeASTFunction("toStartOfInterval",
+            make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket),
+            makeASTFunction("toIntervalSecond", make_intrusive<ASTLiteral>(span_seconds)));
+    }
+
+    ASTs makeDownsampleSortingKey(const TimeSeriesDownsamplingPeriods & periods, UInt64 step_seconds)
+    {
+        ASTs key;
+        key.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+        for (UInt64 span : periods.sortingSpans(step_seconds))
+            key.push_back(makeBucketSpanKey(span));
+        key.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket));
+        return key;
+    }
+
+    /// Matches the stored `ORDER BY` spelling.
+    String formatSortingKey(ASTs key_columns)
+    {
+        if (key_columns.size() == 1)
+            return key_columns[0]->formatWithSecretsOneLine();
+
+        auto tuple = makeASTOperator("tuple");
+        tuple->arguments->children = std::move(key_columns);
+        return tuple->formatWithSecretsOneLine();
+    }
+
+    ASTPtr makeAssignment(const char * column_name, ASTPtr expression)
+    {
+        auto assignment = make_intrusive<ASTAssignment>();
+        assignment->column_name = column_name;
+        assignment->children.push_back(std::move(expression));
+        return assignment;
+    }
+
+    ASTPtr makeDownsampleCall(UInt64 interval_seconds)
+    {
+        return addParametersToAggregateFunction(
+            makeASTFunction("timeSeriesDownsample", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples)),
+            make_intrusive<ASTLiteral>(interval_seconds));
+    }
+
+    /// One GROUP BY rule. Rows older than the level's offset are replaced by one row per group.
+    /// The group is the sorting-key prefix of this span. `bucket` stays in the key only when the span is the bucket step.
+    ASTPtr makeDownsampleTTL(const TimeSeriesDownsamplingPeriods & periods, const TimeSeriesDownsamplingLevel & level, UInt64 step_seconds)
+    {
+        const UInt64 span_seconds = std::max(level.interval_seconds, step_seconds);
+        auto ttl = make_intrusive<ASTTTLElement>(TTLMode::GROUP_BY, DataDestinationType::DELETE, "", /*if_exists=*/ false);
+        ttl->setTTL(makeASTOperator("plus",
+            makeASTFunction("toDateTime", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket)),
+            makeASTFunction("toIntervalSecond", make_intrusive<ASTLiteral>(level.offset_seconds + span_seconds))));
+
+        ttl->group_by_key.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+        for (UInt64 span : periods.sortingSpans(step_seconds))
+        {
+            if (span < span_seconds)
+                break;
+            ttl->group_by_key.push_back(makeBucketSpanKey(span));
+        }
+        if (span_seconds == step_seconds)
+            ttl->group_by_key.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket));
+
+        ttl->group_by_assignments.push_back(makeAssignment(
+            TimeSeriesColumnNames::Samples, makeDownsampleCall(level.interval_seconds)));
+        if (span_seconds != step_seconds)
+        {
+            ttl->group_by_assignments.push_back(makeAssignment(
+                TimeSeriesColumnNames::Bucket,
+                makeASTFunction("min", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket))));
+        }
+        ttl->group_by_assignments.push_back(makeAssignment(
+            TimeSeriesColumnNames::MinTime,
+            makeASTFunction("min", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MinTime))));
+        ttl->group_by_assignments.push_back(makeAssignment(
+            TimeSeriesColumnNames::MaxTime,
+            makeASTFunction("max", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MaxTime))));
+        return ttl;
+    }
+
+    ASTPtr makeDownsampleTTLList(const TimeSeriesDownsamplingPeriods & periods, UInt64 step_seconds)
+    {
+        auto ttl_list = make_intrusive<ASTExpressionList>();
+        for (const auto & level : periods.levels)
+            ttl_list->children.push_back(makeDownsampleTTL(periods, level, step_seconds));
+        return ttl_list;
+    }
+
     /// The codec declared by the entry `CODEC <name> (...)` of the column list of an inner table, where `name` is a column
     /// or a subcolumn of a column written as a dotted name (e.g. `samples.timestamp`), or nullptr if there is no such entry.
     ASTPtr getCodecDeclaration(const ASTColumns & inner_table_columns, std::string_view name)
@@ -776,6 +868,9 @@ namespace
         if (new_version < TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES)
             old_settings.removeSettings({"samples_bucket_step_seconds", "samples_partition_by", "samples_index_granularity_bytes",
                                          "recent_samples_bucket_step_seconds", "recent_samples_index_granularity_bytes"});
+
+        if (new_version < TimeSeriesVersion::MIN_WITH_SAMPLES_DOWNSAMPLING)
+            old_settings.removeSetting("samples_downsampling_periods");
 
         /// The default value of `recent_samples_ttl_seconds` is 345600 (4 days), so an absent setting doesn't disable the recent samples table.
         if (const auto * value = get_new_value("recent_samples_ttl_seconds"); value && (SettingFieldUInt64{*value}.value == 0))
@@ -1301,6 +1396,17 @@ namespace
                             : getDefaultSamplesPartitionKey()->formatWithSecretsOneLine();
                         if (partitioning_equals(expected_partition_by))
                             inner_engine.reset(inner_engine.partition_by);
+
+                        const auto periods = TimeSeriesDownsamplingPeriods::parse(settings[TimeSeriesSetting::samples_downsampling_periods].value);
+                        if (!periods.levels.empty())
+                        {
+                            const UInt64 step_seconds = settings[TimeSeriesSetting::samples_bucket_step_seconds];
+                            if (!inner_engine.primary_key && inner_engine.order_by
+                                && inner_engine.order_by->formatWithSecretsOneLine() == formatSortingKey(makeDownsampleSortingKey(periods, step_seconds)))
+                                inner_engine.reset(inner_engine.order_by);
+                            if (ttl_equals(makeDownsampleTTLList(periods, step_seconds)->formatWithSecretsOneLine()))
+                                inner_engine.reset(inner_engine.ttl_table);
+                        }
                     }
                 }
                 else
@@ -1928,9 +2034,8 @@ namespace
             case ViewTarget::Samples:
             case ViewTarget::RecentSamples:
             {
-                /// The recent samples table gets the same generated engine as the samples table; it becomes
-                /// partitioned and TTL'd below.
                 const bool bucketed = settings.hasBucketedSamples();
+                const bool is_samples = (inner_table_kind == ViewTarget::Samples);
 
                 /// The rows of the same series and bucket are merged by `timeSeriesGroupArray`, which needs an aggregating engine:
                 /// `AggregatingMergeTree`, `ReplicatedAggregatingMergeTree` or `SharedAggregatingMergeTree`.
@@ -1940,13 +2045,44 @@ namespace
                         "to merge the rows of the same time series and bucket, got {}",
                         table_id.getNameForLogs(), inner_table_kind, settings[TimeSeriesSetting::version].value, inner_engine.engine->name);
 
-                if (needs_sorting_key())
+                const auto periods = (is_samples && bucketed)
+                    ? TimeSeriesDownsamplingPeriods::parse(settings[TimeSeriesSetting::samples_downsampling_periods].value)
+                    : TimeSeriesDownsamplingPeriods{};
+
+                if (!periods.levels.empty())
+                {
+                    const UInt64 step_seconds = settings[TimeSeriesSetting::samples_bucket_step_seconds];
+                    const auto expected_key = formatSortingKey(makeDownsampleSortingKey(periods, step_seconds));
+                    const auto expected_ttl = makeDownsampleTTLList(periods, step_seconds)->formatWithSecretsOneLine();
+                    const bool sorting_key_is_generated = !inner_engine.primary_key
+                        && inner_engine.order_by
+                        && inner_engine.order_by->formatWithSecretsOneLine() == expected_key;
+                    const bool ttl_is_generated = inner_engine.ttl_table
+                        && inner_engine.ttl_table->formatWithSecretsOneLine() == expected_ttl;
+
+                    if ((inner_engine.order_by || inner_engine.primary_key) && !sorting_key_is_generated)
+                        throw Exception(ErrorCodes::INCORRECT_QUERY,
+                            "{}: The inner samples table cannot declare ORDER BY or PRIMARY KEY when `samples_downsampling_periods` is set",
+                            table_id.getNameForLogs());
+                    if (inner_engine.ttl_table && !ttl_is_generated)
+                        throw Exception(ErrorCodes::INCORRECT_QUERY,
+                            "{}: The inner samples table cannot declare TTL when `samples_downsampling_periods` is set",
+                            table_id.getNameForLogs());
+
+                    if (needs_sorting_key())
+                        set_sorting_key(makeDownsampleSortingKey(periods, step_seconds));
+
+                    if (!ttl_is_generated)
+                    {
+                        inner_engine.setOrReplace(inner_engine.ttl_table, makeDownsampleTTLList(periods, step_seconds));
+                        changed = true;
+                    }
+                }
+                else if (needs_sorting_key())
                 {
                     set_sorting_key({make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID),
                         make_intrusive<ASTIdentifier>(bucketed ? TimeSeriesColumnNames::Bucket : TimeSeriesColumnNames::Timestamp)});
                 }
-
-                const bool is_samples = (inner_table_kind == ViewTarget::Samples);
                 const auto & index_granularity = settings[is_samples
                     ? TimeSeriesSetting::samples_index_granularity : TimeSeriesSetting::recent_samples_index_granularity];
                 set_merge_tree_setting("index_granularity", index_granularity, getIndexGranularityFromSettings(settings, inner_table_kind));
@@ -2668,6 +2804,15 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
                 setEngineSettings(*create_query.storage, "recent_samples_bucket_step_seconds",
                     Field(settings[TimeSeriesSetting::recent_samples_bucket_step_seconds].value));
             }
+        }
+
+        /// Pin the downsampling periods, including an empty value, so a future default cannot change a table of this version.
+        if (settings[TimeSeriesSetting::version].value >= TimeSeriesVersion::MIN_WITH_SAMPLES_DOWNSAMPLING
+            && !settings[TimeSeriesSetting::samples_downsampling_periods].isChanged()
+            && create_query.storage)
+        {
+            setEngineSettings(*create_query.storage, "samples_downsampling_periods",
+                Field(settings[TimeSeriesSetting::samples_downsampling_periods].value));
         }
 
         /// A RECENT SAMPLES declaration can't be used with `recent_samples_ttl_seconds = 0`

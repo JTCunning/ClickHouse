@@ -31,9 +31,12 @@
 #include <Parsers/makeASTForLogicalFunction.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Storages/ColumnsDescription.h>
+
+#include <ctime>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
+#include <Storages/TimeSeries/TimeSeriesDownsamplingPeriods.h>
 #include <Storages/TimeSeries/TimeSeriesIDGenerator.h>
 #include <Storages/TimeSeries/TimeSeriesIDRange.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
@@ -69,6 +72,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsUInt64 recent_samples_bucket_step_seconds;
     extern const TimeSeriesSettingsUInt64 recent_samples_ttl_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsString samples_downsampling_periods;
 }
 
 namespace Setting
@@ -682,18 +686,20 @@ namespace
     ASTs makeBucketedSamplesTimeRangeConditions(
         const TableTimeRange & time_range,
         const DataTypePtr & table_timestamp_type,
-        UInt64 bucket_step_seconds)
+        UInt64 bucket_step_seconds,
+        UInt64 min_bucket_round_seconds)
     {
         ASTs conditions;
 
         if (time_range.min_time)
         {
-            /// The step of the buckets with the scale of the timestamp type.
+            /// The rounding span with the scale of the timestamp type.
+            /// A coalesced row keeps `bucket = min(bucket)`, so the span is the row span of the applied level.
             Int64 scale_multiplier = DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*table_timestamp_type).value_or(0));
-            Int64 bucket_step = static_cast<Int64>(bucket_step_seconds) * scale_multiplier;
+            Int64 round_step = static_cast<Int64>(min_bucket_round_seconds ? min_bucket_round_seconds : bucket_step_seconds) * scale_multiplier;
 
             /// The same rounding as in TimeSeriesSink: towards negative infinity, so that a bucket starts at or before its samples.
-            DateTime64 min_bucket{DateLUTImpl::roundDownToMultiple(time_range.min_time->value, bucket_step)};
+            DateTime64 min_bucket{DateLUTImpl::roundDownToMultiple(time_range.min_time->value, round_step)};
 
             /// bucket >= <min_bucket>
             conditions.push_back(makeASTFunction(
@@ -724,6 +730,7 @@ namespace
         const TableTimeRange & time_range_to_filter_samples,
         const DataTypePtr & table_timestamp_type,
         UInt64 bucket_step_seconds,
+        UInt64 min_bucket_round_seconds,
         ASTPtr whole_metric_id_range_condition)
     {
         ASTs conditions;
@@ -740,7 +747,7 @@ namespace
         {
             /// bucket >= <min_bucket> AND bucket <= <max_time> AND max_time >= <min_time> AND min_time <= <max_time>
             insertAtEnd(conditions, makeBucketedSamplesTimeRangeConditions(
-                time_range_to_filter_samples, table_timestamp_type, bucket_step_seconds));
+                time_range_to_filter_samples, table_timestamp_type, bucket_step_seconds, min_bucket_round_seconds));
         }
         else
         {
@@ -799,6 +806,7 @@ namespace
                                            const TableTimeRange & time_range_to_filter_samples,
                                            const DataTypePtr & table_timestamp_type,
                                            UInt64 bucket_step_seconds,
+                                           UInt64 min_bucket_round_seconds,
                                            ASTPtr whole_metric_id_range_condition)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
@@ -859,7 +867,7 @@ namespace
         /// with the time ranges table joined to filter the time series by time (see addTimeRangesTableJoin).
         {
             auto where_filter = makeWhereFilterForSamplesTable(
-                select_query_from_tags_table, time_range_to_filter_samples, table_timestamp_type, bucket_step_seconds, std::move(whole_metric_id_range_condition));
+                select_query_from_tags_table, time_range_to_filter_samples, table_timestamp_type, bucket_step_seconds, min_bucket_round_seconds, std::move(whole_metric_id_range_condition));
             select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_filter));
         }
 
@@ -935,6 +943,44 @@ namespace
             makeTablesInSelectQuery(make_intrusive<ASTSubquery>(std::move(select_query_from_samples_table))));
 
         return wrapIntoSelectWithUnionQuery(std::move(select_query));
+    }
+
+    /// Groups the rows of one series and keeps the last sample of each interval.
+    /// The inner query can read past `max_time`, up to the end of that sample's interval.
+    /// This slice returns only the samples inside the original range.
+    ASTPtr makeDownsampleSelectQuery(
+        ASTPtr select_query,
+        UInt64 interval_seconds,
+        const TableTimeRange & original_range,
+        const DataTypePtr & table_timestamp_type)
+    {
+        auto outer = make_intrusive<ASTSelectQuery>();
+
+        auto select_list_exp = make_intrusive<ASTExpressionList>();
+        select_list_exp->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+
+        auto downsampled = addParametersToAggregateFunction(
+            makeASTFunction("timeSeriesDownsample", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples)),
+            make_intrusive<ASTLiteral>(interval_seconds));
+        auto sliced = makeASTFunction(
+            "timeSeriesSliceSortedArray",
+            std::move(downsampled),
+            timeSeriesTimestampToAST(original_range.min_time.value_or(minRepresentableTime(table_timestamp_type)), table_timestamp_type),
+            timeSeriesTimestampToAST(original_range.max_time.value_or(maxRepresentableTime(table_timestamp_type)), table_timestamp_type));
+        sliced->setAlias(TimeSeriesColumnNames::Samples);
+        select_list_exp->children.push_back(std::move(sliced));
+        outer->setExpression(ASTSelectQuery::Expression::SELECT, select_list_exp);
+
+        auto group_by = make_intrusive<ASTExpressionList>();
+        group_by->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+        outer->setExpression(ASTSelectQuery::Expression::GROUP_BY, group_by);
+        outer->setExpression(ASTSelectQuery::Expression::HAVING,
+            makeASTFunction("notEmpty", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples)));
+
+        outer->setExpression(ASTSelectQuery::Expression::TABLES,
+            makeTablesInSelectQuery(make_intrusive<ASTSubquery>(std::move(select_query))));
+
+        return wrapIntoSelectWithUnionQuery(std::move(outer));
     }
 
     /// Converts the samples returned by the select query made by makeSelectQuery() to the requested columns
@@ -1269,7 +1315,35 @@ void StorageTimeSeriesSelector::readImpl(
                   quoteString(config.selector.toString()), config.min_time.value, config.max_time.value);
         return;
     }
-    const TableTimeRange time_range_to_filter_samples = table_time_range;
+    TableTimeRange time_range_to_filter_samples = table_time_range;
+    UInt64 min_bucket_round_seconds = bucket_step_seconds;
+    UInt64 downsample_interval_seconds = 0;
+
+    /// One interval for the whole range: the coarsest level whose offset the start of the range has reached.
+    /// The recent samples table is never reduced. Its retention ends before the first offset.
+    if (samples_table_kind == ViewTarget::Samples && bucket_step_seconds)
+    {
+        const auto periods = TimeSeriesDownsamplingPeriods::parse(
+            (*time_series_settings)[TimeSeriesSetting::samples_downsampling_periods].value);
+        time_t query_now = context->getClientInfo().initial_query_start_time;
+        if (query_now <= 0)
+            query_now = std::time(nullptr);
+
+        const Int64 scale_multiplier = DecimalUtils::scaleMultiplier<Int64>(config.time_scale);
+        const Int64 age_scaled = static_cast<Int64>(query_now) * scale_multiplier - config.min_time.value;
+        const UInt64 age_seconds = age_scaled > 0 ? static_cast<UInt64>(age_scaled / scale_multiplier) : 0;
+        if (const auto * level = periods.levelForAge(age_seconds))
+        {
+            downsample_interval_seconds = level->interval_seconds;
+            min_bucket_round_seconds = std::max(level->interval_seconds, bucket_step_seconds);
+            if (time_range_to_filter_samples.max_time)
+            {
+                const Int64 interval_scaled = static_cast<Int64>(level->interval_seconds) * scale_multiplier;
+                time_range_to_filter_samples.max_time = DateTime64{
+                    timeSeriesDownsampleIntervalEnd(time_range_to_filter_samples.max_time->value, interval_scaled)};
+            }
+        }
+    }
 
     const StorageID time_ranges_table_id = time_series_storage->hasTarget(ViewTarget::TimeRanges)
         ? time_series_storage->getTargetTableID(ViewTarget::TimeRanges, context)
@@ -1340,6 +1414,7 @@ void StorageTimeSeriesSelector::readImpl(
         time_range_to_filter_samples,
         config.table_timestamp_type,
         bucket_step_seconds,
+        min_bucket_round_seconds,
         std::move(whole_metric_id_range_condition));
 
     ASTPtr select_query = makeSelectQuery(
@@ -1348,6 +1423,12 @@ void StorageTimeSeriesSelector::readImpl(
         config.table_timestamp_type,
         config.table_value_type,
         bucket_step_seconds);
+
+    if (downsample_interval_seconds)
+    {
+        select_query = makeDownsampleSelectQuery(
+            std::move(select_query), downsample_interval_seconds, table_time_range, config.table_timestamp_type);
+    }
 
     select_query = convertToReturnColumns(
         std::move(select_query), config.table_timestamp_type, config.table_value_type, bucket_step_seconds, config.return_columns);

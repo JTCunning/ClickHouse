@@ -1,0 +1,7 @@
+-- an instant selector uses the interval, so the point at 8000 still sees the sample at 7200
+5
+-- the same selector with the adjustment off is empty
+0
+-- rate over 30 minutes uses two intervals and matches an explicit two-hour range
+0.0005555555555555556
+0.0005555555555555556

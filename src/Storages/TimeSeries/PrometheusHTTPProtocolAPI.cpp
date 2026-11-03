@@ -26,8 +26,11 @@
 #include <Storages/TimeSeries/PrometheusQueryToSQL/Converter.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/SelectQueryBuilder.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
+#include <Storages/TimeSeries/TimeSeriesDownsamplingPeriods.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Storages/TimeSeries/checkTimeSeriesVersion.h>
+
+#include <ctime>
 #include <Storages/TimeSeries/getPromQLResultTimestampType.h>
 #include <Storages/TimeSeries/splitTimeSeriesType.h>
 #include <Interpreters/executeQuery.h>
@@ -62,6 +65,12 @@ namespace Setting
     extern const SettingsBool enable_materialized_cte;
     extern const SettingsUInt64 promql_max_points_per_series;
     extern const SettingsBool promql_push_down_label_matchers;
+    extern const SettingsBool promql_adjust_window_for_downsampling;
+}
+
+namespace TimeSeriesSetting
+{
+    extern const TimeSeriesSettingsString samples_downsampling_periods;
 }
 
 namespace
@@ -210,6 +219,13 @@ void PrometheusHTTPProtocolAPI::executePromQLQuery(
     evaluation_settings.time_scale = getPromQLResultTimestampScale(evaluation_settings.table_timestamp_type);
     evaluation_settings.time_zone = getPromQLResultTimeZone(evaluation_settings.table_timestamp_type);
     evaluation_settings.push_down_label_matchers = getContext()->getSettingsRef()[Setting::promql_push_down_label_matchers];
+    evaluation_settings.adjust_window_for_downsampling = getContext()->getSettingsRef()[Setting::promql_adjust_window_for_downsampling];
+    evaluation_settings.downsampling_periods = TimeSeriesDownsamplingPeriods::parse(
+        (*time_series_storage->getStorageSettings())[TimeSeriesSetting::samples_downsampling_periods].value);
+    time_t query_now = getContext()->getClientInfo().initial_query_start_time;
+    if (query_now <= 0)
+        query_now = std::time(nullptr);
+    evaluation_settings.downsampling_now_seconds = static_cast<UInt64>(query_now);
     const UInt32 time_scale = evaluation_settings.time_scale;
 
     if (!params.lookback_delta_param.empty())

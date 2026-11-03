@@ -23,12 +23,22 @@ namespace
 
     /// The default subquery step is 15 seconds.
     constexpr const Int64 DEFAULT_SUBQUERY_STEP_SECONDS = 15;
+
+    bool needsTwoSamples(std::string_view function_name)
+    {
+        return function_name == "rate" || function_name == "increase" || function_name == "delta"
+            || function_name == "irate" || function_name == "idelta" || function_name == "deriv"
+            || function_name == "changes" || function_name == "resets" || function_name == "predict_linear";
+    }
 }
 
 NodeEvaluationRangeGetter::NodeEvaluationRangeGetter(std::shared_ptr<const PrometheusQueryTree> promql_tree_,
                                                      const PrometheusQueryEvaluationSettings & settings_)
     : promql_tree(promql_tree_)
     , time_scale(settings_.time_scale)
+    , downsampling_periods(settings_.downsampling_periods)
+    , adjust_window_for_downsampling(settings_.adjust_window_for_downsampling)
+    , downsampling_now_seconds(settings_.downsampling_now_seconds)
 {
     if (promql_tree->getTimeScale() != time_scale)
     {
@@ -217,6 +227,64 @@ void NodeEvaluationRangeGetter::setWindows()
             node_range.window = range;
             propagateRangeToParents(node, range);
         }
+    }
+
+    widenWindowsForDownsampling();
+}
+
+
+void NodeEvaluationRangeGetter::widenWindowsForDownsampling()
+{
+    if (!adjust_window_for_downsampling || downsampling_periods.levels.empty() || downsampling_now_seconds == 0)
+        return;
+
+    const Int64 scale_multiplier = DecimalUtils::scaleMultiplier<Int64>(time_scale);
+    const Int64 now_scaled = static_cast<Int64>(downsampling_now_seconds) * scale_multiplier;
+
+    for (size_t pass = 0; pass < downsampling_periods.levels.size(); ++pass)
+    {
+        bool changed = false;
+        for (auto & [node, node_range] : map)
+        {
+            if (node->node_type != NodeType::InstantSelector)
+                continue;
+
+            const Int64 oldest = node_range.start_time.value - node_range.window.value;
+            const Int64 age_scaled = now_scaled - oldest;
+            const UInt64 age_seconds = age_scaled > 0 ? static_cast<UInt64>(age_scaled / scale_multiplier) : 0;
+            const auto * level = downsampling_periods.levelForAge(age_seconds);
+            if (!level)
+                continue;
+
+            const Node * range_selector = nullptr;
+            const Node * cursor = node->parent;
+            while (cursor && (cursor->node_type == NodeType::Offset || cursor->node_type == NodeType::RangeSelector))
+            {
+                if (cursor->node_type == NodeType::RangeSelector)
+                    range_selector = cursor;
+                cursor = cursor->parent;
+            }
+
+            UInt64 samples_needed = 1;
+            if (range_selector && cursor && cursor->node_type == NodeType::Function
+                && needsTwoSamples(static_cast<const PrometheusQueryTree::Function *>(cursor)->function_name))
+                samples_needed = 2;
+
+            const DurationType required{
+                static_cast<Int64>(level->interval_seconds) * static_cast<Int64>(samples_needed) * scale_multiplier};
+            if (!(node_range.window < required))
+                continue;
+
+            node_range.window = required;
+            changed = true;
+            if (range_selector)
+            {
+                map.at(range_selector).window = required;
+                propagateRangeToParents(range_selector, required);
+            }
+        }
+        if (!changed)
+            break;
     }
 }
 

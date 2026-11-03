@@ -222,10 +222,11 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, DefaultDefinition)
     auto definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries");
 
     EXPECT_TRUE(definition.contains("`samples` Array(Tuple(DateTime64(3), Float64))")) << definition;
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_TRUE(definition.contains("recent_samples_ttl_seconds = 345600")) << definition;
     EXPECT_TRUE(definition.contains("samples_bucket_step_seconds = 3600")) << definition;
     EXPECT_TRUE(definition.contains("recent_samples_bucket_step_seconds = 900")) << definition;
+    EXPECT_TRUE(definition.contains("samples_downsampling_periods = ''")) << definition;
 
     /// The `id` type is declared in the inner columns, so there is no need to record it in the settings.
     EXPECT_FALSE(definition.contains("id_type")) << definition;
@@ -751,7 +752,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, VersionSetting)
     /// The clause `AS <other_table>` doesn't copy the version: a new table gets the latest one.
     auto definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 0"));
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_FALSE(definition.contains("version = 0")) << definition;
 }
 
@@ -821,7 +822,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RecentSamplesEngineSettings)
     auto replicated_copy = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 7 "
             "RECENT SAMPLES ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/ts_recent_samples', '{replica}')"));
-    EXPECT_TRUE(replicated_copy.contains("version = 11")) << replicated_copy;
+    EXPECT_TRUE(replicated_copy.contains("version = 12")) << replicated_copy;
     EXPECT_EQ(extractInnerEngine(replicated_copy, "RECENT SAMPLES"), bucketed_replicated_engine);
 
     /// A declared partition key is kept by a copy even when the engine has arguments.
@@ -1201,7 +1202,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, BucketedSamples)
     /// the generated columns and engines of the other layout are regenerated, the settings of the buckets get the defaults.
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 10, samples_index_granularity = 65536 SAMPLES INNER COLUMNS (extra UInt8)"));
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_TRUE(definition.contains("samples_bucket_step_seconds = 3600")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples` " + DEFAULT_SAMPLES_TYPE + ", `bucket` DateTime64(3)")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8" + DEFAULT_SAMPLES_CODECS)) << definition;
@@ -1337,4 +1338,49 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, ConvertsDefinitionsOfOlderVersions)
     {
         normalizeNewTable("CREATE TABLE db.ts (`id` UInt64, `timestamp` DateTime64(3), `value` Float64) ENGINE = TimeSeries");
     }), ErrorCodes::INCORRECT_QUERY);
+}
+
+
+TEST_F(NormalizeTimeSeriesDefinitionTest, DownsamplingPeriods)
+{
+    auto definition = normalizeNewTable(
+        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_downsampling_periods = '30d:5m,180d:1h'");
+    const String engine = extractInnerEngine(definition, "SAMPLES");
+    EXPECT_TRUE(engine.contains("ORDER BY (id, bucket)")) << engine;
+    EXPECT_TRUE(engine.contains("timeSeriesDownsample(300)")) << engine;
+    EXPECT_TRUE(engine.contains("timeSeriesDownsample(3600)")) << engine;
+    EXPECT_TRUE(engine.contains("toIntervalSecond(2595600)")) << engine;
+    EXPECT_TRUE(engine.contains("toIntervalSecond(15555600)")) << engine;
+    EXPECT_EQ(extractInnerEngine(definition, "RECENT SAMPLES"), DEFAULT_RECENT_SAMPLES_ENGINE);
+
+    definition = normalizeNewTable(
+        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_downsampling_periods = '30d:1h,180d:1d'");
+    const String coarse = extractInnerEngine(definition, "SAMPLES");
+    EXPECT_TRUE(coarse.contains("ORDER BY (id, toStartOfInterval(bucket, toIntervalSecond(86400)), bucket)")) << coarse;
+    EXPECT_TRUE(coarse.contains("bucket = min(bucket)")) << coarse;
+
+    definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 11");
+    EXPECT_FALSE(definition.contains("samples_downsampling_periods")) << definition;
+    EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"), DEFAULT_SAMPLES_ENGINE);
+
+    definition = normalizeNewTable(
+        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 0, samples_downsampling_periods = '30d:5m'");
+    EXPECT_TRUE(extractInnerEngine(definition, "SAMPLES").contains("timeSeriesDownsample(300)")) << definition;
+
+    EXPECT_EQ(getExceptionCode([]
+    {
+        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 11, samples_downsampling_periods = '30d:5m'");
+    }), ErrorCodes::INVALID_SETTING_VALUE);
+    EXPECT_EQ(getExceptionCode([]
+    {
+        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_downsampling_periods = '{job=\"a\"}:30d:5m'");
+    }), ErrorCodes::INVALID_SETTING_VALUE);
+    EXPECT_EQ(getExceptionCode([]
+    {
+        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_downsampling_periods = '30d:7m'");
+    }), ErrorCodes::INVALID_SETTING_VALUE);
+    EXPECT_EQ(getExceptionCode([]
+    {
+        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_downsampling_periods = '1h:5m'");
+    }), ErrorCodes::INVALID_SETTING_VALUE);
 }

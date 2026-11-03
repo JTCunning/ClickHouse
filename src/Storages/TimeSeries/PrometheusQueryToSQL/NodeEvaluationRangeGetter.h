@@ -3,6 +3,7 @@
 #include <DataTypes/IDataType.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/ConverterDefs.h>
 #include <Storages/TimeSeries/PrometheusQueryToSQL/NodeEvaluationRange.h>
+#include <Storages/TimeSeries/TimeSeriesDownsamplingPeriods.h>
 
 
 namespace DB::PrometheusQueryToSQL
@@ -25,6 +26,9 @@ private:
     /// Assigns proper windows to nodes.
     void setWindows();
 
+    /// Widens selector windows that read a downsampled range.
+    void widenWindowsForDownsampling();
+
     /// Propagates the range of a range selector or a subquery up to its parents until we meet a range-vector function
     /// (e.g. avg_over_time) if any, so such function could user a proper window.
     void propagateRangeToParents(const PrometheusQueryTree::Node * node, Decimal64 range);
@@ -38,6 +42,9 @@ private:
     TimestampType query_end_time{};
     DurationType instant_selector_window{};
     DurationType default_subquery_step{};
+    TimeSeriesDownsamplingPeriods downsampling_periods;
+    bool adjust_window_for_downsampling = true;
+    UInt64 downsampling_now_seconds = 0;
 
     std::unordered_map<const Node *, NodeEvaluationRange> map;
 };

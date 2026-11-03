@@ -20,6 +20,7 @@ void registerAggregateFunctionTimeseriesMadToGrid(AggregateFunctionFactory & fac
 void registerAggregateFunctionTimeseriesVariance(AggregateFunctionFactory & factory);
 void registerAggregateFunctionLast2Samples(AggregateFunctionFactory & factory);
 void registerAggregateFunctionTimeseriesGroupArray(AggregateFunctionFactory & factory);
+void registerAggregateFunctionTimeSeriesDownsample(AggregateFunctionFactory & factory);
 void registerAggregateFunctionTimeSeriesTopKMasks(AggregateFunctionFactory & factory);
 
 void registerAggregateFunctionTimeseries(AggregateFunctionFactory & factory);
@@ -41,6 +42,7 @@ void registerAggregateFunctionTimeseries(AggregateFunctionFactory & factory)
     registerAggregateFunctionTimeseriesVariance(factory);
     registerAggregateFunctionLast2Samples(factory);
     registerAggregateFunctionTimeseriesGroupArray(factory);
+    registerAggregateFunctionTimeSeriesDownsample(factory);
     registerAggregateFunctionTimeSeriesTopKMasks(factory);
 }
 

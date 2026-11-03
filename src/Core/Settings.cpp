@@ -11402,6 +11402,15 @@ A comparison without `bool` keeps the metric name, so matchers always go through
 A copied matcher turns a selector of a whole metric into a filtered one, which can be slower on a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table with an `id` clustered by metric (the default) if the matcher keeps most series of the metric. Disable the setting for such queries.
 )", PRIVATE_PREVIEW, \
         {"26.10", false, true, "New setting to copy PromQL label matchers across binary operators."}) \
+    DECLARE(Bool, promql_adjust_window_for_downsampling, true, R"(
+Widens a PromQL selector window when the read range reaches a downsampling level of the TimeSeries table.
+An instant selector uses at least one interval.
+These range functions use at least two intervals: `rate`, `increase`, `delta`, `irate`, `idelta`, `deriv`, `changes`, `resets`, `predict_linear`.
+Other range functions use at least one interval.
+The setting has no effect when the table does not set `samples_downsampling_periods`.
+A downsampled range uses this wider window.
+)", PRIVATE_PREVIEW, \
+        {"26.12", true, true, "New setting."}) \
     DECLARE(Bool, allow_experimental_paimon_storage_engine, false, R"(
 Allow to create tables with Paimon* table engines.
 )", EXPERIMENTAL, \

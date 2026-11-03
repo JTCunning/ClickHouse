@@ -1121,6 +1121,17 @@ Queries reading a time range use the `bucket` column to select granules by the p
 columns to skip the rows whose samples are all outside of the range. The function `timeSeriesSliceSortedArray` then cuts out the requested interval
 of the sorted array of samples.
 
+The setting [samples_downsampling_periods](#settings) replaces old rows of the samples table in place.
+Each level has the form `offset:interval`, for example `30d:5m,180d:1h`.
+A row older than an offset keeps the last sample of each interval.
+The timestamp of that sample stays the original timestamp.
+A query uses the coarsest interval that the start of its range has reached.
+The read path applies the same reduction before a merge does.
+The recent samples table is not reduced.
+A PromQL window over a reduced range grows to at least that interval.
+`rate`, `increase`, `delta`, `irate`, `idelta`, `deriv`, `changes`, `resets` and `predict_linear` use at least two intervals.
+The query setting `promql_adjust_window_for_downsampling` disables that wider window.
+
 ### Recent samples table {#recent-samples-table}
 
 The _recent samples_ table is optional and enabled by default (see the [recent_samples_ttl_seconds](#settings) setting;
@@ -1217,7 +1228,7 @@ CREATE TABLE my_table
     `help` String
 )
 ENGINE = TimeSeries
-SETTINGS version = 11, recent_samples_ttl_seconds = 345600, samples_bucket_step_seconds = 3600, recent_samples_bucket_step_seconds = 900
+SETTINGS version = 12, recent_samples_ttl_seconds = 345600, samples_bucket_step_seconds = 3600, recent_samples_bucket_step_seconds = 900, samples_downsampling_periods = ''
 SAMPLES INNER COLUMNS
 (
     `id` Tuple(UInt64, LowCardinality(UUID)),
@@ -1266,9 +1277,9 @@ METRIC FAMILIES INNER ENGINE = ReplacingMergeTree ORDER BY metric_family
 ```
 
 So the columns were generated automatically and also there are five inner target tables with their own column definitions
-stored in the `INNER COLUMNS` clauses. The `recent_samples_ttl_seconds`, `samples_bucket_step_seconds` and `recent_samples_bucket_step_seconds`
-settings were written into the `SETTINGS` clause with their default values: they define the TTL of the recent samples table and
-the buckets of the samples tables, so their effective values are fixed at creation.
+stored in the `INNER COLUMNS` clauses. The `recent_samples_ttl_seconds`, `samples_bucket_step_seconds`, `recent_samples_bucket_step_seconds`
+and `samples_downsampling_periods` settings were written into the `SETTINGS` clause with their default values: they define the TTL of the recent samples table,
+the buckets of the samples tables, and the in-place downsampling of old samples, so their effective values are fixed at creation.
 Also the latest schema version was pinned into the `version` setting (see [Schema versioning](#schema-versioning)).
 
 Inner target tables have names like `.inner_id.samples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
@@ -1543,7 +1554,7 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `version` | UInt64 | 11 | The version of the table: it identifies the set of the target tables and their structure. The version is pinned automatically when a table is created and can't be changed afterwards, normally it should be omitted in the `CREATE TABLE` query (see [Schema versioning](#schema-versioning)) |
+| `version` | UInt64 | 12 | The version of the table: it identifies the set of the target tables and their structure. The version is pinned automatically when a table is created and can't be changed afterwards, normally it should be omitted in the `CREATE TABLE` query (see [Schema versioning](#schema-versioning)) |
 | `tags_to_columns` | Map | {} | Map specifying which tags should be put to separate columns in the [tags](#tags-table) table. Syntax: `{'tag1': 'column1', 'tag2' : column2, ...}` |
 | `store_time_ranges` | Bool | true | If set to true then the table stores the time range of each time series in the [time ranges](#time-ranges-table) table and uses it to filter time series by time. Set to false to disable the time ranges table. Not applicable to tables of [version](#schema-versioning) 7 or earlier, they use `store_min_time_and_max_time` instead |
 | `samples_bucket_step_seconds` | UInt64 | 3600 | The length in seconds of the time buckets of the [samples](#samples-table) table: a row of the table contains the samples of one time series with timestamps in one bucket, and the `bucket` column contains the start of the bucket, i.e. the timestamp rounded down to a multiple of this setting. The default is 1 hour; the effective value is pinned into the table definition at CREATE time |
@@ -1556,6 +1567,7 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 | `samples_index_granularity_bytes` | UInt64 | 524288 | Sets `index_granularity_bytes` of the inner [samples](#samples-table) table. When set explicitly, it overrides `index_granularity_bytes` from the engine declaration. Ignored for a non-MergeTree engine |
 | `recent_samples_ttl_seconds` | UInt64 | 345600 | Retention of the additional [recent samples](#recent-samples-table) target table, which every inserted sample is written to as well. An inner recent samples table always gets `TTL toDateTime(bucket) + toIntervalSecond(recent_samples_ttl_seconds + recent_samples_bucket_step_seconds)` derived from this setting (overriding any TTL from the engine declaration): a row expires when all its samples are older than the TTL. Queries whose time range fits in the TTL window prefer the recent samples table to the main samples table (see the query-level setting `time_series_prefer_recent_samples_table`). The default is 4 days; the effective value is pinned into the table definition at CREATE time. Set to 0 to disable the recent samples table |
 | `recent_samples_bucket_step_seconds` | UInt64 | 900 | The length in seconds of the time buckets of the [recent samples](#recent-samples-table) table, see `samples_bucket_step_seconds`. The default is 15 minutes; the effective value is pinned into the table definition at CREATE time. Requires `recent_samples_ttl_seconds` to be non-zero |
+| `samples_downsampling_periods` | String | empty | Comma-separated downsampling levels for the [samples](#samples-table) table. Each level has the form `offset:interval`, for example `30d:5m,180d:1h`. Offsets increase. Each offset is a multiple of its interval. Each later interval is a multiple of the previous interval. Each interval divides `samples_bucket_step_seconds`, or `samples_bucket_step_seconds` divides the interval. The first offset is at least the recent samples retention. An empty value stores every sample. The value is fixed at CREATE time. Requires version 12. A series filter is not accepted |
 | `recent_samples_partition_by` | Expression | `toStartOfInterval(toDateTime(bucket, 'UTC'), toIntervalHour(5))` | Partition key of the inner [recent samples](#recent-samples-table) table, for example `toStartOfHour(toDateTime(bucket, 'UTC'))`. When set explicitly, it overrides the partition key from the engine declaration; if neither is set, one partition per 5 hours is used. Requires `recent_samples_ttl_seconds` to be non-zero |
 | `recent_samples_index_granularity` | UInt64 | 256 | Sets `index_granularity` of the inner [recent samples](#recent-samples-table) table. When set explicitly, it overrides `index_granularity` from the engine declaration. Ignored for a non-MergeTree engine. The default is 8192 for tables of [version](#schema-versioning) 10 or earlier, which store one sample per row. Requires `recent_samples_ttl_seconds` to be non-zero |
 | `recent_samples_index_granularity_bytes` | UInt64 | 131072 | Sets `index_granularity_bytes` of the inner [recent samples](#recent-samples-table) table. When set explicitly, it overrides `index_granularity_bytes` from the engine declaration. Ignored for a non-MergeTree engine. Requires `recent_samples_ttl_seconds` to be non-zero |
@@ -1579,7 +1591,7 @@ The following settings apply to tables of earlier [versions](#schema-versioning)
 The `TimeSeries` table engine and the PromQL execution layer are under active development:
 the set of the target tables and their structure can change between ClickHouse versions.
 To make such changes detectable, every `TimeSeries` table stores its version in the [version](#settings) setting.
-The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 11) -
+The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 12) -
 persists in the table metadata, and can't be changed by `ALTER`. Tables created before the setting was introduced are considered as version 0.
 Normally the setting should just be omitted in the `CREATE TABLE` query - then the table gets the latest version.
 An explicit `version` is accepted if the server supports that version; then the table is defined the way that version does it (see [Version history](#version-history)).
@@ -1612,6 +1624,7 @@ the `promql` dialect, and the Prometheus HTTP query API):
 | 9 | The default partition key of an inner [recent samples](#recent-samples-table) table names the timezone: `toStartOfInterval(toDateTime(timestamp, 'UTC'), toIntervalHour(5))`. Earlier versions generate it without one, and `toStartOfInterval` counts hours from local midnight, so a change of the server timezone moves the meaning of the partition values they have already written. Existing tables keep the key they were created with, which no `ALTER` can change |
 | 10 | External target tables are not supported for new tables: every target of a table of this version is an inner table. The settings `id_type` and `id_generator` are not supported either: the type of the `id` column and the expression generating identifiers are declared in `TAGS INNER COLUMNS` (see [The `id` column](#id-column)). Tables of earlier versions keep their external target tables and these settings. The stored data didn't change |
 | 11 | The [samples](#samples-table) and [recent samples](#recent-samples-table) tables store buckets of samples: a row keeps the samples of one time series within one time bucket (the columns `samples`, `bucket`, `min_time`, `max_time`) in an `AggregatingMergeTree` ordered by `(id, bucket)`. The settings [`samples_bucket_step_seconds`](#settings), [`samples_partition_by`](#settings), [`samples_index_granularity_bytes`](#settings), [`recent_samples_bucket_step_seconds`](#settings) and [`recent_samples_index_granularity_bytes`](#settings) were introduced, and the defaults of [`samples_index_granularity`](#settings) and [`recent_samples_index_granularity`](#settings) changed. Tables of earlier versions store one sample per row in the columns `timestamp` and `value`: they can still be read, written into and queried with PromQL, and the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function reads them without a conversion when its argument `return_columns` is `'timestamp_and_value'` |
+| 12 | The setting [`samples_downsampling_periods`](#settings) was introduced. When it is set, old rows of the [samples](#samples-table) table are replaced in place with one sample per interval. Tables of earlier versions keep every stored sample |
 
 # Functions {#functions}
 

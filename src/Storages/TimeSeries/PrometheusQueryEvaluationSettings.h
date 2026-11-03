@@ -4,6 +4,7 @@
 #include <Interpreters/StorageID.h>
 #include <Parsers/Prometheus/PrometheusQueryTree.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
+#include <Storages/TimeSeries/TimeSeriesDownsamplingPeriods.h>
 
 
 namespace DB
@@ -71,6 +72,13 @@ struct PrometheusQueryEvaluationSettings
     UInt64 max_points_per_series = 0;
     /// Copy label matchers across binary operators, see the setting `promql_push_down_label_matchers`.
     bool push_down_label_matchers = true;
+
+    /// Levels from `samples_downsampling_periods`. Empty when the table does not downsample.
+    TimeSeriesDownsamplingPeriods downsampling_periods;
+    /// See the query setting `promql_adjust_window_for_downsampling`.
+    bool adjust_window_for_downsampling = true;
+    /// Wall-clock time of the query, in seconds. Used to choose the downsampling level.
+    UInt64 downsampling_now_seconds = 0;
 };
 
 }
