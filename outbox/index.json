@@ -106,7 +106,7 @@
         "tests/performance/promql_selector_pk_range.xml",
         "tests/performance/promql_selector_id_range_row_cost.xml"
       ],
-      "claim": "A 100-name alternation selector goes from about 437 to 233 ms (-45%). The single-metric and regex controls are not slower; the two guard tests may get slightly faster.",
+      "claim": "Built (2026-11-01): 100-name alternation 176 -> 141 ms (-19.9%) in the in-tree perf test; 50-300 names of 500 series -35 to -39%. Controls and guards not slower.",
       "pass_if": "05479 passes (prints 1 2); the 100-name alternation is faster by at least 25%; no control or guard query is reported slower.",
       "notes": "Judged a pass 2026-11-03 though the 25% floor was missed on the original table (-19.9%; -35 to -39% at 50-300 names of 500 series); the floor came from an over-optimistic emulation. Optional before submit: a read_rows assertion in 05479 that pins primary-key pruning (code change, would need another build). Upstream now has unrelated 05479_* tests; renumber only if the check asks."
     },
