@@ -282,7 +282,7 @@ SAMPLES INNER COLUMNS
     CODEC `samples.timestamp` (Delta, T64, ZSTD(3)),
     CODEC `samples.value` (ALP, ZSTD(3))
 )
-SAMPLES INNER ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC')) ORDER BY (id, bucket) SETTINGS index_granularity = 256, index_granularity_bytes = 524288
+SAMPLES INNER ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC')) ORDER BY (id, bucket) SETTINGS index_granularity = 256, index_granularity_bytes = 524288, prewarm_mark_cache = 1
 RECENT SAMPLES INNER COLUMNS
 (
     `id` Tuple(UInt64, LowCardinality(UUID)),
@@ -293,7 +293,7 @@ RECENT SAMPLES INNER COLUMNS
     CODEC `samples.timestamp` (Delta, T64, ZSTD(3)),
     CODEC `samples.value` (ALP, ZSTD(3))
 )
-RECENT SAMPLES INNER ENGINE = AggregatingMergeTree PARTITION BY toStartOfInterval(toDateTime(bucket, 'UTC'), toIntervalHour(5)) ORDER BY (id, bucket) TTL toDateTime(bucket) + toIntervalSecond(346500) SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1
+RECENT SAMPLES INNER ENGINE = AggregatingMergeTree PARTITION BY toStartOfInterval(toDateTime(bucket, 'UTC'), toIntervalHour(5)) ORDER BY (id, bucket) TTL toDateTime(bucket) + toIntervalSecond(346500) SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1, prewarm_mark_cache = 1
 TAGS INNER COLUMNS
 (
     `id` Tuple(UInt64, LowCardinality(UUID)) DEFAULT tuple(sipHash64(metric_name), toLowCardinality(reinterpretAsUUID(sipHash128(tags)))),
@@ -301,14 +301,14 @@ TAGS INNER COLUMNS
     `tags` Map(LowCardinality(String), String),
     INDEX tags_idx tags TYPE text(tokenizer = 'keyValuePairs') GRANULARITY 100000000
 )
-TAGS INNER ENGINE = ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192
+TAGS INNER ENGINE = ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192, prewarm_mark_cache = 1
 TIME RANGES INNER COLUMNS
 (
     `id` Tuple(UInt64, LowCardinality(UUID)),
     `min_time` SimpleAggregateFunction(min, DateTime64(3)),
     `max_time` SimpleAggregateFunction(max, DateTime64(3))
 )
-TIME RANGES INNER ENGINE = AggregatingMergeTree ORDER BY id
+TIME RANGES INNER ENGINE = AggregatingMergeTree ORDER BY id SETTINGS prewarm_mark_cache = 1
 METRIC FAMILIES INNER COLUMNS
 (
     `metric_family` String,
@@ -316,7 +316,7 @@ METRIC FAMILIES INNER COLUMNS
     `unit` LowCardinality(String),
     `help` String
 )
-METRIC FAMILIES INNER ENGINE = ReplacingMergeTree ORDER BY metric_family
+METRIC FAMILIES INNER ENGINE = ReplacingMergeTree ORDER BY metric_family SETTINGS prewarm_mark_cache = 1
 ```
 
 So the columns were generated automatically and also there are five inner target tables with their own column definitions
@@ -344,7 +344,7 @@ CREATE TABLE default.`.inner_id.samples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC'))
 ORDER BY (id, bucket)
-SETTINGS index_granularity = 256, index_granularity_bytes = 524288
+SETTINGS index_granularity = 256, index_granularity_bytes = 524288, prewarm_mark_cache = 1
 ```
 
 ```sql
@@ -362,7 +362,7 @@ ENGINE = AggregatingMergeTree
 PARTITION BY toStartOfInterval(toDateTime(bucket, 'UTC'), toIntervalHour(5))
 ORDER BY (id, bucket)
 TTL toDateTime(bucket) + toIntervalSecond(346500)
-SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1
+SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1, prewarm_mark_cache = 1
 ```
 
 ```sql
@@ -376,7 +376,7 @@ CREATE TABLE default.`.inner_id.tags.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 ENGINE = ReplacingMergeTree
 PRIMARY KEY metric_name
 ORDER BY (metric_name, id)
-SETTINGS index_granularity = 8192
+SETTINGS index_granularity = 8192, prewarm_mark_cache = 1
 ```
 
 ```sql
@@ -388,7 +388,7 @@ CREATE TABLE default.`.inner_id.timeranges.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 )
 ENGINE = AggregatingMergeTree
 ORDER BY id
-SETTINGS index_granularity = 8192
+SETTINGS index_granularity = 8192, prewarm_mark_cache = 1
 ```
 
 ```sql
@@ -401,7 +401,7 @@ CREATE TABLE default.`.inner_id.metricfamilies.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx
 )
 ENGINE = ReplacingMergeTree
 ORDER BY metric_family
-SETTINGS index_granularity = 8192
+SETTINGS index_granularity = 8192, prewarm_mark_cache = 1
 ```
 
 ## Creating a table AS existing table {#create-as}
@@ -614,6 +614,7 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 | `recent_samples_index_granularity` | UInt64 | 256 | Sets `index_granularity` of the inner [recent samples](#recent-samples-table) table. When set explicitly, it overrides `index_granularity` from the engine declaration. Ignored for a non-MergeTree engine. The default is 8192 for tables of [version](#schema-versioning) 10 or earlier, which store one sample per row. Requires `recent_samples_ttl_seconds` to be non-zero |
 | `recent_samples_index_granularity_bytes` | UInt64 | 131072 | Sets `index_granularity_bytes` of the inner [recent samples](#recent-samples-table) table. When set explicitly, it overrides `index_granularity_bytes` from the engine declaration. Ignored for a non-MergeTree engine. Requires `recent_samples_ttl_seconds` to be non-zero |
 | `tags_index_granularity` | UInt64 | 8192 | Sets `index_granularity` of the inner [tags](#tags-table) table. When set explicitly, it overrides `index_granularity` from the engine declaration. Ignored for a non-MergeTree engine |
+| `prewarm_mark_cache` | Bool | true | If set to true then every MergeTree-family inner table gets `prewarm_mark_cache = 1`, so the mark cache is prewarmed on inserts, merges, fetches and on startup of the server. When set explicitly to false, the setting is not added to the inner engines. An explicit `prewarm_mark_cache` in an `INNER ENGINE SETTINGS` clause overrides this. Requires `version` to be at least 12. Ignored for a non-MergeTree engine |
 
 ### Settings of the earlier versions {#settings-of-earlier-versions}
 
@@ -633,7 +634,7 @@ The following settings apply to tables of earlier [versions](#schema-versioning)
 The `TimeSeries` table engine and the PromQL execution layer are under active development:
 the set of the target tables and their structure can change between ClickHouse versions.
 To make such changes detectable, every `TimeSeries` table stores its version in the [version](#settings) setting.
-The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 11) -
+The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 12) -
 persists in the table metadata, and can't be changed by `ALTER`. Tables created before the setting was introduced are considered as version 0.
 Normally the setting should just be omitted in the `CREATE TABLE` query - then the table gets the latest version.
 An explicit `version` is accepted if the server supports that version; then the table is defined the way that version does it (see [Version history](#version-history)).
@@ -666,6 +667,7 @@ the `promql` dialect, and the Prometheus HTTP query API):
 | 9 | The default partition key of an inner [recent samples](#recent-samples-table) table names the timezone: `toStartOfInterval(toDateTime(timestamp, 'UTC'), toIntervalHour(5))`. Earlier versions generate it without one, and `toStartOfInterval` counts hours from local midnight, so a change of the server timezone moves the meaning of the partition values they have already written. Existing tables keep the key they were created with, which no `ALTER` can change |
 | 10 | External target tables are not supported for new tables: every target of a table of this version is an inner table. The settings `id_type` and `id_generator` are not supported either: the type of the `id` column and the expression generating identifiers are declared in `TAGS INNER COLUMNS` (see [The `id` column](#id-column)). Tables of earlier versions keep their external target tables and these settings. The stored data didn't change |
 | 11 | The [samples](#samples-table) and [recent samples](#recent-samples-table) tables store buckets of samples: a row keeps the samples of one time series within one time bucket (the columns `samples`, `bucket`, `min_time`, `max_time`) in an `AggregatingMergeTree` ordered by `(id, bucket)`. The settings [`samples_bucket_step_seconds`](#settings), [`samples_partition_by`](#settings), [`samples_index_granularity_bytes`](#settings), [`recent_samples_bucket_step_seconds`](#settings) and [`recent_samples_index_granularity_bytes`](#settings) were introduced, and the defaults of [`samples_index_granularity`](#settings) and [`recent_samples_index_granularity`](#settings) changed. Tables of earlier versions store one sample per row in the columns `timestamp` and `value`: they can still be read, written into and queried with PromQL, and the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function reads them without a conversion when its argument `return_columns` is `'timestamp_and_value'` |
+| 12 | New MergeTree-family inner tables get `prewarm_mark_cache = 1` by default, controlled by the [`prewarm_mark_cache`](#settings) setting. Tables of earlier versions keep their engines without that setting |
 
 # Functions {#functions}
 

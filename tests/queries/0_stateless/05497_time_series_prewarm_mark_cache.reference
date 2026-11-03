@@ -1,0 +1,19 @@
+-- default: every MergeTree-family inner table has prewarm_mark_cache = 1
+metricfamilies	1
+recentsamples	1
+samples	1
+tags	1
+timeranges	1
+-- SETTINGS prewarm_mark_cache = 0 leaves the setting off the inner engines
+metricfamilies	0
+recentsamples	0
+samples	0
+tags	0
+timeranges	0
+-- an explicit INNER ENGINE SETTINGS value is kept
+metricfamilies	1
+recentsamples	1
+samples	0
+tags	1
+timeranges	1
+-- the setting requires version 12

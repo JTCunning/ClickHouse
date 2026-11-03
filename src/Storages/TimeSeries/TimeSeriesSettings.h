@@ -71,6 +71,10 @@ struct TimeSeriesSettings
     /// they are stored in that table but not aggregated.
     bool hasMinTimeAndMaxTimeInTagsSortingKey() const;
 
+    /// Whether every MergeTree-family inner table should get `prewarm_mark_cache = 1`
+    /// (tables of version MIN_WITH_PREWARM_MARK_CACHE_SETTING or later with the setting enabled).
+    bool hasPrewarmMarkCache() const;
+
 private:
     std::unique_ptr<TimeSeriesSettingsImpl> impl;
 };

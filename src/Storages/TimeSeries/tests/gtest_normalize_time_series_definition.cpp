@@ -190,19 +190,19 @@ namespace
         + ", `min_time` SimpleAggregateFunction(min, DateTime64(3))" + DEFAULT_TIMESTAMP_CODEC
         + ", `max_time` SimpleAggregateFunction(max, DateTime64(3))" + DEFAULT_TIMESTAMP_CODEC + DEFAULT_SAMPLES_CODECS;
     const String DEFAULT_SAMPLES_ENGINE = "AggregatingMergeTree PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC')) ORDER BY (id, bucket) "
-        "SETTINGS index_granularity = 256, index_granularity_bytes = 524288";
+        "SETTINGS index_granularity = 256, index_granularity_bytes = 524288, prewarm_mark_cache = 1";
     const String DEFAULT_RECENT_SAMPLES_ENGINE = "AggregatingMergeTree PARTITION BY toStartOfInterval(toDateTime(bucket, 'UTC'), toIntervalHour(5)) ORDER BY (id, bucket) "
-        "TTL toDateTime(bucket) + toIntervalSecond(346500) SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1";
+        "TTL toDateTime(bucket) + toIntervalSecond(346500) SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1, prewarm_mark_cache = 1";
 
     const String DEFAULT_TAGS_INDEX = ", INDEX tags_idx tags TYPE text(tokenizer = 'keyValuePairs') GRANULARITY 100000000";
     const String DEFAULT_TAGS_COLUMNS = "`id` " + DEFAULT_ID_TYPE + " DEFAULT " + DEFAULT_ID_GENERATOR
         + ", `metric_name` LowCardinality(String), `tags` Map(LowCardinality(String), String)" + DEFAULT_TAGS_INDEX;
-    const String DEFAULT_TAGS_ENGINE = "ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192";
+    const String DEFAULT_TAGS_ENGINE = "ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192, prewarm_mark_cache = 1";
     const String DEFAULT_TIME_RANGES_COLUMNS = "`id` " + DEFAULT_ID_TYPE
         + ", `min_time` SimpleAggregateFunction(min, DateTime64(3)), `max_time` SimpleAggregateFunction(max, DateTime64(3))";
-    const String DEFAULT_TIME_RANGES_ENGINE = "AggregatingMergeTree ORDER BY id";
+    const String DEFAULT_TIME_RANGES_ENGINE = "AggregatingMergeTree ORDER BY id SETTINGS prewarm_mark_cache = 1";
     const String DEFAULT_METRIC_FAMILIES_COLUMNS = "`metric_family` String, `type` LowCardinality(String), `unit` LowCardinality(String), `help` String";
-    const String DEFAULT_METRIC_FAMILIES_ENGINE = "ReplacingMergeTree ORDER BY metric_family";
+    const String DEFAULT_METRIC_FAMILIES_ENGINE = "ReplacingMergeTree ORDER BY metric_family SETTINGS prewarm_mark_cache = 1";
 }
 
 
@@ -222,7 +222,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, DefaultDefinition)
     auto definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries");
 
     EXPECT_TRUE(definition.contains("`samples` Array(Tuple(DateTime64(3), Float64))")) << definition;
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_TRUE(definition.contains("recent_samples_ttl_seconds = 345600")) << definition;
     EXPECT_TRUE(definition.contains("samples_bucket_step_seconds = 3600")) << definition;
     EXPECT_TRUE(definition.contains("recent_samples_bucket_step_seconds = 900")) << definition;
@@ -704,7 +704,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, MetricFamilyInnerColumnNameDependsOnVe
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 5 METRIC FAMILIES INNER COLUMNS (metric_family_name LowCardinality(String)) "
             "METRIC FAMILIES ENGINE = ReplacingMergeTree PARTITION BY substring(metric_family_name, 1, 1) ORDER BY (metric_family_name, type) SETTINGS index_granularity = 1024"));
     EXPECT_EQ(extractInnerColumns(definition, "METRIC FAMILIES"), DEFAULT_METRIC_FAMILIES_COLUMNS);
-    EXPECT_EQ(extractInnerEngine(definition, "METRIC FAMILIES"), "ReplacingMergeTree ORDER BY metric_family SETTINGS index_granularity = 1024");
+    EXPECT_EQ(extractInnerEngine(definition, "METRIC FAMILIES"), "ReplacingMergeTree ORDER BY metric_family SETTINGS index_granularity = 1024, prewarm_mark_cache = 1");
 
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries SETTINGS version = 5",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries METRIC FAMILIES INNER COLUMNS (metric_family LowCardinality(String)) "
@@ -728,7 +728,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, DeclaredEnginesWithoutKeysGetGenerated
     /// A declared aggregating engine of the tags table gets the setting allowing the tag columns outside the sorting key.
     definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries TAGS ENGINE = AggregatingMergeTree");
     EXPECT_EQ(extractInnerEngine(definition, "TAGS"),
-        "AggregatingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192, allow_dimensions_outside_sorting_key = 1");
+        "AggregatingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192, allow_dimensions_outside_sorting_key = 1, prewarm_mark_cache = 1");
 }
 
 
@@ -751,7 +751,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, VersionSetting)
     /// The clause `AS <other_table>` doesn't copy the version: a new table gets the latest one.
     auto definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 0"));
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_FALSE(definition.contains("version = 0")) << definition;
 }
 
@@ -767,12 +767,12 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, SamplesEngineSettings)
         "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_partition_by = 'toStartOfWeek(bucket)', samples_index_granularity = 1024, samples_index_granularity_bytes = 65536 "
         "SAMPLES ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 2048");
     EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"),
-        "AggregatingMergeTree PARTITION BY toStartOfWeek(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 1024, index_granularity_bytes = 65536");
+        "AggregatingMergeTree PARTITION BY toStartOfWeek(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 1024, index_granularity_bytes = 65536, prewarm_mark_cache = 1");
 
     /// A declared partition key is kept.
     definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SAMPLES ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(bucket)");
     EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"),
-        "AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 256, index_granularity_bytes = 524288");
+        "AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 256, index_granularity_bytes = 524288, prewarm_mark_cache = 1");
 
     /// The samples tables require an aggregating engine: the rows of the same series and bucket are merged.
     for (const String & engine : {"MergeTree", "ReplacingMergeTree", "Memory", "ReplicatedMergeTree('/clickhouse/tables/{shard}/ts_samples', '{replica}')"})
@@ -795,13 +795,13 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RecentSamplesEngineSettings)
         "RECENT SAMPLES ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ORDER BY (id, bucket) TTL toDateTime(bucket) + toIntervalSecond(1) SETTINGS index_granularity = 2048");
     EXPECT_EQ(extractInnerEngine(definition, "RECENT SAMPLES"),
         "AggregatingMergeTree PARTITION BY toStartOfHour(bucket) ORDER BY (id, bucket) TTL toDateTime(bucket) + toIntervalSecond(4500) "
-        "SETTINGS index_granularity = 1024, index_granularity_bytes = 65536, ttl_only_drop_parts = 1");
+        "SETTINGS index_granularity = 1024, index_granularity_bytes = 65536, ttl_only_drop_parts = 1, prewarm_mark_cache = 1");
 
     /// A declared partition key is kept.
     definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries RECENT SAMPLES ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(bucket)");
     EXPECT_EQ(extractInnerEngine(definition, "RECENT SAMPLES"),
         "AggregatingMergeTree PARTITION BY toYYYYMM(bucket) ORDER BY (id, bucket) TTL toDateTime(bucket) + toIntervalSecond(346500) "
-        "SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1");
+        "SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1, prewarm_mark_cache = 1");
 
     /// The default partition key is spelled by the version: the timezone is named only from the version that introduced it,
     /// so an earlier version keeps generating the expression it always generated.
@@ -821,7 +821,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RecentSamplesEngineSettings)
     auto replicated_copy = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 7 "
             "RECENT SAMPLES ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/ts_recent_samples', '{replica}')"));
-    EXPECT_TRUE(replicated_copy.contains("version = 11")) << replicated_copy;
+    EXPECT_TRUE(replicated_copy.contains("version = 12")) << replicated_copy;
     EXPECT_EQ(extractInnerEngine(replicated_copy, "RECENT SAMPLES"), bucketed_replicated_engine);
 
     /// A declared partition key is kept by a copy even when the engine has arguments.
@@ -951,10 +951,10 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, CreateAsCopiesInnerDefinitions)
     EXPECT_EQ(extractInnerColumns(definition, "TAGS"),
         "`id` UInt64 DEFAULT sipHash64(tags), `metric_name` LowCardinality(String), `tags` Map(LowCardinality(String), String)" + DEFAULT_TAGS_INDEX);
     EXPECT_EQ(extractInnerEngine(definition, "TAGS"),
-        "ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 1024, min_bytes_for_wide_part = 0");
+        "ReplacingMergeTree PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 1024, min_bytes_for_wide_part = 0, prewarm_mark_cache = 1");
     EXPECT_EQ(extractInnerColumns(definition, "TIME RANGES"),
         "`id` UInt64, `min_time` SimpleAggregateFunction(min, DateTime64(6)), `max_time` SimpleAggregateFunction(max, DateTime64(6))");
-    EXPECT_EQ(extractInnerEngine(definition, "TIME RANGES"), "AggregatingMergeTree ORDER BY id SETTINGS min_bytes_for_wide_part = 0");
+    EXPECT_EQ(extractInnerEngine(definition, "TIME RANGES"), "AggregatingMergeTree ORDER BY id SETTINGS min_bytes_for_wide_part = 0, prewarm_mark_cache = 1");
 
     /// The inner columns of the other table are not copied for a target replaced with an external table, the types come
     /// from the external table: `timestamp` is DateTime64(3) in the source and DateTime64(6) in the external table.
@@ -1201,15 +1201,49 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, BucketedSamples)
     /// the generated columns and engines of the other layout are regenerated, the settings of the buckets get the defaults.
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 10, samples_index_granularity = 65536 SAMPLES INNER COLUMNS (extra UInt8)"));
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_TRUE(definition.contains("samples_bucket_step_seconds = 3600")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples` " + DEFAULT_SAMPLES_TYPE + ", `bucket` DateTime64(3)")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8" + DEFAULT_SAMPLES_CODECS)) << definition;
     EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("`timestamp`")) << definition;
     EXPECT_EQ(extractInnerColumns(definition, "RECENT SAMPLES"), DEFAULT_SAMPLES_COLUMNS);
     EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"),
-        "AggregatingMergeTree PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC')) ORDER BY (id, bucket) SETTINGS index_granularity = 65536, index_granularity_bytes = 524288");
+        "AggregatingMergeTree PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC')) ORDER BY (id, bucket) SETTINGS index_granularity = 65536, index_granularity_bytes = 524288, prewarm_mark_cache = 1");
     EXPECT_EQ(extractInnerEngine(definition, "RECENT SAMPLES"), DEFAULT_RECENT_SAMPLES_ENGINE);
+}
+
+
+TEST_F(NormalizeTimeSeriesDefinitionTest, PrewarmMarkCache)
+{
+    /// Every MergeTree-family inner table of the latest version gets `prewarm_mark_cache = 1` by default.
+    auto definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries");
+    EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"), DEFAULT_SAMPLES_ENGINE);
+    EXPECT_EQ(extractInnerEngine(definition, "RECENT SAMPLES"), DEFAULT_RECENT_SAMPLES_ENGINE);
+    EXPECT_EQ(extractInnerEngine(definition, "TAGS"), DEFAULT_TAGS_ENGINE);
+    EXPECT_EQ(extractInnerEngine(definition, "TIME RANGES"), DEFAULT_TIME_RANGES_ENGINE);
+    EXPECT_EQ(extractInnerEngine(definition, "METRIC FAMILIES"), DEFAULT_METRIC_FAMILIES_ENGINE);
+
+    /// An explicit `prewarm_mark_cache = 0` on the TimeSeries table leaves the setting off the inner engines.
+    definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS prewarm_mark_cache = 0");
+    for (const String & target : {"SAMPLES", "RECENT SAMPLES", "TAGS", "TIME RANGES", "METRIC FAMILIES"})
+        EXPECT_FALSE(extractInnerEngine(definition, target).contains("prewarm_mark_cache")) << target << ": " << definition;
+
+    /// An explicit value in an INNER ENGINE SETTINGS clause is kept.
+    definition = normalizeNewTable(
+        "CREATE TABLE db.ts ENGINE = TimeSeries SAMPLES ENGINE = AggregatingMergeTree SETTINGS prewarm_mark_cache = 0");
+    EXPECT_TRUE(extractInnerEngine(definition, "SAMPLES").contains("prewarm_mark_cache = 0")) << definition;
+    EXPECT_TRUE(extractInnerEngine(definition, "TAGS").contains("prewarm_mark_cache = 1")) << definition;
+
+    /// The setting requires version 12 or later.
+    EXPECT_EQ(getExceptionCode([]
+    {
+        normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 11, prewarm_mark_cache = 1");
+    }), ErrorCodes::INVALID_SETTING_VALUE);
+
+    /// Tables of earlier versions keep their engines without the setting.
+    definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 11");
+    for (const String & target : {"SAMPLES", "RECENT SAMPLES", "TAGS", "TIME RANGES", "METRIC FAMILIES"})
+        EXPECT_FALSE(extractInnerEngine(definition, target).contains("prewarm_mark_cache")) << target << ": " << definition;
 }
 
 

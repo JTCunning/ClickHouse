@@ -777,6 +777,11 @@ namespace
             old_settings.removeSettings({"samples_bucket_step_seconds", "samples_partition_by", "samples_index_granularity_bytes",
                                          "recent_samples_bucket_step_seconds", "recent_samples_index_granularity_bytes"});
 
+        /// The `prewarm_mark_cache` setting exists from version MIN_WITH_PREWARM_MARK_CACHE_SETTING (see TimeSeriesVersion.h),
+        /// so it isn't copied into a table pinned to an earlier version.
+        if (new_version < TimeSeriesVersion::MIN_WITH_PREWARM_MARK_CACHE_SETTING)
+            old_settings.removeSetting("prewarm_mark_cache");
+
         /// The default value of `recent_samples_ttl_seconds` is 345600 (4 days), so an absent setting doesn't disable the recent samples table.
         if (const auto * value = get_new_value("recent_samples_ttl_seconds"); value && (SettingFieldUInt64{*value}.value == 0))
             old_settings.removeSettings({"recent_samples_bucket_step_seconds", "recent_samples_partition_by",
@@ -2051,6 +2056,11 @@ namespace
             default:
                 UNREACHABLE();
         }
+
+        /// Tables of version MIN_WITH_PREWARM_MARK_CACHE_SETTING or later get `prewarm_mark_cache = 1` on every
+        /// MergeTree-family inner table, unless the engine declaration already sets it (see TimeSeriesVersion.h).
+        if (is_merge_tree() && settings.hasPrewarmMarkCache() && !has_engine_setting("prewarm_mark_cache"))
+            set_engine_setting("prewarm_mark_cache", 1);
 
         return changed;
     }
