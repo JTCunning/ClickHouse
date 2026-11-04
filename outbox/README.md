@@ -4,7 +4,7 @@ These are fix branches that lil red can't build itself. James builds and A/B tes
 
 | # | item | status | branch | issue | claim |
 |---|---|---|---|---|---|
-| 1 | [promql-shared-selector-sets](../prs/promql-shared-selector-sets.md) | results-in | `lilred-perf-promql-shared-selector-sets` | #5 | `x + x` 41.6 → 35.4 ms (−15%, run 1): the id set is built once per query |
+| 1 | [promql-shared-selector-sets](../prs/promql-shared-selector-sets.md) | ready-to-build | `lilred-perf-promql-shared-selector-sets` | #5 | `x + x` 41.6 → 35.4 ms (−15%, run 1): the id set is built once per query |
 | 2 | [promql-drop-name-exact-selector](../prs/promql-drop-name-exact-selector.md) | ready-to-build | `lilred-perf-promql-drop-name-exact-selector` | #8 | sum(rate) −19% CPU at 100k series. Overlaps upstream 121069 and 126763: land one of them |
 | 3 | [time-ranges-id-ranges-index-hint](../prs/time-ranges-id-ranges-index-hint.md) | ready-to-submit | `lilred-perf-time-ranges-id-ranges-index-hint` | #6 | 100-name selector −19.9% (176 → 141 ms); 50–300 names −35–39% (build, 2026-11-01) |
 | 4 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | ready-to-build | `lilred-perf-grid-gap-wraparound` | #10 | the 6.1× / 4.1× slowdown on series with a gap goes away |

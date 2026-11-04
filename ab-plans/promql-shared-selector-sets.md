@@ -61,3 +61,6 @@
 - [ ] run every case at 2 and 8 threads; save the raw output under `bench/selector-set-cache/ab/`
 - [ ] fill the branch column of `prs/promql-shared-selector-sets.md` and remove "pending build"
 - [ ] update the report verdict and the backlog row
+
+## Run 3 (confirm, 2026-11-04)
+Run 2 passed on the numbers (6.5–8.2 ms per repeat, guards flat). The branch was then rebased onto master `fd328d4baedf` (conflict in the HTTP API entry point) and got one review fix (`b56cfb0261aa`: the PromQL query always gets its own non-waiting cache). Run 3 only confirms: the tests (05481 on A and B, the integration test, `PreparedSetsCache.*` if a test build is at hand), `promql_repeated_selector.xml` and the `promql_selector_pk_range.xml` guard, same host and method as run 2. Pass: the run 2 pass rule.

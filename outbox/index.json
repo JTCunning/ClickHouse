@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-03T15:45:01Z",
+  "updated": "2026-11-04T11:06:52Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -16,15 +16,15 @@
     {
       "slug": "promql-shared-selector-sets",
       "title": "Build the id set of a repeated PromQL selector once per query",
-      "status": "results-in",
+      "status": "ready-to-build",
       "priority": 1,
       "branch": "lilred-perf-promql-shared-selector-sets",
-      "head": "15ec8bc23e76a041e889809cfebe48c3dfe3450a",
-      "base": "c189bd99fbda59c78489a6734c49397533bdd591",
+      "head": "b56cfb0261aa",
+      "base": "fd328d4baedf",
       "issue": 5,
       "pr_text": "prs/promql-shared-selector-sets.md",
       "report": "reports/2026-11-01-promql-shared-selector-sets.md",
-      "ab_plan": null,
+      "ab_plan": "ab-plans/promql-shared-selector-sets.md",
       "tests": {
         "stateless": [
           "05481_promql_repeated_selector_shares_id_set"
@@ -45,9 +45,9 @@
       "guard_perf_tests": [
         "tests/performance/promql_selector_pk_range.xml"
       ],
-      "claim": "A repeated one-series selector builds its id set once. Measured run 1 (64-vCPU host, 16 pinned cores): about 6 ms off each repeat (x + x 41.6 -> 35.4 ms, -15%; x + x + x 59.1 -> 48.6 ms, -18%; ~200-series y + y -12%). A hit skips only the tags lookup's execution; the subquery is still planned and the samples are still read per selector. Single-use and offset controls unchanged.",
-      "pass_if": "05481 prints 1, 1, 2, 2 (and only those four rows); the repeated-selector queries of promql_repeated_selector.xml are significantly faster by at least 4 ms per repeat; no control or guard query is reported slower (rerun promql_selector_pk_range to settle the +1.1-1.8% seen in run 1).",
-      "notes": "Run 1 failed the old 8 ms/repeat floor: that floor came from my 12-14 ms prediction, which wrongly counted per-query overhead as lookup cost; the 6 ms saved matches the lookup-only cost. Commit 15ec8bc fixes the 05481 log_comment filter (test-only; C++ unchanged). Decide: submit at ~6 ms/repeat (my recommendation: yes) or tell me drop. gtests PreparedSetsCache.* need ENABLE_TESTS=ON (or upstream CI). Related upstream: 118801 (broader, MaterializedCTE)."
+      "claim": "A repeated one-series selector builds its id set once. Run 2 (64-vCPU host, 16 pinned cores, base c189bd99fbda): 6.5-8.2 ms off each repeat (x + x 41.9 -> 34.9 ms, -16.9%; x + x + x 61.0 -> 48.1 ms, -21.1%; ~200-series y + y -15.0%); controls and the pk_range guard not slower.",
+      "pass_if": "Confirm run on the rebased head: 05481 prints 1, 1, 2, 2 (only those four rows) on B and fails on A; the integration test passes; the repeated-selector queries of promql_repeated_selector.xml are significantly faster by at least 4 ms per repeat; no control or promql_selector_pk_range query is reported slower. If it passes, I mark it ready-to-submit with no further changes.",
+      "notes": "2026-11-04: run 2 passed on the numbers. The branch then conflicted with master (PrometheusHTTPProtocolAPI.cpp: master added StoragePrometheusQuery::applySettingsForPrometheusQuery), so I rebased onto fd328d4baedf and moved the cache setup into that helper. Review round 4 fix (b56cfb0): always install the non-waiting cache (a PromQL query inside a mutation kept the mutation's waiting cache before); 05481 pins use_index_for_in_with_subqueries = 1, use_query_condition_cache = 0. PR text is final except the setup line's base sha. gtests PreparedSetsCache.* need ENABLE_TESTS=ON (or upstream CI); running 05481 with random settings (flaky check) would be useful. Related upstream: 118801."
     },
     {
       "slug": "promql-drop-name-exact-selector",
