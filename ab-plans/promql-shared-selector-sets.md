@@ -33,6 +33,7 @@
 | G7 | `ALTER TABLE t DELETE WHERE k IN (SELECT k FROM s)` on a MergeTree with 20 parts, `mutations_sync = 1`; and the same with a TTL-delete merge | guard (mutations get the early adoption too) | equal or faster; same rows left |
 | E1 | `x + x` where x matches 0 series | edge (empty set adopted) | equal or faster; same empty result |
 | E2 | T2 with `max_threads = 1` and with `use_index_for_in_with_subqueries = 0` | edge (the never-wait path; the in-place build disabled) | no hang; with the index off, unchanged (no set built in place) |
+| N1 | `rate(x[5m]) / rate(x[5m] offset 10m)`, `x - x offset 1h`; guard `x - x offset 1d` | next step, not this branch: share one id set built for the union of the windows (a superset of ids is safe because samples are still filtered by time) | G3's sets 2 → 1, ~same saving as T1; the 1d guard must not regress; a series present only in the earlier window must not appear in the later selector's output |
 | E3 | 1,000 distinct single-use selectors in one query (`m1 + m2 + … `, generated) | edge (cache misses only) | unchanged within noise; a reviewer will ask about the hash-map cost |
 
 ## Method
