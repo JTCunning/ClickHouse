@@ -204,8 +204,9 @@ void StoragePrometheusQuery::applySettingsForPrometheusQuery(Context & context)
 
     /// Selectors with the same matchers and time range build the same set of series ids: build it once per query.
     /// The sets are built in one pipeline, so the cache must not wait for a set being built. A distributed plan ships
-    /// the values of each set to its workers and doesn't use the cache. A cache of the outer query (a mutation) is kept.
-    if (!context.getPreparedSetsCache() && !context.getSettingsRef()[Setting::make_distributed_plan])
+    /// the values of each set to its workers and doesn't use the cache. This replaces a waiting cache of an outer
+    /// query (a mutation) in this copy of its context, so the sets of a PromQL query are not shared between mutation tasks.
+    if (!context.getSettingsRef()[Setting::make_distributed_plan])
         context.setPreparedSetsCache(std::make_shared<PreparedSetsCache>(/* wait_for_sets_being_built_ = */ false));
 }
 
