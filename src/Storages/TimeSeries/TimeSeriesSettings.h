@@ -5,6 +5,8 @@
 #include <Core/SettingFieldDataType.h>
 #include <Core/SettingsFields.h>
 
+#include <vector>
+
 
 namespace DB
 {
@@ -18,6 +20,7 @@ struct TimeSeriesSettingsImpl;
     M(CLASS_NAME, Bool) \
     M(CLASS_NAME, DataType) \
     M(CLASS_NAME, Map) \
+    M(CLASS_NAME, String) \
     M(CLASS_NAME, UInt64) \
 
 TIMESERIES_SETTINGS_SUPPORTED_TYPES(TimeSeriesSettings, DECLARE_SETTING_TRAIT)
@@ -62,6 +65,13 @@ struct TimeSeriesSettings
     /// within one time bucket (tables of version MIN_WITH_BUCKETED_SAMPLES or later, see TimeSeriesVersion.h).
     /// The tables of earlier versions store one sample per row.
     bool hasBucketedSamples() const;
+
+    /// Whether the samples table has rollup columns (`samples_rollup_steps` is non-empty).
+    /// Requires version MIN_WITH_ROLLUP_SAMPLES or later.
+    bool hasRollupSamples() const;
+
+    /// Parsed ascending unique rollup steps in seconds from `samples_rollup_steps`.
+    std::vector<UInt64> getRollupStepsSeconds() const;
 
     /// Whether the "tags" table stores the columns `min_time` and `max_time`: tables of earlier versions
     /// with the `store_min_time_and_max_time` setting enabled (see TimeSeriesVersion.h).

@@ -41,13 +41,16 @@ namespace DB
 ///       The settings `id_type` and `id_generator` are not supported either: the type of the `id` column and the expression
 ///       generating identifiers are declared in the inner columns of the "tags" table. Tables of earlier versions keep
 ///       their external target tables and these settings.
-///  11 - The "samples" and "recent samples" target tables store buckets of samples: a row keeps the samples of one time series
-///       within one time bucket as a sorted array in the column `samples`, with the columns `bucket`, `min_time` and `max_time`,
-///       and the tables use `AggregatingMergeTree` ordered by `(id, bucket)`. The settings `samples_bucket_step_seconds`,
-///       `samples_partition_by`, `samples_index_granularity_bytes`, `recent_samples_bucket_step_seconds` and
-///       `recent_samples_index_granularity_bytes` were introduced, and the defaults of `samples_index_granularity` and
-///       `recent_samples_index_granularity` changed. Tables of earlier versions stored one sample per row in the columns
-///       `timestamp` and `value`.
+    ///  11 - The "samples" and "recent samples" target tables store buckets of samples: a row keeps the samples of one time series
+    ///       within one time bucket as a sorted array in the column `samples`, with the columns `bucket`, `min_time` and `max_time`,
+    ///       and the tables use `AggregatingMergeTree` ordered by `(id, bucket)`. The settings `samples_bucket_step_seconds`,
+    ///       `samples_partition_by`, `samples_index_granularity_bytes`, `recent_samples_bucket_step_seconds` and
+    ///       `recent_samples_index_granularity_bytes` were introduced, and the defaults of `samples_index_granularity` and
+    ///       `recent_samples_index_granularity` changed. Tables of earlier versions stored one sample per row in the columns
+    ///       `timestamp` and `value`.
+    ///  12 - Optional rollup columns on the samples table (one per step in `samples_rollup_steps`): `samples_<step>` stores
+    ///       the last raw sample of every interval of that step, with `SimpleAggregateFunction(timeSeriesGroupArray(<step>), ...)`.
+    ///       A query whose step is at least as large as a rollup step reads that column (see `time_series_prefer_rollup_tables`).
 namespace TimeSeriesVersion
 {
     /// The minimum version which can be read with SELECT and whose creation can be replayed on another node.
@@ -107,11 +110,14 @@ namespace TimeSeriesVersion
     /// The earlier versions stored one sample per row.
     constexpr UInt64 MIN_WITH_BUCKETED_SAMPLES = 11;
 
+    /// The first version with optional rollup columns on the samples table (see the version history above).
+    constexpr UInt64 MIN_WITH_ROLLUP_SAMPLES = 12;
+
     /// The latest version, new tables get it unless the CREATE query specifies another supported version.
     /// Bump it each time the schema of the target tables or the semantics of the stored data changes;
     /// every version in [MIN_SUPPORTED, LATEST] must stay supported, so either make the schema generation
     /// version-aware or bump MIN_SUPPORTED too.
-    constexpr UInt64 LATEST = 11;
+    constexpr UInt64 LATEST = 12;
 
     static_assert(MIN_WITH_ID_TYPE_SETTING <= LATEST);
     static_assert(MIN_WITH_SAMPLES_OUTER_COLUMN <= LATEST);
@@ -123,6 +129,8 @@ namespace TimeSeriesVersion
     static_assert(MIN_WITH_UTC_PARTITION_KEY <= LATEST);
     static_assert(MIN_WITHOUT_EXTERNAL_TARGETS <= LATEST);
     static_assert(MIN_WITH_BUCKETED_SAMPLES <= LATEST);
+    static_assert(MIN_WITH_ROLLUP_SAMPLES <= LATEST);
+    static_assert((MIN_WITH_BUCKETED_SAMPLES <= MIN_WITH_ROLLUP_SAMPLES) && (MIN_WITH_ROLLUP_SAMPLES <= LATEST));
     static_assert((MIN_WITH_ID_TYPE_SETTING <= MIN_WITHOUT_ID_SETTINGS) && (MIN_WITHOUT_ID_SETTINGS <= LATEST));
 
     static_assert(MIN_SUPPORTED <= LATEST);

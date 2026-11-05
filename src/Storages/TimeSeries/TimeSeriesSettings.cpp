@@ -7,6 +7,7 @@
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/Prometheus/CreateQueryTimeSeriesSettings.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
+#include <Parsers/Prometheus/parseTimeSeriesRollupSteps.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <Storages/TimeSeries/checkTimeSeriesVersion.h>
@@ -30,6 +31,7 @@ namespace ErrorCodes
     DECLARE(Map, tags_to_columns, Map{}, "Map specifying which tags should be put to separate columns of the 'tags' table. Syntax: {'tag1': 'column1', 'tag2' : column2, ...}", 0) \
     DECLARE(Bool, store_time_ranges, true, "If set to true then the table stores the time range (the minimum and the maximum timestamp) of each time series in the 'time ranges' target table, and uses it to filter time series by time. Not applicable to tables of version 7 or earlier, they use the 'store_min_time_and_max_time' setting instead", 0) \
     DECLARE(UInt64, samples_bucket_step_seconds, 3600, "The length in seconds of the time buckets of the 'samples' table: a row of the table contains the samples of one time series with timestamps in one bucket, and the 'bucket' column contains the start of the bucket, i.e. the timestamp rounded down to a multiple of this setting. The default is 1 hour; the effective value is pinned into the table definition at CREATE time. Requires 'version' to be at least 11", 0) \
+    DECLARE(String, samples_rollup_steps, "", "Comma-separated list of PromQL durations (for example '1m, 5m, 1h') that add a column samples_<step> on the inner samples table. Each column keeps the last raw sample of every interval of that step. Each step must be a whole number of seconds in [1, samples_bucket_step_seconds] and must divide samples_bucket_step_seconds. Empty disables rollups. Requires 'version' to be at least 12", 0) \
     DECLARE(ASTFunction, samples_partition_by, String{}, "Partition key of the inner 'samples' table, for example 'toStartOfWeek(bucket)'. When set explicitly, it overrides the partition key from the engine declaration; if neither is set, 'toYYYYMM(toDateTime(bucket, 'UTC'))' is used, i.e. one partition per month. Requires 'version' to be at least 11", 0) \
     DECLARE(UInt64, samples_index_granularity, 256, "Sets 'index_granularity' of the inner 'samples' table. When set explicitly, it overrides 'index_granularity' from the engine declaration. Ignored for a non-MergeTree engine. The default is 32768 for tables of version 10 or earlier, which store one sample per row", 0) \
     DECLARE(UInt64, samples_index_granularity_bytes, 524288, "Sets 'index_granularity_bytes' of the inner 'samples' table. When set explicitly, it overrides 'index_granularity_bytes' from the engine declaration. Ignored for a non-MergeTree engine. Requires 'version' to be at least 11", 0) \
@@ -149,6 +151,16 @@ bool TimeSeriesSettings::hasBucketedSamples() const
     return (*this)[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES;
 }
 
+bool TimeSeriesSettings::hasRollupSamples() const
+{
+    return !getRollupStepsSeconds().empty();
+}
+
+std::vector<UInt64> TimeSeriesSettings::getRollupStepsSeconds() const
+{
+    return parseTimeSeriesRollupSteps((*this)[TimeSeriesSetting::samples_rollup_steps].value);
+}
+
 bool TimeSeriesSettings::hasMinTimeAndMaxTimeInTagsTable() const
 {
     return ((*this)[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET)
@@ -189,6 +201,7 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
     check_setting_requires_version("samples_index_granularity_bytes", TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES);
     check_setting_requires_version("recent_samples_bucket_step_seconds", TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES);
     check_setting_requires_version("recent_samples_index_granularity_bytes", TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES);
+    check_setting_requires_version("samples_rollup_steps", TimeSeriesVersion::MIN_WITH_ROLLUP_SAMPLES);
 
     auto check_bucket_step = [](const SettingFieldUInt64 & bucket_step, std::string_view setting_name)
     {
@@ -200,6 +213,23 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
     };
     check_bucket_step(settings[TimeSeriesSetting::samples_bucket_step_seconds], "samples_bucket_step_seconds");
     check_bucket_step(settings[TimeSeriesSetting::recent_samples_bucket_step_seconds], "recent_samples_bucket_step_seconds");
+
+    if (settings.isChanged("samples_rollup_steps") || !settings[TimeSeriesSetting::samples_rollup_steps].value.empty())
+    {
+        const UInt64 bucket_step = settings[TimeSeriesSetting::samples_bucket_step_seconds];
+        const auto rollup_steps = settings.getRollupStepsSeconds();
+        for (UInt64 step : rollup_steps)
+        {
+            if (!step || (step > bucket_step))
+                throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+                    "Setting `samples_rollup_steps` values must be in the range [1, samples_bucket_step_seconds={}], got {}",
+                    bucket_step, step);
+            if (bucket_step % step)
+                throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+                    "Setting `samples_rollup_steps` value {} must divide samples_bucket_step_seconds={}",
+                    step, bucket_step);
+        }
+    }
 
     if (settings.hasMinTimeAndMaxTimeInTagsTable())
     {

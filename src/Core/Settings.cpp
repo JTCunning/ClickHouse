@@ -10817,6 +10817,10 @@ Allows creation of tables with the [TimeSeries](/reference/engines/table-engines
 Read from the recent samples table of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table instead of the main samples table when the whole requested time range fits in the TTL window of the recent samples table (see the `recent_samples_ttl_seconds` setting of the TimeSeries table engine).
 )", PRIVATE_PREVIEW, \
         {"26.8", true, true, "New setting to read from the recent samples table of a TimeSeries table when the requested time range fits in its TTL window."}) \
+    DECLARE(Bool, time_series_prefer_rollup_tables, true, R"(
+Read a rollup column `samples_<step>` of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table when the query step is at least as large as one of the configured rollup steps (see the `samples_rollup_steps` setting of the TimeSeries table engine). The largest rollup step that does not exceed the query step is chosen.
+)", PRIVATE_PREVIEW, \
+        {"26.11", true, true, "New setting to read a TimeSeries rollup column when the query step meets or exceeds a configured rollup step."}) \
     DECLARE(UInt64, unique_key_max_encoded_size, 256, R"(
 Maximum size (in bytes) of the order-preserving binary encoding of a single `UNIQUE KEY` row.
 )", EXPERIMENTAL, \

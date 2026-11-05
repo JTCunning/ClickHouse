@@ -1797,6 +1797,7 @@ static std::unordered_map<String, CHSetting> serverSettings2 = {
          {"1.0", "1.01", "1.5", "2", "10"},
          false)},
     {"time_series_prefer_recent_samples_table", trueOrFalseSetting},
+    {"time_series_prefer_rollup_tables", trueOrFalseSetting},
     {"rows_before_aggregation", trueOrFalseSettingNoOracle},
     {"s3_allow_multipart_copy", trueOrFalseSettingNoOracle},
     {"s3_allow_parallel_part_upload", trueOrFalseSettingNoOracle},
