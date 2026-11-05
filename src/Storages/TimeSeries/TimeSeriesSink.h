@@ -108,6 +108,10 @@ private:
     Decimal64 samples_bucket_step{0};
     std::optional<Decimal64> recent_samples_bucket_step;
 
+    /// Rollup steps in seconds and in timestamp-scale ticks. Each step adds a column `samples_<step>` on the samples block.
+    std::vector<UInt64> rollup_steps_seconds;
+    std::vector<Decimal64> rollup_steps;
+
     std::unique_ptr<TargetPipeline> tags_pipeline;
     std::unique_ptr<TargetPipeline> time_ranges_pipeline;
     std::unique_ptr<TargetPipeline> samples_pipeline;

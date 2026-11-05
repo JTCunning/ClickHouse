@@ -563,16 +563,63 @@ namespace
         return samples_block;
     }
 
-    /// The blocks to insert into the samples table and into the recent samples table (if there is one).
+    /// The blocks to insert into the samples table and the recent samples table (if any).
+    /// Rollup columns are part of `samples_block`.
     struct SamplesBlocks
     {
         Block samples_block;
         std::optional<Block> recent_samples_block;
     };
 
+    /// Keeps the last sample of each rollup interval per series from already-sorted indices.
+    template <typename TimestampColumn>
+    void filterLastSamplePerInterval(
+        const PaddedPODArray<UInt8> & filter,
+        const TimestampColumn & ts_timestamps,
+        const PaddedPODArray<size_t> & sorted_indices,
+        const PaddedPODArray<size_t> & sorted_offsets,
+        Decimal64 rollup_step,
+        PaddedPODArray<size_t> & out_indices,
+        PaddedPODArray<size_t> & out_offsets)
+    {
+        const auto & timestamps = ts_timestamps.getData();
+        out_indices.clear();
+        out_offsets.clear();
+        out_offsets.resize(sorted_offsets.size());
+
+        for (size_t i = 0; i < filter.size(); ++i)
+        {
+            if (!filter[i])
+            {
+                out_offsets[i] = out_indices.size();
+                continue;
+            }
+
+            size_t row_begin = (i == 0) ? 0 : sorted_offsets[i - 1];
+            size_t row_end = sorted_offsets[i];
+            std::optional<Decimal64> current_interval;
+            for (size_t pos = row_begin; pos < row_end; ++pos)
+            {
+                const Decimal64 interval = getBucket(toDecimal64(timestamps[sorted_indices[pos]]), rollup_step);
+                if (!current_interval || *current_interval != interval)
+                {
+                    out_indices.push_back(sorted_indices[pos]);
+                    current_interval = interval;
+                }
+                else
+                {
+                    out_indices.back() = sorted_indices[pos];
+                }
+            }
+            out_offsets[i] = out_indices.size();
+        }
+    }
+
     /// Builds the blocks for the samples tables from the series in the input block: the samples of each series
     /// are sorted once (see sortSamples), then split into the buckets of each table (see makeSamplesBlock).
     /// `recent_samples_bucket_step` is unset if there is no recent samples table.
+    /// `rollup_steps` are the rollup intervals in timestamp-scale ticks, parallel to `rollup_steps_seconds`.
+    /// Each step adds a column `samples_<step>` on the samples block. The recent samples block stays raw.
     template <typename TimestampColumn>
     SamplesBlocks makeSamplesBlocksForTimestampType(
         const PaddedPODArray<UInt8> & filter,
@@ -584,7 +631,9 @@ namespace
         const DataTypePtr & value_type,
         const ColumnArray::Offsets & ts_offsets,
         Decimal64 samples_bucket_step,
-        std::optional<Decimal64> recent_samples_bucket_step)
+        std::optional<Decimal64> recent_samples_bucket_step,
+        const std::vector<UInt64> & rollup_steps_seconds,
+        const std::vector<Decimal64> & rollup_steps)
     {
         PaddedPODArray<size_t> sorted_indices;
         PaddedPODArray<size_t> sorted_offsets;
@@ -596,13 +645,28 @@ namespace
 
         if (recent_samples_bucket_step)
         {
-            /// The same block is reused if the buckets of the two tables have the same step
-            /// (a Block copy is cheap: it only copies column pointers).
+            /// Copy before the rollup columns are attached. A Block copy only copies column pointers.
             if (*recent_samples_bucket_step == samples_bucket_step)
                 res.recent_samples_block = res.samples_block;
             else
                 res.recent_samples_block = makeSamplesBlock(
                     filter, id_column, id_type, ts_timestamps, timestamp_type, ts_values, value_type, sorted_indices, sorted_offsets, *recent_samples_bucket_step);
+        }
+
+        for (size_t step_index = 0; step_index < rollup_steps.size(); ++step_index)
+        {
+            PaddedPODArray<size_t> rollup_indices;
+            PaddedPODArray<size_t> rollup_offsets;
+            filterLastSamplePerInterval(filter, ts_timestamps, sorted_indices, sorted_offsets, rollup_steps[step_index], rollup_indices, rollup_offsets);
+            Block rollup_block = makeSamplesBlock(
+                filter, id_column, id_type, ts_timestamps, timestamp_type, ts_values, value_type, rollup_indices, rollup_offsets, samples_bucket_step);
+            if (rollup_block.rows() != res.samples_block.rows())
+                throw Exception(ErrorCodes::LOGICAL_ERROR,
+                    "Rollup column {} has {} rows and the samples block has {}",
+                    TimeSeriesColumnNames::rollupSamplesColumn(rollup_steps_seconds[step_index]), rollup_block.rows(), res.samples_block.rows());
+            auto column = rollup_block.getByName(TimeSeriesColumnNames::Samples);
+            column.name = TimeSeriesColumnNames::rollupSamplesColumn(rollup_steps_seconds[step_index]);
+            res.samples_block.insert(std::move(column));
         }
 
         return res;
@@ -625,7 +689,9 @@ namespace
         const ColumnArray::Offsets & ts_offsets,
         size_t total_samples,
         Decimal64 samples_bucket_step,
-        std::optional<Decimal64> recent_samples_bucket_step)
+        std::optional<Decimal64> recent_samples_bucket_step,
+        const std::vector<UInt64> & rollup_steps_seconds,
+        const std::vector<Decimal64> & rollup_steps)
     {
         if (!samples_bucket_step.value)
         {
@@ -639,10 +705,10 @@ namespace
         }
 
         if (const auto * decimal_timestamps = typeid_cast<const ColumnDecimal<DateTime64> *>(&ts_timestamps))
-            return makeSamplesBlocksForTimestampType(filter, id_column, id_type, *decimal_timestamps, timestamp_type, ts_values, value_type, ts_offsets, samples_bucket_step, recent_samples_bucket_step);
+            return makeSamplesBlocksForTimestampType(filter, id_column, id_type, *decimal_timestamps, timestamp_type, ts_values, value_type, ts_offsets, samples_bucket_step, recent_samples_bucket_step, rollup_steps_seconds, rollup_steps);
 
         if (const auto * uint32_timestamps = typeid_cast<const ColumnUInt32 *>(&ts_timestamps))
-            return makeSamplesBlocksForTimestampType(filter, id_column, id_type, *uint32_timestamps, timestamp_type, ts_values, value_type, ts_offsets, samples_bucket_step, recent_samples_bucket_step);
+            return makeSamplesBlocksForTimestampType(filter, id_column, id_type, *uint32_timestamps, timestamp_type, ts_values, value_type, ts_offsets, samples_bucket_step, recent_samples_bucket_step, rollup_steps_seconds, rollup_steps);
 
         throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Unexpected column {} of timestamps in the column with samples", ts_timestamps.getName());
     }
@@ -799,7 +865,8 @@ std::unique_ptr<TimeSeriesSink::TargetPipeline> TimeSeriesSink::createTargetPipe
     insert_query->columns = columns_ast;
 
     pipeline->context = Context::createCopy(getContext());
-    pipeline->context->setCurrentQueryId(fmt::format("{}:{}", getContext()->getCurrentQueryId(), kind));
+    const String pipeline_id = fmt::format("{}:{}", getContext()->getCurrentQueryId(), kind);
+    pipeline->context->setCurrentQueryId(pipeline_id);
 
     InterpreterInsertQuery interpreter(
         insert_query,
@@ -1019,6 +1086,16 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
         samples_bucket_step = Decimal64(static_cast<Int64>(settings[TimeSeriesSetting::samples_bucket_step_seconds].value) * timestamp_scale_multiplier);
         if (time_series_storage.hasTarget(ViewTarget::RecentSamples))
             recent_samples_bucket_step = Decimal64(static_cast<Int64>(settings[TimeSeriesSetting::recent_samples_bucket_step_seconds].value) * timestamp_scale_multiplier);
+
+        rollup_steps_seconds = settings.getRollupStepsSeconds();
+        rollup_steps.clear();
+        rollup_steps.reserve(rollup_steps_seconds.size());
+        for (UInt64 step_seconds : rollup_steps_seconds)
+        {
+            rollup_steps.push_back(Decimal64(static_cast<Int64>(step_seconds) * timestamp_scale_multiplier));
+            samples_header.insert(ColumnWithTypeAndName{
+                makeSamplesType(timestamp_type, value_type), TimeSeriesColumnNames::rollupSamplesColumn(step_seconds)});
+        }
     }
     else
     {
@@ -1030,9 +1107,15 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
     }
     samples_pipeline = createTargetPipeline(ViewTarget::Samples, samples_header);
 
-    /// The recent samples table (if any) receives every sample too, but its buckets can have another step.
+    /// The recent samples table (if any) receives every raw sample, but its buckets can have another step.
+    /// It does not store the rollup columns.
     if (time_series_storage.hasTarget(ViewTarget::RecentSamples))
-        recent_samples_pipeline = createTargetPipeline(ViewTarget::RecentSamples, samples_header);
+    {
+        Block recent_samples_header = samples_header;
+        for (UInt64 step_seconds : rollup_steps_seconds)
+            recent_samples_header.erase(TimeSeriesColumnNames::rollupSamplesColumn(step_seconds));
+        recent_samples_pipeline = createTargetPipeline(ViewTarget::RecentSamples, recent_samples_header);
+    }
 }
 
 
@@ -1215,7 +1298,7 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     {
         SamplesBlocks samples_blocks = makeSamplesBlocks(
             filter, *id_column, id_type, ts_timestamps, timestamp_type, ts_values, value_type, ts_offsets, total_samples,
-            samples_bucket_step, recent_samples_bucket_step);
+            samples_bucket_step, recent_samples_bucket_step, rollup_steps_seconds, rollup_steps);
 
         samples_pipeline->push(std::move(samples_blocks.samples_block));
         if (samples_blocks.recent_samples_block)
