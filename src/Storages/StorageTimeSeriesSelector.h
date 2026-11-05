@@ -36,6 +36,10 @@ public:
         DateTime64 min_time{};
         DateTime64 max_time{};
 
+        /// Optional query step at `time_scale` (the 7th argument). Zero means unset: read raw samples.
+        /// When set, the largest configured rollup step that does not exceed this step is preferred.
+        DateTime64 step{};
+
         /// The columns the table function timeSeriesSelector() returns besides `id`:
         /// `samples` (of type `Array(Tuple(table_timestamp_type, table_value_type))`); or
         /// `timestamp` and `value` with one sample per row.

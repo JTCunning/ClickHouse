@@ -217,6 +217,7 @@ This function is similar to [range selectors](https://prometheus.io/docs/prometh
 timeSeriesSelector('db_name', 'time_series_table', 'instant_query', min_time, max_time, return_columns)
 timeSeriesSelector(db_name.time_series_table, 'instant_query', min_time, max_time, return_columns)
 timeSeriesSelector('time_series_table', 'instant_query', min_time, max_time, return_columns)
+timeSeriesSelector('db_name', 'time_series_table', 'instant_query', min_time, max_time, return_columns, step)
 ```
 
 ## Arguments {#arguments}
@@ -227,6 +228,7 @@ timeSeriesSelector('time_series_table', 'instant_query', min_time, max_time, ret
 - `min_time` - Start timestamp, inclusive.
 - `max_time` - End timestamp, inclusive.
 - `return_columns` - The columns returning the samples: `'samples'` or `'timestamp_and_value'`, see below.
+- `step` - Optional. The step of the query in seconds, a non-negative value. It is accepted only in the form `(database, table, selector, min_time, max_time, return_columns, step)`. If the samples table has [rollup columns](/reference/engines/table-engines/integrations/time-series#rollup-columns) and the query-level setting `time_series_prefer_rollup_tables` is enabled, the function reads the rollup column with the largest step which is less than or equal to `step`. If `step` is not specified or is 0, the function reads the raw samples.
 
 `min_time` and `max_time` can have fractions of a second even if the timestamps in the table are whole seconds:
 the function selects the samples with `min_time <= timestamp <= max_time` exactly, without rounding the bounds to the type of the timestamps.
