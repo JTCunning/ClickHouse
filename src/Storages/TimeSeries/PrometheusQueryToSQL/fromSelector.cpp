@@ -89,14 +89,29 @@ namespace
         TimestampType min_time = node_range.start_time - node_range.window + 1;
         TimestampType max_time = node_range.end_time;
 
-        builder.from_table_function = makeASTFunction(
-            "timeSeriesSelector",
-            make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
-            make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
-            make_intrusive<ASTLiteral>(String{instant_selector_text}),
-            timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
-            timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
-            make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}));
+        if (node_range.step > 0)
+        {
+            builder.from_table_function = makeASTFunction(
+                "timeSeriesSelector",
+                make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
+                make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
+                make_intrusive<ASTLiteral>(String{instant_selector_text}),
+                timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
+                timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
+                make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}),
+                timeSeriesDurationToAST(node_range.step, context.result_timestamp_type));
+        }
+        else
+        {
+            builder.from_table_function = makeASTFunction(
+                "timeSeriesSelector",
+                make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
+                make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
+                make_intrusive<ASTLiteral>(String{instant_selector_text}),
+                timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
+                timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
+                make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}));
+        }
 
         res.select_query = builder.getSelectQuery();
         return res;

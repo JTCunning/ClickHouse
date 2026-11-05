@@ -74,6 +74,7 @@ namespace TimeSeriesSetting
 namespace Setting
 {
     extern const SettingsBool time_series_prefer_recent_samples_table;
+    extern const SettingsBool time_series_prefer_rollup_tables;
 }
 
 namespace
@@ -237,15 +238,19 @@ StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfigura
     std::string_view function_name = "timeSeriesSelector";
 
     size_t min_num_args = 5;
-    size_t max_num_args = 6;
+    size_t max_num_args = 7;
 
     if ((args.size() < min_num_args) || (args.size() > max_num_args))
     {
-        std::string_view expected_args = "[database, ] time_series_table, selector, min_time, max_time, return_columns";
+        std::string_view expected_args = "[database, ] time_series_table, selector, min_time, max_time, return_columns [, step]";
         throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
                         "Table function '{}' requires {}..{} arguments: {}({})",
                         function_name, min_num_args, max_num_args, function_name, expected_args);
     }
+
+    /// The optional `step` is accepted only in the 7-argument form with an explicit database, so it is not
+    /// confused with the optional database argument of the 6-argument form.
+    const bool has_step_argument = (args.size() == 7);
 
     size_t argument_index = 0;
 
@@ -273,10 +278,17 @@ StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfigura
         }
         else
         {
-            /// timeSeriesSelector( 'mydb', 'my_time_series_table', ... )
+            /// timeSeriesSelector( 'mydb', 'my_time_series_table', ... [, step] )
             time_series_storage_id.database_name = getStringConstArgument(args[argument_index++], context, "database_name");
             time_series_storage_id.table_name = getStringConstArgument(args[argument_index++], context, "table_name");
         }
+    }
+    else if (has_step_argument)
+    {
+        throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                        "Table function '{}' accepts the optional 'step' argument only in the form "
+                        "{}(database, table, selector, min_time, max_time, return_columns, step)",
+                        function_name, function_name);
     }
 
     time_series_storage_id = context->resolveStorageID(time_series_storage_id);
@@ -295,14 +307,29 @@ StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfigura
     auto [min_time_field, min_time_type] = evaluateConstantExpression(args[argument_index++], context);
     auto [max_time_field, max_time_type] = evaluateConstantExpression(args[argument_index++], context);
 
-    UInt32 table_timestamp_scale = tryGetDecimalScale(*table_timestamp_type).value_or(0);
-    UInt32 parameters_scale = getTimeScale(table_timestamp_scale, min_time_type, max_time_type);
-    auto min_time = parseTimeSeriesTimestamp(min_time_field, min_time_type, parameters_scale);
-    auto max_time = parseTimeSeriesTimestamp(max_time_field, max_time_type, parameters_scale);
-
     /// The argument `return_columns` chooses the columns returning the samples: 'samples' or 'timestamp_and_value'.
     String return_columns_str = getStringConstArgument(args[argument_index++], context, "return_columns");
     auto return_columns = parseReturnColumns(return_columns_str, function_name);
+
+    Field step_field;
+    DataTypePtr step_type;
+    if (has_step_argument)
+        std::tie(step_field, step_type) = evaluateConstantExpression(args[argument_index++], context);
+
+    UInt32 table_timestamp_scale = tryGetDecimalScale(*table_timestamp_type).value_or(0);
+    UInt32 parameters_scale = getTimeScale(table_timestamp_scale, min_time_type, max_time_type);
+    if (step_type)
+        parameters_scale = getTimeScale(parameters_scale, step_type, step_type);
+    auto min_time = parseTimeSeriesTimestamp(min_time_field, min_time_type, parameters_scale);
+    auto max_time = parseTimeSeriesTimestamp(max_time_field, max_time_type, parameters_scale);
+
+    DateTime64 step{};
+    if (has_step_argument)
+    {
+        step = parseTimeSeriesTimestamp(step_field, step_type, parameters_scale);
+        if (step < 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Table function '{}' requires a non-negative 'step' argument", function_name);
+    }
 
     chassert(argument_index == args.size());
 
@@ -316,6 +343,7 @@ StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfigura
     config.time_scale = parameters_scale;
     config.min_time = min_time;
     config.max_time = max_time;
+    config.step = step;
     return config;
 }
 
@@ -799,6 +827,7 @@ namespace
                                            const TableTimeRange & time_range_to_filter_samples,
                                            const DataTypePtr & table_timestamp_type,
                                            UInt64 bucket_step_seconds,
+                                           const String & samples_column_name,
                                            ASTPtr whole_metric_id_range_condition)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
@@ -821,7 +850,7 @@ namespace
                 /// the function cuts out the samples with timestamps in [min_time, max_time].
                 auto samples = makeASTFunction(
                     "timeSeriesSliceSortedArray",
-                    make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples),
+                    make_intrusive<ASTIdentifier>(samples_column_name),
                     timeSeriesTimestampToAST(time_range_to_filter_samples.min_time.value_or(minRepresentableTime(table_timestamp_type)), table_timestamp_type),
                     timeSeriesTimestampToAST(time_range_to_filter_samples.max_time.value_or(maxRepresentableTime(table_timestamp_type)), table_timestamp_type));
                 samples->setAlias(TimeSeriesColumnNames::Samples);
@@ -1232,14 +1261,16 @@ void StorageTimeSeriesSelector::readImpl(
 
     const auto & matchers = typeid_cast<const PrometheusQueryTree::InstantSelector &>(*config.selector.getRoot()).matchers;
 
-    /// Prefer the recent samples table when the whole range fits in its TTL window: it's a much smaller copy of the recent samples.
-    auto samples_table_kind = ViewTarget::Samples;
+    /// Prefer the recent samples table when the whole range fits in its TTL window.
+    /// Otherwise a query step can read a rollup column of the samples table.
+    ViewTarget::Kind samples_table_kind = ViewTarget::Samples;
 
     /// The step of the buckets of the table being read (the samples table and the recent samples table have their own steps),
     /// zero for a table storing one sample per row (see `TimeSeriesSettings::hasBucketedSamples`).
     UInt64 bucket_step_seconds = 0;
     if (time_series_settings->hasBucketedSamples())
         bucket_step_seconds = (*time_series_settings)[TimeSeriesSetting::samples_bucket_step_seconds];
+
     const auto recent_samples_ttl_seconds = (*time_series_settings)[TimeSeriesSetting::recent_samples_ttl_seconds].value;
     if (recent_samples_ttl_seconds && context->getSettingsRef()[Setting::time_series_prefer_recent_samples_table])
     {
@@ -1252,6 +1283,29 @@ void StorageTimeSeriesSelector::readImpl(
                 bucket_step_seconds = (*time_series_settings)[TimeSeriesSetting::recent_samples_bucket_step_seconds];
             LOG_DEBUG(log, "Selector {} time range [{}, {}] fits in the recent samples TTL window: reading from the recent samples table",
                       quoteString(config.selector.toString()), config.min_time.value, config.max_time.value);
+        }
+    }
+
+    String samples_column_name = TimeSeriesColumnNames::Samples;
+    if ((samples_table_kind == ViewTarget::Samples)
+        && (config.step > 0)
+        && time_series_settings->hasRollupSamples()
+        && time_series_settings->hasBucketedSamples()
+        && context->getSettingsRef()[Setting::time_series_prefer_rollup_tables])
+    {
+        const Int64 scale_multiplier = DecimalUtils::scaleMultiplier<Int64>(config.time_scale);
+        const UInt64 step_seconds = static_cast<UInt64>(config.step.value / scale_multiplier);
+        UInt64 chosen_rollup_step = 0;
+        for (UInt64 rollup_step : time_series_settings->getRollupStepsSeconds())
+        {
+            if (rollup_step <= step_seconds)
+                chosen_rollup_step = rollup_step;
+        }
+        if (chosen_rollup_step)
+        {
+            samples_column_name = TimeSeriesColumnNames::rollupSamplesColumn(chosen_rollup_step);
+            LOG_DEBUG(log, "Selector {} step {}s reads rollup column {}",
+                      quoteString(config.selector.toString()), step_seconds, samples_column_name);
         }
     }
 
@@ -1340,6 +1394,7 @@ void StorageTimeSeriesSelector::readImpl(
         time_range_to_filter_samples,
         config.table_timestamp_type,
         bucket_step_seconds,
+        samples_column_name,
         std::move(whole_metric_id_range_condition));
 
     ASTPtr select_query = makeSelectQuery(
