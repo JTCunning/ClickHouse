@@ -1,6 +1,7 @@
 #include <Storages/TimeSeries/normalizeTimeSeriesDefinitionImpl.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
+#include <Core/Field.h>
 #include <Core/Settings.h>
 #include <Core/SettingsEnums.h>
 #include <Core/UUID.h>
@@ -34,6 +35,7 @@
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <Parsers/Prometheus/CreateQueryTimeSeriesSettings.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
+#include <Parsers/Prometheus/parseTimeSeriesRollupSteps.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Storages/TimeSeries/TimeSeriesIDGenerator.h>
 #include <base/EnumReflection.h>
@@ -57,6 +59,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsASTFunction recent_samples_partition_by;
     extern const TimeSeriesSettingsUInt64 recent_samples_ttl_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsString samples_rollup_steps;
     extern const TimeSeriesSettingsUInt64 samples_index_granularity;
     extern const TimeSeriesSettingsUInt64 samples_index_granularity_bytes;
     extern const TimeSeriesSettingsASTFunction samples_partition_by;
@@ -112,12 +115,43 @@ namespace
         return {tuple_type->getElements()[0], tuple_type->getElements()[1]};
     }
 
-    /// Whether `type` is `SimpleAggregateFunction(timeSeriesGroupArray, ...)`: the aggregating engine of a samples table
-    /// merges the rows of the same series and bucket with this function.
-    bool isTimeSeriesGroupArraySimpleAggregate(const DataTypePtr & type)
+    /// Whether `type` is `SimpleAggregateFunction(timeSeriesGroupArray, ...)` with no parameters,
+    /// or `SimpleAggregateFunction(timeSeriesGroupArray(<step>), ...)` when `rollup_step_seconds` is set.
+    bool isTimeSeriesGroupArraySimpleAggregate(const DataTypePtr & type, const std::optional<UInt64> & rollup_step_seconds = std::nullopt)
     {
         const auto * simple_aggregate_function = typeid_cast<const DataTypeCustomSimpleAggregateFunction *>(type->getCustomName());
-        return simple_aggregate_function && (simple_aggregate_function->getFunctionName() == "timeSeriesGroupArray");
+        if (!simple_aggregate_function || (simple_aggregate_function->getFunctionName() != "timeSeriesGroupArray"))
+            return false;
+
+        const auto & parameters = simple_aggregate_function->getParameters();
+        if (!rollup_step_seconds)
+            return parameters.empty();
+        if (parameters.size() != 1)
+            return false;
+
+        UInt64 parameter_step = 0;
+        const Field & parameter = parameters[0];
+        if (parameter.getType() == Field::Types::UInt64)
+            parameter_step = parameter.safeGet<UInt64>();
+        else if ((parameter.getType() == Field::Types::Int64) && (parameter.safeGet<Int64>() >= 0))
+            parameter_step = static_cast<UInt64>(parameter.safeGet<Int64>());
+        else
+            return false;
+        return parameter_step == *rollup_step_seconds;
+    }
+
+    /// `samples_<step>` is a rollup column. The suffix is a positive decimal integer.
+    bool isRollupSamplesColumnName(std::string_view name)
+    {
+        constexpr std::string_view prefix = "samples_";
+        if (!name.starts_with(prefix) || (name.size() == prefix.size()) || (name[prefix.size()] == '0'))
+            return false;
+        for (char c : name.substr(prefix.size()))
+        {
+            if ((c < '0') || (c > '9'))
+                return false;
+        }
+        return true;
     }
 
     /// Conflict-checking setter for `DataTypePtr`.
@@ -1382,11 +1416,12 @@ namespace
     }
 
     /// Makes the AST of the type `SimpleAggregateFunction(<function_name>, <argument_type>)`.
-    ASTPtr makeSimpleAggregate(const String & function_name, const DataTypePtr & argument_type)
+    /// `parameters` is the parameter list of the function, for example the step of `timeSeriesGroupArray(60)`.
+    ASTPtr makeSimpleAggregate(const String & function_name, const DataTypePtr & argument_type, const Array & parameters = {})
     {
         AggregateFunctionProperties properties;
-        auto function = AggregateFunctionFactory::instance().get(function_name, NullsAction::EMPTY, {argument_type}, {}, properties);
-        auto custom_name = std::make_unique<DataTypeCustomSimpleAggregateFunction>(function, DataTypes{argument_type}, Array{});
+        auto function = AggregateFunctionFactory::instance().get(function_name, NullsAction::EMPTY, {argument_type}, parameters, properties);
+        auto custom_name = std::make_unique<DataTypeCustomSimpleAggregateFunction>(function, DataTypes{argument_type}, parameters);
         auto type = DataTypeFactory::instance().getCustom(std::make_unique<DataTypeCustomDesc>(std::move(custom_name)));
         return dataTypeToAST(type);
     }
@@ -1458,6 +1493,22 @@ namespace
                     {
                         add_codec_declaration(String{TimeSeriesColumnNames::Samples} + "." + TimeSeriesColumnNames::Timestamp, getDefaultTimestampCodec());
                         add_codec_declaration(String{TimeSeriesColumnNames::Samples} + "." + TimeSeriesColumnNames::Value, getDefaultValueCodec());
+                    }
+
+                    /// One column per rollup step, only on the samples table. The recent samples table stays a raw copy.
+                    if (inner_table_kind == ViewTarget::Samples)
+                    {
+                        for (UInt64 step : time_series_settings.getRollupStepsSeconds())
+                        {
+                            const String column_name = TimeSeriesColumnNames::rollupSamplesColumn(step);
+                            Array parameters;
+                            parameters.emplace_back(step);
+                            if (add_column_if_missing(column_name, makeSimpleAggregate("timeSeriesGroupArray", samples_type, parameters)))
+                            {
+                                add_codec_declaration(column_name + "." + TimeSeriesColumnNames::Timestamp, getDefaultTimestampCodec());
+                                add_codec_declaration(column_name + "." + TimeSeriesColumnNames::Value, getDefaultValueCodec());
+                            }
+                        }
                     }
 
                     /// `bucket` is computed on insertion from the `*_bucket_step_seconds` setting of the table. The three columns get the codec
@@ -1569,6 +1620,10 @@ namespace
             default:
                 UNREACHABLE();
         }
+
+        /// A rollup column whose step is no longer in `samples_rollup_steps` is not an extra column.
+        if (inner_table_kind == ViewTarget::Samples)
+            std::erase_if(original, [](const auto & name_and_column) { return isRollupSamplesColumnName(name_and_column.first); });
 
         /// Copy all remaining original columns at the end (user-defined extra columns).
         for (auto & [name, col] : original)
@@ -2232,6 +2287,27 @@ namespace
                 resolved_types.value_type->getName());
         };
 
+        /// The rollup column `samples_<step>` uses `timeSeriesGroupArray(<step>)` and the same tuple types as `samples`.
+        auto check_column_rollup_samples = [&](std::string_view column_name, UInt64 step)
+        {
+            check_column(column_name);
+            const auto * col = target_table_columns.tryGet(String(column_name));
+            auto [samples_timestamp_type, samples_value_type] = trySplitSamplesType(col->type, /* allow_unnamed_tuple = */ false);
+            if (isTimeSeriesGroupArraySimpleAggregate(col->type, step) && samples_timestamp_type && samples_value_type
+                && samples_timestamp_type->equals(*resolved_types.timestamp_type) && samples_value_type->equals(*resolved_types.value_type))
+                return;
+            throw Exception(
+                ErrorCodes::BAD_TYPE_OF_FIELD,
+                "{}: Column {} in the {} table has type {}, but expected SimpleAggregateFunction(timeSeriesGroupArray({}), Array(Tuple(timestamp {}, value {})))",
+                table_id.getNameForLogs(),
+                column_name,
+                target_kind,
+                col->type->getName(),
+                step,
+                resolved_types.timestamp_type->getName(),
+                resolved_types.value_type->getName());
+        };
+
         /// Checks that a column of the layout of the other versions is not declared.
         auto check_column_not_exists = [&](std::string_view column_name)
         {
@@ -2280,6 +2356,11 @@ namespace
                 check_column_not_exists(TimeSeriesColumnNames::Value);
 
                 check_column_samples(TimeSeriesColumnNames::Samples);
+                if (target_kind == ViewTarget::Samples)
+                {
+                    for (UInt64 step : time_series_settings.getRollupStepsSeconds())
+                        check_column_rollup_samples(TimeSeriesColumnNames::rollupSamplesColumn(step), step);
+                }
                 check_column_type(TimeSeriesColumnNames::Bucket, resolved_types.timestamp_type);
                 check_column_bucket_bound(TimeSeriesColumnNames::MinTime, "min");
                 check_column_bucket_bound(TimeSeriesColumnNames::MaxTime, "max");
@@ -2667,6 +2748,17 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
             {
                 setEngineSettings(*create_query.storage, "recent_samples_bucket_step_seconds",
                     Field(settings[TimeSeriesSetting::recent_samples_bucket_step_seconds].value));
+            }
+        }
+
+        /// Column names are `samples_<seconds>`. Store the same seconds, in ascending order.
+        if (settings.hasRollupSamples() && create_query.storage)
+        {
+            const String canonical_steps = formatTimeSeriesRollupSteps(settings.getRollupStepsSeconds());
+            if (settings[TimeSeriesSetting::samples_rollup_steps].value != canonical_steps)
+            {
+                setEngineSettings(*create_query.storage, "samples_rollup_steps", Field(canonical_steps));
+                settings[TimeSeriesSetting::samples_rollup_steps] = canonical_steps;
             }
         }
 

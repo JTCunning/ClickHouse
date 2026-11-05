@@ -138,7 +138,7 @@ namespace
     String extractInnerEngine(const String & definition, const String & target)
     {
         static const std::vector<String> target_clauses
-            = {" SAMPLES INNER ", " RECENT SAMPLES INNER ", " TAGS INNER ", " TIME RANGES INNER ", " METRIC FAMILIES INNER ", " METRICS INNER "};
+            = {" SAMPLES INNER ", " RECENT SAMPLES INNER ", " ROLLUP SAMPLES ", " TAGS INNER ", " TIME RANGES INNER ", " METRIC FAMILIES INNER ", " METRICS INNER "};
 
         String prefix = target + " INNER ENGINE = ";
         size_t start = definition.find(prefix);
@@ -194,6 +194,25 @@ namespace
     const String DEFAULT_RECENT_SAMPLES_ENGINE = "AggregatingMergeTree PARTITION BY toStartOfInterval(toDateTime(bucket, 'UTC'), toIntervalHour(5)) ORDER BY (id, bucket) "
         "TTL toDateTime(bucket) + toIntervalSecond(346500) SETTINGS index_granularity = 256, index_granularity_bytes = 131072, ttl_only_drop_parts = 1";
 
+    /// The samples inner columns with one `samples_<step>` column per rollup step.
+    String samplesColumnsWithRollups(const std::vector<UInt64> & steps)
+    {
+        String columns = "`id` " + DEFAULT_ID_TYPE + ", `samples` " + DEFAULT_SAMPLES_TYPE;
+        String codecs = DEFAULT_SAMPLES_CODECS;
+        for (UInt64 step : steps)
+        {
+            const String name = "samples_" + std::to_string(step);
+            columns += ", `" + name + "` SimpleAggregateFunction(timeSeriesGroupArray(" + std::to_string(step)
+                + "), Array(Tuple(timestamp DateTime64(3), value Float64)))";
+            codecs += ", CODEC `" + name + ".timestamp` (Delta, T64, ZSTD(3)), CODEC `" + name + ".value` (ALP, ZSTD(3))";
+        }
+        columns += ", `bucket` DateTime64(3)" + DEFAULT_TIMESTAMP_CODEC
+            + ", `min_time` SimpleAggregateFunction(min, DateTime64(3))" + DEFAULT_TIMESTAMP_CODEC
+            + ", `max_time` SimpleAggregateFunction(max, DateTime64(3))" + DEFAULT_TIMESTAMP_CODEC
+            + codecs;
+        return columns;
+    }
+
     const String DEFAULT_TAGS_INDEX = ", INDEX tags_idx tags TYPE text(tokenizer = 'keyValuePairs') GRANULARITY 100000000";
     const String DEFAULT_TAGS_COLUMNS = "`id` " + DEFAULT_ID_TYPE + " DEFAULT " + DEFAULT_ID_GENERATOR
         + ", `metric_name` LowCardinality(String), `tags` Map(LowCardinality(String), String)" + DEFAULT_TAGS_INDEX;
@@ -222,7 +241,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, DefaultDefinition)
     auto definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries");
 
     EXPECT_TRUE(definition.contains("`samples` Array(Tuple(DateTime64(3), Float64))")) << definition;
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_TRUE(definition.contains("recent_samples_ttl_seconds = 345600")) << definition;
     EXPECT_TRUE(definition.contains("samples_bucket_step_seconds = 3600")) << definition;
     EXPECT_TRUE(definition.contains("recent_samples_bucket_step_seconds = 900")) << definition;
@@ -751,7 +770,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, VersionSetting)
     /// The clause `AS <other_table>` doesn't copy the version: a new table gets the latest one.
     auto definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 0"));
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_FALSE(definition.contains("version = 0")) << definition;
 }
 
@@ -821,7 +840,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RecentSamplesEngineSettings)
     auto replicated_copy = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 7 "
             "RECENT SAMPLES ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/ts_recent_samples', '{replica}')"));
-    EXPECT_TRUE(replicated_copy.contains("version = 11")) << replicated_copy;
+    EXPECT_TRUE(replicated_copy.contains("version = 12")) << replicated_copy;
     EXPECT_EQ(extractInnerEngine(replicated_copy, "RECENT SAMPLES"), bucketed_replicated_engine);
 
     /// A declared partition key is kept by a copy even when the engine has arguments.
@@ -875,6 +894,9 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, NormalizationIsIdempotent)
         {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 10, recent_samples_partition_by = 'toStartOfHour(timestamp)' "
          "SAMPLES INNER COLUMNS (timestamp DateTime64(6) CODEC(Delta, ZSTD(1)), extra UInt8) TAGS INNER COLUMNS (id UInt64)", {}},
         {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 8 TAGS db.ext_tags", params_with_external_tags},
+        {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m, 1m'", {}},
+        {"CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1m', recent_samples_ttl_seconds = 0 "
+         "SAMPLES INNER COLUMNS (extra UInt8)", {}},
     };
 
     for (const auto & [query, params] : definitions)
@@ -1201,7 +1223,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, BucketedSamples)
     /// the generated columns and engines of the other layout are regenerated, the settings of the buckets get the defaults.
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries",
         normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS version = 10, samples_index_granularity = 65536 SAMPLES INNER COLUMNS (extra UInt8)"));
-    EXPECT_TRUE(definition.contains("version = 11")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
     EXPECT_TRUE(definition.contains("samples_bucket_step_seconds = 3600")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples` " + DEFAULT_SAMPLES_TYPE + ", `bucket` DateTime64(3)")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8" + DEFAULT_SAMPLES_CODECS)) << definition;
@@ -1210,6 +1232,96 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, BucketedSamples)
     EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"),
         "AggregatingMergeTree PARTITION BY toYYYYMM(toDateTime(bucket, 'UTC')) ORDER BY (id, bucket) SETTINGS index_granularity = 65536, index_granularity_bytes = 524288");
     EXPECT_EQ(extractInnerEngine(definition, "RECENT SAMPLES"), DEFAULT_RECENT_SAMPLES_ENGINE);
+}
+
+
+TEST_F(NormalizeTimeSeriesDefinitionTest, RollupSamples)
+{
+    /// Steps are written in the ascending canonical form in seconds, and each step adds a column on the samples table.
+    auto definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m, 1m'");
+    EXPECT_TRUE(definition.contains("samples_rollup_steps = '60, 300'")) << definition;
+    EXPECT_TRUE(definition.contains("version = 12")) << definition;
+    EXPECT_EQ(extractInnerColumns(definition, "SAMPLES"), samplesColumnsWithRollups({60, 300})) << definition;
+    EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"), DEFAULT_SAMPLES_ENGINE);
+    EXPECT_FALSE(definition.contains("samples_3600")) << definition;
+    EXPECT_EQ(extractInnerColumns(definition, "RECENT SAMPLES"), DEFAULT_SAMPLES_COLUMNS);
+    EXPECT_EQ(extractInnerEngine(definition, "METRIC FAMILIES"), DEFAULT_METRIC_FAMILIES_ENGINE);
+
+    /// The recent samples table stays raw, and the samples engine settings still apply.
+    definition = normalizeNewTable(
+        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1h', recent_samples_ttl_seconds = 0, "
+        "samples_partition_by = 'toStartOfWeek(bucket)', samples_index_granularity = 1024");
+    EXPECT_FALSE(definition.contains("RECENT SAMPLES")) << definition;
+    EXPECT_EQ(extractInnerColumns(definition, "SAMPLES"), samplesColumnsWithRollups({3600})) << definition;
+    EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"),
+        "AggregatingMergeTree PARTITION BY toStartOfWeek(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 1024, index_granularity_bytes = 524288");
+
+    /// A declared samples column list keeps its extra columns and gets the generated rollup columns.
+    definition = normalizeNewTable(
+        "CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '60' "
+        "SAMPLES INNER COLUMNS (extra UInt8) SAMPLES INNER ENGINE = AggregatingMergeTree ORDER BY (id, bucket) SETTINGS index_granularity = 2048");
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("timeSeriesGroupArray(60)")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8")) << definition;
+    EXPECT_TRUE(extractInnerEngine(definition, "SAMPLES").contains("index_granularity = 2048")) << definition;
+}
+
+
+TEST_F(NormalizeTimeSeriesDefinitionTest, RollupSamplesSettingsAndDeclarations)
+{
+    /// The steps must divide the step of the buckets and the table must have version 12 or later.
+    EXPECT_EQ(getExceptionCode([] { normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '7s'"); }), ErrorCodes::INVALID_SETTING_VALUE);
+    EXPECT_EQ(getExceptionCode([] { normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '2h'"); }), ErrorCodes::INVALID_SETTING_VALUE);
+    EXPECT_EQ(getExceptionCode([] { normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 11, samples_rollup_steps = '1m'"); }), ErrorCodes::INVALID_SETTING_VALUE);
+
+    /// A declared rollup column must use the step from the setting.
+    EXPECT_EQ(getExceptionCode([]
+        {
+            normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1m' "
+                "SAMPLES INNER COLUMNS (samples_60 SimpleAggregateFunction(timeSeriesGroupArray(300), Array(Tuple(timestamp DateTime64(3), value Float64))))");
+        }),
+        ErrorCodes::BAD_TYPE_OF_FIELD);
+    EXPECT_EQ(getExceptionCode([]
+        {
+            normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1m' "
+                "SAMPLES INNER COLUMNS (samples_60 SimpleAggregateFunction(timeSeriesGroupArray, Array(Tuple(timestamp DateTime64(3), value Float64))))");
+        }),
+        ErrorCodes::BAD_TYPE_OF_FIELD);
+
+    /// The raw samples column has no parameter.
+    EXPECT_EQ(getExceptionCode([]
+        {
+            normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries "
+                "SAMPLES INNER COLUMNS (samples SimpleAggregateFunction(timeSeriesGroupArray(60), Array(Tuple(timestamp DateTime64(3), value Float64))))");
+        }),
+        ErrorCodes::BAD_TYPE_OF_FIELD);
+}
+
+
+TEST_F(NormalizeTimeSeriesDefinitionTest, CreateAsCopiesRollupSamples)
+{
+    const String source = normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1m, 5m' "
+        "SAMPLES INNER COLUMNS (extra UInt8)");
+
+    auto definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries", source);
+    EXPECT_TRUE(definition.contains("samples_rollup_steps = '60, 300'")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples_60`")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples_300`")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8")) << definition;
+
+    /// A step which the query drops has no column.
+    definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m'", source);
+    EXPECT_TRUE(definition.contains("samples_rollup_steps = '300'")) << definition;
+    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("`samples_60`")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples_300`")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8")) << definition;
+
+    /// A copy pinned to a version without rollups doesn't copy the setting.
+    definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries SETTINGS version = 11", source);
+    EXPECT_FALSE(definition.contains("samples_rollup_steps")) << definition;
+    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("samples_60")) << definition;
+
+    definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries", normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries"));
+    EXPECT_FALSE(definition.contains("samples_60")) << definition;
 }
 
 

@@ -2,6 +2,8 @@
 
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
 
+#include <string>
+
 
 namespace DB
 {
@@ -50,6 +52,12 @@ struct TimeSeriesColumnNames
     /// It's named `time_series` in tables of versions before 3, see `getOuterSamples`.
     static constexpr const char * Samples = "samples";
     static constexpr const char * TimeSeries = "time_series";
+
+    /// Column `samples_<step>` of the samples table: the last raw sample of each interval of `step_seconds`.
+    static std::string rollupSamplesColumn(UInt64 step_seconds)
+    {
+        return std::string(Samples) + "_" + std::to_string(step_seconds);
+    }
 
     /// Internal columns used by steps of prometheus query evaluation.
     /// The function prometheusQuery() doesn't output them.
