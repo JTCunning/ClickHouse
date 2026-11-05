@@ -2,6 +2,8 @@
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/FactoryHelpers.h>
+#include <Core/DecimalFunctions.h>
+#include <DataTypes/DataTypesDecimal.h>
 
 
 namespace DB
@@ -9,23 +11,40 @@ namespace DB
 
 namespace ErrorCodes
 {
+    extern const int BAD_ARGUMENTS;
     extern const int ILLEGAL_TYPE_OF_ARGUMENT;
 }
 
 
 namespace
 {
+    template <typename TimestampType, typename ValueType>
+    AggregateFunctionPtr createWithTypes(
+        const DataTypes & argument_types, const Array & parameters, TimestampType rollup_step)
+    {
+        return std::make_shared<AggregateFunctionTimeSeriesGroupArray<TimestampType, ValueType>>(argument_types, parameters, rollup_step);
+    }
+
     template <typename ValueType>
-    AggregateFunctionPtr createWithValueType(const String & name, const DataTypes & argument_types, const DataTypePtr & timestamp_type)
+    AggregateFunctionPtr createWithValueType(
+        const String & name,
+        const DataTypes & argument_types,
+        const Array & parameters,
+        const DataTypePtr & timestamp_type,
+        UInt64 rollup_step_seconds)
     {
         AggregateFunctionPtr res;
         if (isDateTime64(timestamp_type))
         {
-            res = std::make_shared<AggregateFunctionTimeSeriesGroupArray<DateTime64, ValueType>>(argument_types);
+            const UInt32 scale = getDecimalScale(*timestamp_type);
+            const DateTime64 rollup_step = rollup_step_seconds
+                ? DecimalUtils::decimalFromComponents<DateTime64>(static_cast<Int64>(rollup_step_seconds), 0, scale)
+                : DateTime64{0};
+            res = createWithTypes<DateTime64, ValueType>(argument_types, parameters, rollup_step);
         }
         else if (isDateTime(timestamp_type) || isUInt32(timestamp_type))
         {
-            res = std::make_shared<AggregateFunctionTimeSeriesGroupArray<UInt32, ValueType>>(argument_types);
+            res = createWithTypes<UInt32, ValueType>(argument_types, parameters, static_cast<UInt32>(rollup_step_seconds));
         }
 
         if (!res)
@@ -36,12 +55,17 @@ namespace
     }
 
     AggregateFunctionPtr createWithTimestampAndValueTypes(
-        const String & name, const DataTypes & argument_types, const DataTypePtr & timestamp_type, const DataTypePtr & value_type)
+        const String & name,
+        const DataTypes & argument_types,
+        const Array & parameters,
+        const DataTypePtr & timestamp_type,
+        const DataTypePtr & value_type,
+        UInt64 rollup_step_seconds)
     {
         if (value_type->getTypeId() == TypeIndex::Float64)
-            return createWithValueType<Float64>(name, argument_types, timestamp_type);
+            return createWithValueType<Float64>(name, argument_types, parameters, timestamp_type, rollup_step_seconds);
         if (value_type->getTypeId() == TypeIndex::Float32)
-            return createWithValueType<Float32>(name, argument_types, timestamp_type);
+            return createWithValueType<Float32>(name, argument_types, parameters, timestamp_type, rollup_step_seconds);
 
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
             "Illegal type {} of 2nd argument (value) for aggregate function {}", value_type->getName(), name);
@@ -52,7 +76,32 @@ namespace
         /// The function is not gated by the `enable_time_series_aggregate_functions` setting: the TimeSeries table engine
         /// uses it in the `SimpleAggregateFunction` type of its inner tables, so the type must be parsed in any context.
 
-        assertNoParameters(name, parameters);
+        UInt64 rollup_step_seconds = 0;
+        if (parameters.size() > 1)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                "Aggregate function {} requires zero or one parameter (rollup step in seconds), got {}", name, parameters.size());
+        if (parameters.size() == 1)
+        {
+            const auto type = parameters[0].getType();
+            if (type != Field::Types::UInt64 && type != Field::Types::Int64)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Aggregate function {} parameter must be an integer number of seconds", name);
+            if (type == Field::Types::Int64)
+            {
+                const Int64 value = parameters[0].safeGet<Int64>();
+                if (value <= 0)
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "Aggregate function {} parameter must be a positive number of seconds", name);
+                rollup_step_seconds = static_cast<UInt64>(value);
+            }
+            else
+            {
+                rollup_step_seconds = parameters[0].safeGet<UInt64>();
+                if (rollup_step_seconds == 0)
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                        "Aggregate function {} parameter must be a positive number of seconds", name);
+            }
+        }
 
         if (argument_types.size() == 1)
         {
@@ -64,7 +113,8 @@ namespace
                     "Illegal type {} of argument for aggregate function {}, expected Array(Tuple(timestamp, value))",
                     argument_types[0]->getName(), name);
 
-            return createWithTimestampAndValueTypes(name, argument_types, tuple_type->getElements()[0], tuple_type->getElements()[1]);
+            return createWithTimestampAndValueTypes(
+                name, argument_types, parameters, tuple_type->getElements()[0], tuple_type->getElements()[1], rollup_step_seconds);
         }
 
         assertBinary(name, argument_types);
@@ -78,10 +128,10 @@ namespace
         {
             const auto & timestamp_type = typeid_cast<const DataTypeArray *>(argument_types[0].get())->getNestedType();
             const auto & value_type = typeid_cast<const DataTypeArray *>(argument_types[1].get())->getNestedType();
-            return createWithTimestampAndValueTypes(name, argument_types, timestamp_type, value_type);
+            return createWithTimestampAndValueTypes(name, argument_types, parameters, timestamp_type, value_type, rollup_step_seconds);
         }
 
-        return createWithTimestampAndValueTypes(name, argument_types, argument_types[0], argument_types[1]);
+        return createWithTimestampAndValueTypes(name, argument_types, parameters, argument_types[0], argument_types[1], rollup_step_seconds);
     }
 }
 
@@ -98,6 +148,10 @@ The samples can be passed in one of three forms:
 
 If several samples have the same timestamp, only one of them is used: the sample with the greatest value. A NaN value loses to any other value, so a NaN value is used only if all samples at this timestamp are NaN.
 
+When called with a positive `rollup_step_seconds` parameter, the function keeps only the last sample of each
+rollup interval (`floor(timestamp / rollup_step)`), preserving that sample's original timestamp. Equal
+timestamps within an interval still keep the greatest value.
+
 <Note>
 This function is in private preview.
 </Note>
@@ -105,13 +159,17 @@ This function is in private preview.
     FunctionDocumentation::Syntax syntax = R"(
 timeSeriesGroupArray(timestamp, value)
 timeSeriesGroupArray(samples)
+timeSeriesGroupArray(rollup_step_seconds)(timestamp, value)
+timeSeriesGroupArray(rollup_step_seconds)(samples)
     )";
     FunctionDocumentation::Arguments arguments = {
         {"timestamp", "Timestamp of the sample. Can be an individual value or an array.", {"UInt32", "DateTime", "DateTime64", "Array(UInt32)", "Array(DateTime)", "Array(DateTime64)"}},
         {"value", "Value of the time series corresponding to the timestamp. Can be an individual value or an array.", {"Float*", "Array(Float*)"}},
         {"samples", "Samples of the time series passed as an array of tuples `(timestamp, value)`, where the tuple elements have the timestamp and value types listed above.", {"Array(Tuple(T1, T2))"}},
     };
-    FunctionDocumentation::Parameters parameters = {};
+    FunctionDocumentation::Parameters parameters = {
+        {"rollup_step_seconds", "Optional. Positive integer number of seconds. When set, collapses samples that fall into the same rollup interval to the last sample of that interval."},
+    };
     FunctionDocumentation::ReturnedValue returned_value = {"Returns an array of tuples `(timestamp, value)` sorted by timestamp in ascending order.", {"Array(Tuple(T1, T2))"}};
     FunctionDocumentation::Examples examples = {
     {
@@ -147,6 +205,20 @@ SELECT timeSeriesGroupArray(timestamps, values);
 ┌─timeSeriesGroupArray(timestamps, values)───┐
 │ [(100,5),(110,1),(120,6),(130,8),(140,19)] │
 └────────────────────────────────────────────┘
+        )"
+    },
+    {
+        "Keeping the last sample of each 60-second rollup interval",
+        R"(
+WITH
+    [10, 50, 70, 110]::Array(UInt32) AS timestamps,
+    [1, 2, 3, 4]::Array(Float32) AS values
+SELECT timeSeriesGroupArray(60)(timestamps, values);
+        )",
+        R"(
+┌─timeSeriesGroupArray(60)(timestamps, values)─┐
+│ [(50,2),(110,4)]                             │
+└──────────────────────────────────────────────┘
         )"
     }
     };
