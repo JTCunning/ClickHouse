@@ -64,3 +64,5 @@
 
 ## Run 3 (confirm, 2026-11-04)
 Run 2 passed on the numbers (6.5–8.2 ms per repeat, guards flat). The branch was then rebased onto master `fd328d4baedf` (conflict in the HTTP API entry point) and got one review fix (`b56cfb0261aa`: the PromQL query always gets its own non-waiting cache). Run 3 only confirms: the tests (05481 on A and B, the integration test, `PreparedSetsCache.*` if a test build is at hand), `promql_repeated_selector.xml` and the `promql_selector_pk_range.xml` guard, same host and method as run 2. Pass: the run 2 pass rule.
+
+**Run 3 result (2026-11-04, judged 2026-11-05): pass.** 5.7–6.7 ms per repeat (`x + x` −15.5%, `x + x + x` −21.8%, `y + y` −11.7%, p < 0.001); `rate/offset` control −0.7% (same); pk_range guard within ±0.7% (same); single-use `x` −4.3% unstable (p = 0.77), single-use `y` −6.1% (faster, no cache hit, so not counted). 05481 1,1,2,2 on B and 2,3,2,2 on A; integration and mutation tests pass; gtest not run (ENABLE_TESTS=OFF). Three runs agree: 5.2–8.2 ms per repeat. Item → ready-to-submit.
