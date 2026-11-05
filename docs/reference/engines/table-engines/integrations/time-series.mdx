@@ -130,8 +130,9 @@ A `TimeSeries` table doesn't have its own data, everything is stored in its targ
 This is similar to how a [materialized view](/reference/statements/create/view#materialized-view) works,
 with the difference that a materialized view has one target table
 whereas a `TimeSeries` table has three mandatory target tables named [samples](#samples-table), [tags](#tags-table), and [metric families](#metric-families-table),
-and two optional target tables which are enabled by default: [recent samples](#recent-samples-table)
-(see the [recent_samples_ttl_seconds](#settings) setting) and [time ranges](#time-ranges-table) (see the [store_time_ranges](#settings) setting).
+and optional target tables: [recent samples](#recent-samples-table) (enabled by default, see the [recent_samples_ttl_seconds](#settings) setting)
+and [time ranges](#time-ranges-table) (enabled by default, see the [store_time_ranges](#settings) setting).
+The samples table can also store [rollup columns](#rollup-columns) (disabled by default, see the [samples_rollup_steps](#settings) setting).
 
 The target tables can be either specified explicitly in the `CREATE TABLE` query
 or the `TimeSeries` table engine can generate inner target tables automatically.
@@ -189,6 +190,23 @@ because it's much smaller (this can be disabled with the query-level setting `ti
 The TTL of the inner recent samples table is always derived from the [recent_samples_ttl_seconds](#settings) setting:
 a row expires when all its samples are older than the TTL, i.e. the TTL expression is
 `toDateTime(bucket) + toIntervalSecond(recent_samples_ttl_seconds + recent_samples_bucket_step_seconds)`.
+
+### Rollup columns {#rollup-columns}
+
+Rollup columns are optional downsampled copies of the `samples` column on the [samples](#samples-table) table.
+They are disabled by default and enabled by the [samples_rollup_steps](#settings) setting, a comma-separated list of PromQL durations, for example `'1m, 5m, 1h'`.
+Every step adds one column named `samples_<step>`, where `<step>` is the step in seconds. Rollup columns require a table of [version](#schema-versioning) 12 or later.
+The [recent samples](#recent-samples-table) table does not get these columns.
+
+A column `samples_<step>` keeps the last raw sample of every interval of `<step>` seconds, with its original timestamp.
+The column type is `SimpleAggregateFunction(timeSeriesGroupArray(step), Array(Tuple(timestamp DateTime64(3), value Float64)))`.
+The tuple element types match the `samples` column. The row stays one bucket of `samples_bucket_step_seconds`, and `min_time` and `max_time` stay the range of the raw samples.
+
+A query with a step reads the rollup column with the largest step which is less than or equal to the query step
+when the query-level setting `time_series_prefer_rollup_tables` is enabled (it is enabled by default).
+The query step is the step of the [prometheusQueryRange](/reference/functions/table-functions/prometheusQueryRange) table function,
+or the optional last argument `step` of the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function.
+Instant queries, which have the step 0, a range that fits in the recent samples TTL, and reads with `time_series_prefer_rollup_tables` disabled use the raw `samples` column.
 
 ### Tags table {#tags-table}
 
@@ -271,7 +289,7 @@ CREATE TABLE my_table
     `help` String
 )
 ENGINE = TimeSeries
-SETTINGS version = 11, recent_samples_ttl_seconds = 345600, samples_bucket_step_seconds = 3600, recent_samples_bucket_step_seconds = 900
+SETTINGS version = 12, recent_samples_ttl_seconds = 345600, samples_bucket_step_seconds = 3600, recent_samples_bucket_step_seconds = 900
 SAMPLES INNER COLUMNS
 (
     `id` Tuple(UInt64, LowCardinality(UUID)),
@@ -324,6 +342,9 @@ stored in the `INNER COLUMNS` clauses. The `recent_samples_ttl_seconds`, `sample
 settings were written into the `SETTINGS` clause with their default values: they define the TTL of the recent samples table and
 the buckets of the samples tables, so their effective values are fixed at creation.
 Also the latest schema version was pinned into the `version` setting (see [Schema versioning](#schema-versioning)).
+Because the `samples_rollup_steps` setting is empty by default, the samples table has no rollup columns. With a non-empty `samples_rollup_steps`
+the samples `INNER COLUMNS` clause also contains one `samples_<step>` column for each step.
+The stored setting lists those steps in seconds, for example `'60, 300, 3600'`.
 
 Inner target tables have names like `.inner_id.samples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
 `.inner_id.recentsamples.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, `.inner_id.tags.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`,
@@ -495,6 +516,7 @@ The values of the tags `instance` and `job` will be stored both in those columns
 By default inner target tables use the following table engines:
 - the [samples](#samples-table) table uses [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) because the rows
 of the same time series and the same bucket must be merged into one sorted array of samples; it's partitioned by month (see the [samples_partition_by](#settings) setting);
+- the [rollup samples](#rollup-samples-tables) tables use [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) like the samples table, because their rows are merged by `timeSeriesGroupArray` in the same way;
 - the [recent samples](#recent-samples-table) table uses [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) partitioned by 5-hour intervals (see the [recent_samples_partition_by](#settings) setting) with a `TTL` derived from
 the [recent_samples_ttl_seconds](#settings) setting and with `ttl_only_drop_parts` enabled, so expired parts are dropped as a whole;
 - the [tags](#tags-table) table uses [ReplacingMergeTree](/reference/engines/table-engines/mergetree-family/replacingmergetree) because the same data is often inserted multiple times to this table so we need a way
@@ -597,10 +619,11 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `version` | UInt64 | 11 | The version of the table: it identifies the set of the target tables and their structure. The version is pinned automatically when a table is created and can't be changed afterwards, normally it should be omitted in the `CREATE TABLE` query (see [Schema versioning](#schema-versioning)) |
+| `version` | UInt64 | 12 | The version of the table: it identifies the set of the target tables and their structure. The version is pinned automatically when a table is created and can't be changed afterwards, normally it should be omitted in the `CREATE TABLE` query (see [Schema versioning](#schema-versioning)) |
 | `tags_to_columns` | Map | {} | Map specifying which tags should be put to separate columns in the [tags](#tags-table) table. Syntax: `{'tag1': 'column1', 'tag2' : column2, ...}` |
 | `store_time_ranges` | Bool | true | If set to true then the table stores the time range of each time series in the [time ranges](#time-ranges-table) table and uses it to filter time series by time. Set to false to disable the time ranges table. Not applicable to tables of [version](#schema-versioning) 7 or earlier, they use `store_min_time_and_max_time` instead |
 | `samples_bucket_step_seconds` | UInt64 | 3600 | The length in seconds of the time buckets of the [samples](#samples-table) table: a row of the table contains the samples of one time series with timestamps in one bucket, and the `bucket` column contains the start of the bucket, i.e. the timestamp rounded down to a multiple of this setting. The default is 1 hour; the effective value is pinned into the table definition at CREATE time |
+| `samples_rollup_steps` | String | `''` | Comma-separated list of PromQL durations (for example `'1m, 5m, 1h'`) that add a column `samples_<step>` on the [samples](#samples-table) table. Each column keeps the last raw sample of every interval of that step. Each step must be a whole number of seconds in [1, `samples_bucket_step_seconds`] and must divide `samples_bucket_step_seconds`. Empty disables rollups. Requires `version` to be at least 12 |
 | `samples_partition_by` | Expression | `toYYYYMM(toDateTime(bucket, 'UTC'))` | Partition key of the inner [samples](#samples-table) table, for example `toStartOfWeek(toDateTime(bucket, 'UTC'))`. When set explicitly, it overrides the partition key from the engine declaration; if neither is set, one partition per month is used |
 | `metric_families_deduplication_cache_size_bytes` | UInt64 | 10485760 | Maximum size in bytes of the deduplication cache of the [metric families](#metric-families-table) table. The cache remembers the descriptions of the metric families written recently, so they aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). Set to 0 to disable the cache, see also `metric_families_deduplication_cache_expiration_seconds` |
 | `metric_families_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [metric families](#metric-families-table) table expires, counted from the moment the metric family was written. The actual lifetime of an entry is uniformly random in the range `[0.8 * expiration_seconds, expiration_seconds]`, so the metric families written together aren't all written again at the same moment. So every metric family is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. Set to 0 to disable the cache |
@@ -633,7 +656,7 @@ The following settings apply to tables of earlier [versions](#schema-versioning)
 The `TimeSeries` table engine and the PromQL execution layer are under active development:
 the set of the target tables and their structure can change between ClickHouse versions.
 To make such changes detectable, every `TimeSeries` table stores its version in the [version](#settings) setting.
-The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 11) -
+The version is pinned automatically into the `CREATE` query when a table is created - its value is the latest version known to the server (currently 12) -
 persists in the table metadata, and can't be changed by `ALTER`. Tables created before the setting was introduced are considered as version 0.
 Normally the setting should just be omitted in the `CREATE TABLE` query - then the table gets the latest version.
 An explicit `version` is accepted if the server supports that version; then the table is defined the way that version does it (see [Version history](#version-history)).
@@ -666,6 +689,7 @@ the `promql` dialect, and the Prometheus HTTP query API):
 | 9 | The default partition key of an inner [recent samples](#recent-samples-table) table names the timezone: `toStartOfInterval(toDateTime(timestamp, 'UTC'), toIntervalHour(5))`. Earlier versions generate it without one, and `toStartOfInterval` counts hours from local midnight, so a change of the server timezone moves the meaning of the partition values they have already written. Existing tables keep the key they were created with, which no `ALTER` can change |
 | 10 | External target tables are not supported for new tables: every target of a table of this version is an inner table. The settings `id_type` and `id_generator` are not supported either: the type of the `id` column and the expression generating identifiers are declared in `TAGS INNER COLUMNS` (see [The `id` column](#id-column)). Tables of earlier versions keep their external target tables and these settings. The stored data didn't change |
 | 11 | The [samples](#samples-table) and [recent samples](#recent-samples-table) tables store buckets of samples: a row keeps the samples of one time series within one time bucket (the columns `samples`, `bucket`, `min_time`, `max_time`) in an `AggregatingMergeTree` ordered by `(id, bucket)`. The settings [`samples_bucket_step_seconds`](#settings), [`samples_partition_by`](#settings), [`samples_index_granularity_bytes`](#settings), [`recent_samples_bucket_step_seconds`](#settings) and [`recent_samples_index_granularity_bytes`](#settings) were introduced, and the defaults of [`samples_index_granularity`](#settings) and [`recent_samples_index_granularity`](#settings) changed. Tables of earlier versions store one sample per row in the columns `timestamp` and `value`: they can still be read, written into and queried with PromQL, and the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function reads them without a conversion when its argument `return_columns` is `'timestamp_and_value'` |
+| 12 | Optional [rollup columns](#rollup-columns) were added to the [samples](#samples-table) table. The setting [`samples_rollup_steps`](#settings) adds one column `samples_<step>` per step, with the type `SimpleAggregateFunction(timeSeriesGroupArray(step), ...)`. A query with a step reads the rollup column with the largest step not greater than the query step, see the query-level setting `time_series_prefer_rollup_tables`. Tables of earlier versions have no rollup columns |
 
 # Functions {#functions}
 
