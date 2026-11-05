@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-05T11:04:49Z",
+  "updated": "2026-11-05T21:43:38Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -113,7 +113,7 @@
     {
       "slug": "grid-gap-wraparound",
       "title": "Grow the timeSeries*ToGrid bucket map before a colliding wrapping index",
-      "status": "ready-to-build",
+      "status": "results-in",
       "priority": 4,
       "branch": "lilred-perf-grid-gap-wraparound",
       "head": "46291048116bdeeacd63aac63df0da25d4b5466d",
