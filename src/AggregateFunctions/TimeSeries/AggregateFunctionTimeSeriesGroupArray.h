@@ -83,7 +83,7 @@ public:
             elements.push_back(Element{.timestamp = timestamp, .value = value}, arena);
         }
 
-        void merge(const Data & rhs, Arena * arena)
+        void merge(const Data & rhs, Arena * arena, TimestampType step)
         {
             if (rhs.elements.empty())
                 return;
@@ -92,11 +92,11 @@ public:
             {
                 elements.assign(rhs.elements.begin(), rhs.elements.end(), arena);
                 sorted = rhs.sorted;
-                sort(arena);
+                sort(arena, step);
                 return;
             }
 
-            sort(arena);
+            sort(arena, step);
 
             /// A rare unsorted argument is sorted into a copy: `rhs` belongs to another state and is kept intact.
             const Elements * rhs_elements = &rhs.elements;
@@ -105,18 +105,26 @@ public:
             {
                 sorted_rhs_elements.assign(rhs.elements.begin(), rhs.elements.end(), arena);
                 sorted_rhs_elements.resize_exact(
-                    sortElements(sorted_rhs_elements.data(), sorted_rhs_elements.size()), arena);
+                    sortElements(sorted_rhs_elements.data(), sorted_rhs_elements.size(), step), arena);
                 rhs_elements = &sorted_rhs_elements;
             }
 
             /// Partial states often cover disjoint time ranges - then the merge is a plain append or prepend.
-            if (elements.back().timestamp < rhs_elements->front().timestamp)
+            /// With a rollup step the intervals must be disjoint, not just the timestamps.
+            const bool has_step = timestampToInt64(step) != 0;
+            const bool disjoint_append = has_step
+                ? (intervalKey(elements.back().timestamp, step) < intervalKey(rhs_elements->front().timestamp, step))
+                : (elements.back().timestamp < rhs_elements->front().timestamp);
+            if (disjoint_append)
             {
                 elements.insert(rhs_elements->begin(), rhs_elements->end(), arena);
                 return;
             }
 
-            if (rhs_elements->back().timestamp < elements.front().timestamp)
+            const bool disjoint_prepend = has_step
+                ? (intervalKey(rhs_elements->back().timestamp, step) < intervalKey(elements.front().timestamp, step))
+                : (rhs_elements->back().timestamp < elements.front().timestamp);
+            if (disjoint_prepend)
             {
                 Elements prepended;
                 prepended.reserve_exact(rhs_elements->size() + elements.size(), arena);
@@ -130,17 +138,22 @@ public:
             merged.resize_exact(elements.size() + rhs_elements->size(), arena);
             std::merge(
                 elements.begin(), elements.end(), rhs_elements->begin(), rhs_elements->end(), merged.begin(), lessByTimestamp);
-            merged.resize_exact(deduplicateSorted(merged.data(), merged.size()), arena);
+            merged.resize_exact(deduplicateSorted(merged.data(), merged.size(), step), arena);
             elements.swap(merged, arena);
         }
 
-        /// Restores the invariant in place after out-of-order `add`s; no-op in the common (already sorted) case.
-        void sort(Arena * arena)
+        /// Restores the invariant in place after out-of-order `add`s.
+        /// When timestamps are already ordered, a non-zero rollup step still needs interval collapse.
+        void sort(Arena * arena, TimestampType step)
         {
-            if (sorted)
+            if (!sorted)
+            {
+                elements.resize_exact(sortElements(elements.data(), elements.size(), step), arena);
+                sorted = true;
                 return;
-            elements.resize_exact(sortElements(elements.data(), elements.size()), arena);
-            sorted = true;
+            }
+            if (timestampToInt64(step) != 0)
+                elements.resize_exact(deduplicateSorted(elements.data(), elements.size(), step), arena);
         }
 
         static bool lessByTimestamp(const Element & lhs, const Element & rhs)
@@ -148,9 +161,29 @@ public:
             return lhs.timestamp < rhs.timestamp;
         }
 
-        /// Collapses each equal-timestamp run of a sorted range into one element and returns how many elements
-        /// are left at the beginning of the range.
-        static size_t deduplicateSorted(Element * elements, size_t size)
+        static Int64 timestampToInt64(TimestampType ts)
+        {
+            if constexpr (is_decimal<TimestampType>)
+                return ts.value;
+            else
+                return static_cast<Int64>(ts);
+        }
+
+        /// Floor-divides timestamp ticks by a positive step towards -infinity.
+        static Int64 intervalKey(TimestampType ts, TimestampType step)
+        {
+            const Int64 value = timestampToInt64(ts);
+            const Int64 step_i64 = timestampToInt64(step);
+            if (value >= 0)
+                return value / step_i64;
+            return -((-value + step_i64 - 1) / step_i64);
+        }
+
+        /// Collapses runs of equal timestamps (or of the same rollup interval when `step` is set)
+        /// into one element and returns how many elements are left at the beginning of the range.
+        /// With a rollup step the survivor of an interval is the sample with the greatest timestamp;
+        /// equal timestamps keep the greatest value (a NaN loses).
+        static size_t deduplicateSorted(Element * elements, size_t size, TimestampType step)
         {
             if (size == 0)
                 return 0;
@@ -158,26 +191,41 @@ public:
             size_t last_unique = 0;
             for (size_t i = 1; i < size; ++i)
             {
-                if (elements[i].timestamp == elements[last_unique].timestamp)
-                    elements[last_unique].value
-                        = timeseriesMaxValueForDuplicateTimestamp(elements[last_unique].value, elements[i].value);
+                const bool same = timestampToInt64(step) != 0
+                    ? (intervalKey(elements[i].timestamp, step) == intervalKey(elements[last_unique].timestamp, step))
+                    : (elements[i].timestamp == elements[last_unique].timestamp);
+
+                if (same)
+                {
+                    if (elements[i].timestamp != elements[last_unique].timestamp)
+                    {
+                        if (elements[i].timestamp > elements[last_unique].timestamp)
+                            elements[last_unique] = elements[i];
+                    }
+                    else
+                    {
+                        elements[last_unique].value
+                            = timeseriesMaxValueForDuplicateTimestamp(elements[last_unique].value, elements[i].value);
+                    }
+                }
                 else
                     elements[++last_unique] = elements[i];
             }
             return last_unique + 1;
         }
 
-        static size_t sortElements(Element * elements, size_t size)
+        static size_t sortElements(Element * elements, size_t size, TimestampType step)
         {
             ::sort(elements, elements + size, lessByTimestamp);
-            return deduplicateSorted(elements, size);
+            return deduplicateSorted(elements, size, step);
         }
     };
 
-    explicit AggregateFunctionTimeSeriesGroupArray(const DataTypes & argument_types_)
-        : Base(argument_types_, {}, createResultType(argument_types_))
+    AggregateFunctionTimeSeriesGroupArray(const DataTypes & argument_types_, const Array & parameters_, TimestampType rollup_step_)
+        : Base(argument_types_, parameters_, createResultType(argument_types_))
         , array_of_pairs_argument(argument_types_.size() == 1)
         , array_arguments(!array_of_pairs_argument && (argument_types_[1]->getTypeId() == TypeIndex::Array))
+        , rollup_step(rollup_step_)
     {
     }
 
@@ -428,7 +476,7 @@ public:
 
     void mergeImpl(AggregateDataPtr __restrict place, ConstAggregateDataPtr rhs, Arena * arena) const override
     {
-        data(place).merge(data(rhs), arena);
+        data(place).merge(data(rhs), arena, rollup_step);
     }
 
     void serialize(ConstAggregateDataPtr __restrict place, WriteBuffer & buf, std::optional<size_t> /* version */) const override
@@ -441,7 +489,7 @@ public:
         {
             PODArray<Element> sorted_elements;
             sorted_elements.assign(data.elements.begin(), data.elements.end());
-            sorted_elements.resize_exact(Data::sortElements(sorted_elements.data(), sorted_elements.size()));
+            sorted_elements.resize_exact(Data::sortElements(sorted_elements.data(), sorted_elements.size(), rollup_step));
             writeElements(sorted_elements, buf);
             return;
         }
@@ -503,7 +551,7 @@ public:
         for (size_t i = 0; i < size; ++i)
             readBinaryLittleEndian(data.elements[i].value, buf);
 
-        data.sort(arena);
+        data.sort(arena, rollup_step);
     }
 
     void insertResultInto(AggregateDataPtr __restrict place, IColumn & to, Arena * arena) const override
@@ -524,7 +572,7 @@ public:
 
         Data & data = this->data(place);
 
-        data.sort(arena);
+        data.sort(arena, rollup_step);
 
         for (const Element & element : data.elements)
         {
@@ -541,6 +589,9 @@ private:
 
     /// Whether timestamp/value arguments are arrays (one row holds a whole series) or scalars.
     const bool array_arguments;
+
+    /// Rollup interval in timestamp ticks; zero means keep every timestamp (no downsampling).
+    const TimestampType rollup_step;
 
     static constexpr UInt16 FORMAT_VERSION = 1;
 
