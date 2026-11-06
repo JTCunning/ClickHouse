@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-05T21:43:38Z",
+  "updated": "2026-11-06T11:06:40Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -52,7 +52,7 @@
     {
       "slug": "promql-drop-name-exact-selector",
       "title": "PromQL: skip the duplicate series check when dropping the metric name of one metric",
-      "status": "results-in",
+      "status": "ready-to-submit",
       "priority": 2,
       "branch": "lilred-perf-promql-drop-name-exact-selector",
       "head": "dadc843ffb7478938ad1712ee757df247f78d093",
