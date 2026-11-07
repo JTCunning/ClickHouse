@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-06T11:06:40Z",
+  "updated": "2026-11-07T11:13:46Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -112,16 +112,16 @@
     },
     {
       "slug": "grid-gap-wraparound",
-      "title": "Grow the timeSeries*ToGrid bucket map before a colliding wrapping index",
-      "status": "results-in",
+      "title": "Grow the timeSeries*ToGrid bucket map before inserting a colliding key",
+      "status": "ready-to-build",
       "priority": 4,
       "branch": "lilred-perf-grid-gap-wraparound",
-      "head": "46291048116bdeeacd63aac63df0da25d4b5466d",
+      "head": "e6d27f5cc1d46392c894e989a64266fc7cf20568",
       "base": "52529f0c711566d696917678bf15e7068772fdde",
       "issue": 10,
       "pr_text": "prs/grid-gap-wraparound.md",
       "report": "reports/2026-10-31-grid-gap-wraparound.md",
-      "ab_plan": null,
+      "ab_plan": "ab-plans/grid-gap-wraparound.md",
       "tests": {
         "stateless": [
           "05474_timeseries_to_grid_gap_wraparound"
@@ -133,10 +133,13 @@
       "perf_tests": [
         "tests/performance/timeseries_to_grid_gap.xml"
       ],
-      "guard_perf_tests": [],
-      "claim": "The gap and late-start cases lose their slowdown against the contiguous case (6.1x timeSeriesLastToGrid, 4.1x timeSeriesRateToGrid on master) and run about as fast as it. The contiguous case is unchanged.",
-      "pass_if": "05474 passes; the gap queries are at least 3x faster; the contiguous queries are not slower.",
-      "notes": "Closes upstream issue 125759. Related upstream: 124773 (caused it), 124777."
+      "guard_perf_tests": [
+        "tests/performance/timeseries_to_grid_bucketing.xml",
+        "tests/performance/timeseries_to_grid_aggregation_functions.xml"
+      ],
+      "claim": "Run 2: the gap slowdown goes away in time order (run 1: 8.8x / 6.5x), and the merge with the run after the gap first gets about 3x faster (probes as with the pre-#124773 1/2 limit). Contiguous, late-start, sparse-gap, every-2nd-minute and 4-samples-per-minute series are unchanged in time and memory.",
+      "pass_if": "05474 passes on A and B; gap LastToGrid and RateToGrid at least 3x faster; the later-run-first merge at least 2x faster; no guard query significantly slower (contiguous, late_start, gap_sparse, every_2nd, dense, bucketing, aggregation_functions); gap_sparse and every_2nd memory_usage within 5%.",
+      "notes": "Run 1 (head 46291048116b) passed; the final review then found two Majors run 1 did not cover (arrival order; memory doubling on sparse gaps and every-2nd-bucket series), fixed in 0113a7c96c12 and e6d27f5cc1d4. Needs run 2 with memory_usage reported. Disclosed, not fixed: a sparse gap inserted in reverse or merged into the later run doubles the map once (1/2-limit size, same speed). Backport label (26.10) is your call. Closes upstream issue 125759. Related upstream: 124773 (caused it), 124777."
     },
     {
       "slug": "alp-search-early-exit",

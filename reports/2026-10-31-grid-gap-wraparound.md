@@ -81,3 +81,13 @@ $CH local --path ./db --enable_time_series_aggregate_functions=1 --max_threads=1
 SELECT sum(length(r)) FROM (SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(ts, v) r FROM g.s WHERE case='gap_mid' GROUP BY id) FORMAT Null"
 ```
 For the branch column, build `lilred/perf-grid-gap-wraparound` and run the same commands interleaved with master (A B A B …), plus `tests/performance/timeseries_to_grid_{gap,bucketing,aggregation_functions,deserialization}.xml`.
+
+## Update 2026-11-07: build results and a wider rule
+
+**Run 1 (2026-11-05, release build of `46291048116b` on a 16-core host, perf.py, 13 runs):** pass. Gap series 8.8× faster for `timeSeriesLastToGrid` (877 → 99 ms) and 6.5× for `timeSeriesRateToGrid` (945 → 145 ms); contiguous +0.4% / +0.8% and late start −0.02%, all within noise. The model on the small VM had understated the master gap (6.1× slower than contiguous; on the big host it was 8.9×).
+
+**Final review before submission found two gaps the run did not test:**
+- **Arrival order.** The first rule grew the map only before inserting a key that wraps (at or above the buffer size). When the run after the gap arrives first (reverse time order, or a `-Merge` into a state that already holds that run, which a multi-threaded `GROUP BY` can produce), the low keys collide with the wrapped high keys and walk the whole run, as on master. Confirmed on master on the small VM: a merge with the later run first is as slow as the gap case (about 0.95 s vs 0.21 s contiguous, wall time incl. startup).
+- **Sparse gaps.** A gap that wraps onto a map below half full (minutes [0, 1500) + [8581, 10081)) doubled the map once more with no speed gain, because the key still wraps after the doubling.
+
+**`0113a7c96c12` + `e6d27f5cc1d4`:** any missing key whose home cell and the next cell hold other keys (so not the one-cell collisions of a sample every 2nd bucket) doubles a more-than-half-full map, unless the key would still wrap after the doubling (`key < 2 × buffer size`). The map never grows beyond the size the pre-#124773 1/2 limit gave. Tests gained a reverse-order batch add and a merge with the later run first (05474 still passes on master: results don't change); the perf test gained the later-run-first merge, the sparse gap, and a 120 s window for `timeSeriesRateToGrid` (with 60 s and one sample per minute every point was NULL). Needs run 2: [A/B plan](../ab-plans/grid-gap-wraparound.md).
