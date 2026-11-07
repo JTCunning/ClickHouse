@@ -13,6 +13,16 @@ gap_late	1
 gap_mid	1
 gap_sparse	1
 late_start	1
+-- batch add in reverse time order
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
+-- merge into a state that holds the run after the gap
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
 -- states written to a table and read back (deserialize)
 gap_late	1
 gap_mid	1

@@ -2,8 +2,8 @@
 -- `k % bufSize`. A series with a gap in the middle of the grid has bucket indexes above the buffer size that wrap onto
 -- the cells of its first run of buckets; the map grows before such an index is inserted if it is more than half full
 -- and the index collides with another one.
--- This test pins down the results on the shapes that take that path (the add, batch add, merge and deserialize paths)
--- against the expected grid computed without the aggregate functions.
+-- This test pins down the results on the shapes that take that path (the add, batch add, merge and deserialize paths,
+-- in time order and with the run after the gap first) against the expected grid computed without the aggregate functions.
 
 SET enable_time_series_aggregate_functions = 1;
 
@@ -65,6 +65,39 @@ FROM
 ) AS a
 JOIN grid_gap_expected USING shape
 ORDER BY shape;
+
+SELECT '-- batch add in reverse time order';
+SELECT shape, r = grid
+FROM
+(
+    SELECT shape, timeSeriesLastToGrid(0, 604800, 60, 60)(ts, vs) AS r
+    FROM
+    (
+        SELECT shape, arrayReverse(groupArray(timestamp)) AS ts, arrayReverse(groupArray(value)) AS vs
+        FROM (SELECT * FROM grid_gap_samples ORDER BY shape, timestamp)
+        GROUP BY shape
+    ) AS b
+    GROUP BY shape
+) AS a
+JOIN grid_gap_expected USING shape
+ORDER BY shape
+SETTINGS max_threads = 1;
+
+SELECT '-- merge into a state that holds the run after the gap';
+SELECT shape, r = grid
+FROM
+(
+    SELECT shape, timeSeriesLastToGridMerge(0, 604800, 60, 60)(s) AS r
+    FROM
+    (
+        SELECT shape, value >= if(shape = 'gap_late', 10000, 5000) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s
+        FROM grid_gap_samples GROUP BY shape, late ORDER BY shape, late DESC
+    ) AS b
+    GROUP BY shape
+) AS a
+JOIN grid_gap_expected USING shape
+ORDER BY shape
+SETTINGS max_threads = 1;
 
 SELECT '-- states written to a table and read back (deserialize)';
 CREATE TABLE grid_gap_states (shape String, s AggregateFunction(timeSeriesLastToGrid(0, 604800, 60, 60), DateTime64(3), Float64))

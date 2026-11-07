@@ -10,7 +10,10 @@
         buckets before it. 200 series, one sample per minute, 7-day grid at a 60 s step (10081 points):
           - contiguous: minutes [0, 6200), the baseline with the same number of samples;
           - gap: minutes [0, 3100) and [6981, 10081);
-          - late start: minutes [4000, 10081), whose indexes wrap without colliding.
+          - late start: minutes [4000, 10081), whose indexes wrap without colliding;
+          - gap sparse: minutes [0, 1500) and [8581, 10081), whose indexes wrap onto a map below half full.
+        The merge query merges the state of the run after the gap first. The rate window is 120 s so that every grid
+        point with two samples gets a value.
     -->
 
     <create_query>
@@ -34,13 +37,21 @@
         FROM (SELECT number % 200 AS id, intDiv(number, 200) AS m FROM numbers(200 * 10081))
         WHERE m &gt;= 4000
     </fill_query>
+    <fill_query>
+        INSERT INTO ts_gap
+        SELECT 'gap_sparse', id, toDateTime64(m * 60, 3), m
+        FROM (SELECT number % 200 AS id, intDiv(number, 200) AS m FROM numbers(200 * 10081))
+        WHERE m &lt; 1500 OR m &gt;= 8581
+    </fill_query>
     <fill_query>OPTIMIZE TABLE ts_gap FINAL</fill_query>
 
     <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'contiguous' GROUP BY id FORMAT Null</query>
     <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'gap' GROUP BY id FORMAT Null</query>
     <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'late_start' GROUP BY id FORMAT Null</query>
-    <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'contiguous' GROUP BY id FORMAT Null</query>
-    <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'gap' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'gap_sparse' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesLastToGridMerge(0, 604800, 60, 60)(s) FROM (SELECT id, timestamp &gt;= toDateTime64(6981 * 60, 3) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s FROM ts_gap WHERE shape = 'gap' GROUP BY id, late ORDER BY id, late DESC) GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 120)(timestamp, value) FROM ts_gap WHERE shape = 'contiguous' GROUP BY id FORMAT Null</query>
+    <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 120)(timestamp, value) FROM ts_gap WHERE shape = 'gap' GROUP BY id FORMAT Null</query>
 
     <drop_query>DROP TABLE IF EXISTS ts_gap</drop_query>
 </test>
