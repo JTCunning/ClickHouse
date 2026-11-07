@@ -1,6 +1,7 @@
 # ALP codec: cut the parameter search without changing a byte
 **Verdict:** worth fixing; fix branch pushed (unbuilt). An exact early exit in ALP's brute-force parameter search makes the encoder 40–90% cheaper on decimal-like values (2–9% on full-precision doubles). The compressed bytes are the same in all 76 cases measured. The candidate fix in the task (fewer samples for small blocks) was rejected: it costs up to 4.8% of compressed size.
 **Task:** 2026-10-31-alp-codec-scale-the-parameter-search-to (scout, follow-up of the remote-write baseline) · **Build:** 26.11.1.974 (a7f713612c80); code at c189bd99fbda · **Date:** 2026-11-01
+**A/B plan:** ab-plans/alp-search-early-exit.md
 
 ## What happens (plain language)
 ALP stores floats as small integers by finding a decimal scale (an exponent/fraction pair) per block. It finds the scale by brute force. It takes up to 8 samples of 32 values and scores every pair on each sample by estimated size: 190 pairs for Float64, 55 for Float32, about 48,600 trial encodings per compressed block. That cost doesn't depend on the block size. TimeSeries samples tables use 256-row granules, and compact parts compress every granule on its own, so on ingest the search runs once per 256 values. Even at 8,192-value blocks it is most of ALP's encode time.
