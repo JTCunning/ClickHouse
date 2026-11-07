@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS grid_gap_states;
 --   gap_sparse: minutes [0, 1500) and [8581, 10081): the wrapping indexes land on a map below half full.
 --   gap_late:   minutes [0, 6000) and [10000, 10081): the map is 3/4 full when the wrapping indexes arrive.
 --   late_start: minutes [4000, 10081): the indexes wrap without colliding, so the map keeps filling to 3/4.
+--   every_2nd:  every 2nd minute: the wrapping indexes collide with one cell only, so the map keeps filling to 3/4.
 CREATE TABLE grid_gap_samples (shape String, part UInt8, timestamp DateTime64(3), value Float64)
 ENGINE = MergeTree ORDER BY (shape, timestamp);
 
@@ -23,13 +24,14 @@ INSERT INTO grid_gap_samples
 SELECT shape, m % 2, toDateTime64(m * 60, 3), m
 FROM
 (
-    SELECT number AS m, arrayJoin(['gap_mid', 'gap_sparse', 'gap_late', 'late_start']) AS shape
+    SELECT number AS m, arrayJoin(['gap_mid', 'gap_sparse', 'gap_late', 'late_start', 'every_2nd']) AS shape
     FROM numbers(10081)
 )
 WHERE (shape = 'gap_mid' AND (m < 3100 OR m >= 6981))
    OR (shape = 'gap_sparse' AND (m < 1500 OR m >= 8581))
    OR (shape = 'gap_late' AND (m < 6000 OR m >= 10000))
-   OR (shape = 'late_start' AND m >= 4000);
+   OR (shape = 'late_start' AND m >= 4000)
+   OR (shape = 'every_2nd' AND m % 2 = 0);
 
 -- The expected grid of each shape (no sample is NaN, so NaN marks the empty points).
 DROP VIEW IF EXISTS grid_gap_expected;

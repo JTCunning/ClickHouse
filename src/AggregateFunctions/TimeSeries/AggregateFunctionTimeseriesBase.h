@@ -113,14 +113,16 @@ public:
     /// grower lets the map fill up to 3/4. Keys at or above `bufSize` wrap around onto the cells of the low keys; on a
     /// series with a gap in the middle of the grid both form long runs, and every insert of a key whose cell is taken
     /// by the other run walks the whole run, whichever run comes first (in time order, in reverse, or in a merge).
-    /// So a missing key whose home cell holds another key is inserted only after the map is doubled if it is more
-    /// than half full, unless the key would wrap after the doubling as well. The map then grows on collisions as it
-    /// did with the 1/2 limit (never beyond that size), and maps without collisions (contiguous series, also those
-    /// starting late in the grid) keep the 3/4 limit.
+    /// So a missing key whose home cell and the cell after it hold other keys (the start of a run, not a one-cell
+    /// collision such as a sample in every 2nd bucket) is inserted only after the map is doubled if it is more than
+    /// half full, unless the key itself would wrap after the doubling as well. The map then grows on such collisions
+    /// as it did with the 1/2 limit (never beyond that size); maps without them keep the 3/4 limit.
     static ALWAYS_INLINE Bucket & getOrInsertBucket(TimeSeriesBucketsMap<Bucket> & buckets, size_t bucket_index)
     {
         const size_t buffer_size = buckets.getBufferSizeInCells();
-        if (buckets.size() * 2 > buffer_size && bucket_index < 2 * buffer_size && !buckets.isEmptyCell(buckets.hash(bucket_index)))
+        const size_t home = buckets.hash(bucket_index);
+        if (buckets.size() * 2 > buffer_size && bucket_index < 2 * buffer_size && !buckets.isEmptyCell(home)
+            && !buckets.isEmptyCell(home + 1))
         {
             if (auto * it = buckets.find(bucket_index))
                 return it->getMapped();
