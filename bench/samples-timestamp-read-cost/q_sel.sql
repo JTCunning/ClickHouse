@@ -1,0 +1,1 @@
+SELECT count(), sum(length(samples)) FROM timeSeriesSelector('lab', 'TBL', 'container_cpu_usage_seconds_total{job="cadvisor",image!=""}', toDateTime64('2024-01-01 00:00:00', 3, 'UTC'), toDateTime64('2024-01-03 00:00:00', 3, 'UTC'), 'samples') SETTINGS max_threads = 2, use_uncompressed_cache = 0

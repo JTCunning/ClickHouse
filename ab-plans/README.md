@@ -18,6 +18,7 @@ Order: fix branches first (they need a build anyway), then report conclusions th
 | 8 | [label-regex-in](../reports/2026-11-01-label-regex-in.md) (handoff #7) | report: needs a branch first | 2026-10-31-handoff-rewrite-label-value-regex-to-in | IN via the text index: 4–14% end to end on 100k series | todo |
 | 9 | [remote-write-baseline](../reports/2026-11-01-remote-write-baseline.md) | report: re-baseline at scale | 2026-10-31-baseline-remote-write-ingest-and-the-ded | per-sample CPU and the merge share hold with more cores and senders | todo |
 | 10 | [tags-collector-store-cost](../reports/2026-10-31-tags-collector-store-cost.md) (handoff #3) | report: model only | 2026-10-31-handoff-cut-per-row-cpu-of-contexttimes | the ~2× from steps 1+3 on a real build (needs a branch first) | todo |
+| 11 | [samples-timestamp-read-cost](../reports/2026-11-08-samples-timestamp-read-cost.md) (handoff #12) | report: settings A/B on EBS | 2026-11-01-handoff-samplestimestamp-read-cost-dom | local prefetch + 1 MiB local buffer: sync read wait −80%, wall −10–21% on the 30-day `rate()` + `sum by()` with a cold page cache (2 vCPU SSD showed the mechanism only) | [plan](samples-timestamp-read-cost.md) |
 
 No A/B needed:
 - [selector-probe](../reports/2026-10-31-selector-probe.md): already fixed upstream by #117344.
