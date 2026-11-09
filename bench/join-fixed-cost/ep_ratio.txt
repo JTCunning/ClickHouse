@@ -1,0 +1,120 @@
+(Expression)
+ExpressionTransform
+  (Sorting)
+  MergingSortedTransform 16 → 1
+    MergeSortingTransform × 16
+      LimitsCheckingTransform × 16
+        PartialSortingTransform × 16
+          (Expression)
+          ExpressionTransform × 16
+            (Filter)
+            FilterTransform × 16
+              (Join)
+              Resize 1 → 16
+                FillingRightJoinSide
+                  Resize 16 → 1
+                    JoiningTransform 3 → 1
+                      DelayedJoinedBlocksWorkerTransform
+                        SimpleSquashingTransform
+                          JoiningTransform 3 → 1
+                            DelayedJoinedBlocksWorkerTransform
+                              SimpleSquashingTransform
+                                JoiningTransform 3 → 1
+                                  DelayedJoinedBlocksWorkerTransform
+                                    SimpleSquashingTransform
+                                      JoiningTransform 3 → 1
+                                        DelayedJoinedBlocksWorkerTransform
+                                          SimpleSquashingTransform
+                                            JoiningTransform 3 → 1
+                                              DelayedJoinedBlocksWorkerTransform
+                                                SimpleSquashingTransform
+                                                  JoiningTransform 3 → 1
+                                                    DelayedJoinedBlocksWorkerTransform
+                                                      SimpleSquashingTransform
+                                                        JoiningTransform 3 → 1
+                                                          DelayedJoinedBlocksWorkerTransform
+                                                            SimpleSquashingTransform
+                                                              JoiningTransform 3 → 1
+                                                                DelayedJoinedBlocksWorkerTransform
+                                                                  SimpleSquashingTransform
+                                                                    JoiningTransform 3 → 1
+                                                                      DelayedJoinedBlocksWorkerTransform
+                                                                        SimpleSquashingTransform
+                                                                          JoiningTransform 3 → 1
+                                                                            DelayedJoinedBlocksWorkerTransform
+                                                                              SimpleSquashingTransform
+                                                                                JoiningTransform 3 → 1
+                                                                                  DelayedJoinedBlocksWorkerTransform
+                                                                                    SimpleSquashingTransform
+                                                                                      JoiningTransform 3 → 1
+                                                                                        DelayedJoinedBlocksWorkerTransform
+                                                                                          SimpleSquashingTransform
+                                                                                            JoiningTransform 3 → 1
+                                                                                              DelayedJoinedBlocksWorkerTransform
+                                                                                                SimpleSquashingTransform
+                                                                                                  JoiningTransform 3 → 1
+                                                                                                    DelayedJoinedBlocksWorkerTransform
+                                                                                                      SimpleSquashingTransform
+                                                                                                        JoiningTransform 3 → 1
+                                                                                                          DelayedJoinedBlocksWorkerTransform
+                                                                                                            SimpleSquashingTransform
+                                                                                                              JoiningTransform 3 → 1
+                                                                                                                DelayedJoinedBlocksWorkerTransform
+                                                                                                                  SimpleSquashingTransform
+                                                                                                                    DelayedJoinedBlocksTransform 0 → 16
+                                                                                                                      (Expression)
+                                                                                                                      ExpressionTransform × 16
+                                                                                                                        (Filter)
+                                                                                                                        FilterTransform × 16
+                                                                                                                          (Aggregating)
+                                                                                                                          Resize 16 → 16
+                                                                                                                            AggregatingTransform × 16
+                                                                                                                              (Expression)
+                                                                                                                              ExpressionTransform × 16
+                                                                                                                                (Filter)
+                                                                                                                                FilterTransform × 16
+                                                                                                                                  (Aggregating)
+                                                                                                                                  Resize 16 → 16
+                                                                                                                                    AggregatingTransform × 16
+                                                                                                                                      (Expression)
+                                                                                                                                      ExpressionTransform × 16
+                                                                                                                                        (Aggregating)
+                                                                                                                                        Resize 16 → 16
+                                                                                                                                          AggregatingTransform × 16
+                                                                                                                                            (Expression)
+                                                                                                                                            ExpressionTransform × 16
+                                                                                                                                              (CreatingSets)
+                                                                                                                                                (Expression)
+                                                                                                                                                ExpressionTransform × 16
+                                                                                                                                                  (ReadFromMergeTree)
+                                                                                                                                                  MergeTreeSelect(pool: ReadPool, algorithm: Thread) × 16 0 → 1
+                                                                                                                      (Expression)
+                                                                                                                      ExpressionTransform × 16
+                                                                                                                        (BuildRuntimeFilter)
+                                                                                                                        BuildRuntimeFilterTransform × 16
+                                                                                                                          (Expression)
+                                                                                                                          ExpressionTransform × 16
+                                                                                                                            (Aggregating)
+                                                                                                                            Resize 16 → 16
+                                                                                                                              AggregatingTransform × 16
+                                                                                                                                (Expression)
+                                                                                                                                ExpressionTransform × 16
+                                                                                                                                  (Filter)
+                                                                                                                                  FilterTransform × 16
+                                                                                                                                    (Aggregating)
+                                                                                                                                    Resize 16 → 16
+                                                                                                                                      AggregatingTransform × 16
+                                                                                                                                        (Expression)
+                                                                                                                                        ExpressionTransform × 16
+                                                                                                                                          (Filter)
+                                                                                                                                          FilterTransform × 16
+                                                                                                                                            (Aggregating)
+                                                                                                                                            Resize 16 → 16
+                                                                                                                                              AggregatingTransform × 16
+                                                                                                                                                (Expression)
+                                                                                                                                                ExpressionTransform × 16
+                                                                                                                                                  (CreatingSets)
+                                                                                                                                                    (Expression)
+                                                                                                                                                    ExpressionTransform × 16
+                                                                                                                                                      (ReadFromMergeTree)
+                                                                                                                                                      MergeTreeSelect(pool: ReadPool, algorithm: Thread) × 16 0 → 1

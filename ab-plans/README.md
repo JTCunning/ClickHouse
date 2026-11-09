@@ -26,5 +26,6 @@ No A/B needed:
 - [skip-tags-label-free](../reports/2026-11-01-skip-tags-label-free.md): superseded by #2.
 - [selector-eager-ids](../reports/2026-10-31-selector-eager-ids.md): the verdict is "no gain"; re-check only if asked.
 - [explain-estimate-materialized-cte](../reports/2026-11-09-explain-estimate-materialized-cte.md): not a bug (the copied SQL ran with `enable_materialized_cte=0`); exact counts, not timings.
+- [join-fixed-cost](../reports/2026-11-09-join-fixed-cost.md): the verdict is "no gain" (the JOIN is ~1 ms of ~640 ms; serial layout and spill-off measured flat); the capture's own 16-core processor timers agree (`Join` 0.9 ms of 1,106 ms CPU).
 
 Every new experiment adds a row here and its plan in the same run.
