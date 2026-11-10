@@ -2,8 +2,9 @@
 -- no-random-merge-tree-settings: the test needs compact parts with one compressed block per granule of a fixed size.
 
 -- Compact parts compress every granule separately, so the ALP codec sees compressed blocks of exactly `index_granularity` values,
--- and runs its search for the encoding parameters on every block. The search stops evaluating a parameter pair as soon as the pair
--- cannot beat the best one found so far; it must still choose the same parameters as a full evaluation of every pair.
+-- and runs its search for the encoding parameters on every block. The search starts each sample from the previous sample's best
+-- pair and stops evaluating a parameter pair as soon as the pair cannot beat the best one found so far; it must still choose the
+-- same parameters as a full evaluation of every pair.
 
 SET enable_alp_codec = 1;
 
@@ -43,3 +44,21 @@ SELECT
     (SELECT sum(cityHash64(bin(v))) FROM alp_small_blocks_d2) = (SELECT sum(cityHash64(bin((10000 + intHash32(number) % 2000) / 100))) FROM numbers(25600));
 DROP TABLE alp_small_blocks_d3;
 DROP TABLE alp_small_blocks_d2;
+
+SELECT '# Compressed size of a block whose samples share their best pair';
+
+-- One compressed block of 131,072 values: 3-decimal values, except for 8 runs of 1,024 integers that no search sample covers.
+-- All 8 samples have the same best pair, (14, 11), so each sample's search starts from that pair, and the pair is the only
+-- candidate that the integer runs choose from. A search that lost the shared pair would add the default pair (0, 0) to the
+-- candidates, and the integer runs would compress better with it: the compressed size would change.
+DROP TABLE IF EXISTS alp_shared_best_pair;
+CREATE TABLE alp_shared_best_pair (v Float64 CODEC(ALP)) ENGINE = MergeTree ORDER BY tuple()
+SETTINGS index_granularity = 131072, index_granularity_bytes = '100Mi', min_bytes_for_wide_part = '1Gi', min_compress_block_size = 1048576, max_compress_block_size = 1048576;
+INSERT INTO alp_shared_best_pair
+SELECT if(intDiv(number, 1024) % 16 = 10, toFloat64(number % 1000), (100000 + intHash32(number) % 4096) / 1000) FROM numbers(131072)
+SETTINGS max_block_size = 131072, min_insert_block_size_rows = 131072, min_insert_block_size_bytes = 0, max_insert_block_size = 131072;
+SELECT part_type, marks, data_compressed_bytes, data_uncompressed_bytes
+FROM system.parts WHERE database = currentDatabase() AND table = 'alp_shared_best_pair' AND active;
+SELECT (SELECT sum(cityHash64(bin(v))) FROM alp_shared_best_pair)
+    = (SELECT sum(cityHash64(bin(if(intDiv(number, 1024) % 16 = 10, toFloat64(number % 1000), (100000 + intHash32(number) % 4096) / 1000)))) FROM numbers(131072));
+DROP TABLE alp_shared_best_pair;
