@@ -116,7 +116,10 @@ public:
     /// So a missing key whose home cell and the cell after it hold other keys (the start of a run, not a one-cell
     /// collision such as a sample in every 2nd bucket) is inserted only after the map is doubled if it is more than
     /// half full, unless the key itself would wrap after the doubling as well. The map then grows on such collisions
-    /// as it did with the 1/2 limit (never beyond that size); maps without them keep the 3/4 limit.
+    /// as it did with the 1/2 limit, and never beyond that size; maps without them keep the 3/4 limit. A key at least
+    /// twice the buffer size (the run after the gap starts far past the map size, on a long grid or a sparse series)
+    /// keeps master's growth and walks the run until the map is 3/4 full: after one doubling it can still wrap onto
+    /// the same run, so growing for it may cost memory and save nothing.
     static ALWAYS_INLINE Bucket & getOrInsertBucket(TimeSeriesBucketsMap<Bucket> & buckets, size_t bucket_index)
     {
         const size_t buffer_size = buckets.getBufferSizeInCells();

@@ -13,7 +13,8 @@ DROP TABLE IF EXISTS grid_gap_states;
 -- One sample per minute at value = minute, on a 7-day grid at a 60 s step (10081 points) with a 60 s window, so grid
 -- point `i` holds the sample of minute `i` if there is one and NULL otherwise.
 --   gap_mid:    minutes [0, 3100) and [6981, 10081): with 8192 cells and 4311 buckets the indexes from 8192 wrap.
---   gap_sparse: minutes [0, 1500) and [8581, 10081): the wrapping indexes land on a map below half full.
+--   gap_sparse: minutes [0, 1500) and [8581, 10081): the wrapping indexes are more than twice the 2048-cell map, so the
+--               map is not grown for them.
 --   gap_late:   minutes [0, 6000) and [10000, 10081): the map is 3/4 full when the wrapping indexes arrive.
 --   late_start: minutes [4000, 10081): the indexes wrap without colliding, so the map keeps filling to 3/4.
 --   every_2nd:  every 2nd minute: the wrapping indexes collide with one cell only, so the map keeps filling to 3/4.
@@ -99,7 +100,7 @@ FROM
 ) AS a
 JOIN grid_gap_expected USING shape
 ORDER BY shape
-SETTINGS max_threads = 1;
+SETTINGS max_threads = 1, query_plan_remove_redundant_sorting = 0; -- keep the ORDER BY that feeds the merge
 
 SELECT '-- states written to a table and read back (deserialize)';
 CREATE TABLE grid_gap_states (shape String, s AggregateFunction(timeSeriesLastToGrid(0, 604800, 60, 60), DateTime64(3), Float64))
