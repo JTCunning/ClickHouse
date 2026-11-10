@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-07T11:13:46Z",
+  "updated": "2026-11-10T03:00:46Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -52,7 +52,7 @@
     {
       "slug": "promql-drop-name-exact-selector",
       "title": "PromQL: skip the duplicate series check when dropping the metric name of one metric",
-      "status": "ready-to-submit",
+      "status": "submitted",
       "priority": 2,
       "branch": "lilred-perf-promql-drop-name-exact-selector",
       "head": "dadc843ffb7478938ad1712ee757df247f78d093",
@@ -77,7 +77,9 @@
       ],
       "claim": "At 100k series: sum(rate) -19% CPU, sum(abs) -20%, sum by (job) -9%, a 37-step range query -30%, with identical results. The regex-selector control is unchanged.",
       "pass_if": "05482 passes; the sum(rate), sum(abs) and range queries are faster by at least 10%; the regex control is not slower.",
-      "notes": "Overlaps upstream 121069 (the same rule, range functions only) and James's own 126763: land only one of them. Decide before submitting. The last 2 reference lines of 05482 were predicted (one less than master prints): check them first."
+      "notes": "Overlaps upstream 121069 (the same rule, range functions only) and James's own 126763: land only one of them. Decide before submitting. The last 2 reference lines of 05482 were predicted (one less than master prints): check them first.",
+      "upstream_pr": 126763,
+      "submitted_head": "dadc843ffb7478938ad1712ee757df247f78d093"
     },
     {
       "slug": "time-ranges-id-ranges-index-hint",
