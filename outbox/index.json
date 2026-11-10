@@ -115,7 +115,7 @@
     {
       "slug": "grid-gap-wraparound",
       "title": "Grow the timeSeries*ToGrid bucket map before inserting a colliding key",
-      "status": "ready-to-build",
+      "status": "results-in",
       "priority": 4,
       "branch": "lilred-perf-grid-gap-wraparound",
       "head": "e6d27f5cc1d46392c894e989a64266fc7cf20568",
