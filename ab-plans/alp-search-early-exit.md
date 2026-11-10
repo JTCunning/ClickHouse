@@ -1,7 +1,34 @@
 # A/B plan: stop scoring an ALP parameter pair once it cannot beat the best one
-**Experiment:** ../reports/2026-11-01-alp-search-early-exit.md · **Branch:** `lilred-perf-alp-search-early-exit` @ `d4c58e0009b4` (based on master `c189bd99fbda`; merges cleanly with master `7a516a1aba46`, 2026-11-07) · **Task:** 2026-10-31-alp-codec-scale-the-parameter-search-to · **Outbox:** item 5, issue #11 (`ready-to-build`)
+**Experiment:** ../reports/2026-11-01-alp-search-early-exit.md · **Branch:** `lilred-perf-alp-search-early-exit` @ `d6f173c6e3d3` (run 2; run 1 was `d4c58e0009b4`; based on master `c189bd99fbda`; merges cleanly with master `2f701ba6d627`, 2026-11-10) · **Task:** 2026-10-31-alp-codec-scale-the-parameter-search-to · **Outbox:** item 5, issue #11 (`ready-to-build`, run 2)
 **Claim:** `ALP` encode CPU drops 40–90% on decimal-like values and 2–26% on full-precision ones, with byte-identical output. End to end, the new perf test's `INSERT` of 2M rows into 256-row compact granules with `ALP, ZSTD(3)` goes from 1.53 s to about 0.8 s (`rtn`, −45–50%) and from 1.55 s to about 1.2 s (`rnd`, −20–25%).
 **Evidence so far:** a standalone harness that compiles master's and the branch's encoder verbatim (76 cases, bytes identical in all, calibrated against a master build within 0.01%), plus master-only end-to-end `INSERT` timings on 2 vCPU. Unproven: the branch on a real build, the end-to-end share of the search (the predictions above assume the `ALP, ZSTD(3)` minus `ZSTD(3)` time is all `ALP` encode), and the effect on TimeSeries ingest.
+
+## Run 2 (head `d6f173c6e3d3`), 2026-11-10
+Run 1 (`d4c58e0009b4`, results on #11) failed: `codecs_float_insert` `ALP` `mon` +10.2% and `seq` +4.0%. The cause was a scalar scoring loop (see the report's correction). Run 2 checks the fix: the cut-off only while the sample's best score is under `RD_SIZE_THRESHOLD_LIMIT`, master's vectorized loop above it, and each sample seeded from the previous sample's best pair.
+
+- **Builds:** A = `c189bd99fbda` again (the base is unchanged, so run 1's A binary can be reused), B = `d6f173c6e3d3`. Same host, method and `perf.py --runs 13` as run 1.
+- **Tests on B:** `05480_alp_codec_small_compress_blocks`, which now has 4 pinned sizes (3-decimal 159,770, 2-decimal 145,000, NaN at every sample start 167,720, shared best pair 216,123 bytes). Also `04612_alp_codec_float32_decimal_ratio` and `05054_adaptive_codec_float_alp`. 05480 must also pass on A, because the bytes are master's. I took the new reference lines from a master build (26.11.1.1642, same encoder as the base).
+- **Debug or sanitizer build, if one is at hand:** run 05480 on it once. The new `chassert(best_estimation.occurred_times == 1)` only fires there.
+- **Expected (encoder-alone harness under clang 20, scaled by run 1's share of `ALP` in each `INSERT`):**
+
+| case | run 1 (`d4c58e0009b4`) | run 2 prediction |
+|---|---|---|
+| T1 `codecs_float_alp_small_blocks` `rtn` | −32.6% | about −45% (encode −71% vs run 1's −52%) |
+| T2 same, `rnd` | −16.2% | about −2%, maybe not significant (random doubles keep master's loop now) |
+| T4 `codecs_float_insert` `ALP` `rtn` | −6.5% | faster, similar to run 1 (encode −38% vs −36%) |
+| G1 `codecs_float_insert` `ALP` `seq` / `mon` / `rnd` | +4.0% / +10.2% / −9.1% | faster or unchanged (encode −9% / −5% / −2%) |
+| G2 the unchanged codecs of `codecs_float_insert` | −17.1% to +6.2% | the noise band of this run |
+
+- **Pass:**
+  - every listed test passes on B, and 05480 also on A;
+  - T1 is at least 30% faster;
+  - T2 is not significantly slower;
+  - T4 is significantly faster;
+  - no `ALP` row of `codecs_float_insert` (G1, T4) is slower than the slowest unchanged-codec row (G2) of the same run.
+
+  Run 1 showed shifts of up to 17% in code this change does not touch, so a G1 row inside that band is noise, not a regression.
+- **Fail, G1 still slower beyond the band:** the gate does not hold on Zen 4. Send the `perf annotate` of `estimateParamCandidates` on B for the slow row if you can; otherwise I drop the branch.
+- **Changelog number:** after a pass, I put T1's end-to-end change into the changelog entry. It has no number now.
 
 ## Builds
 - A: master at `c189bd99fbda` (the branch base). B: `lilred-perf-alp-search-early-exit` @ `d4c58e0009b4`. Master's only `CompressionCodecALP.cpp` change since the base (`bc9f38691549`, `FirstApplicable`) touches codec registration, not the encoder, so rebasing is optional; if you rebase, build A at the new base and record both shas.

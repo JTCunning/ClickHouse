@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-10T03:00:46Z",
+  "updated": "2026-11-10T12:08:15Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -150,15 +150,15 @@
     {
       "slug": "alp-search-early-exit",
       "title": "Stop evaluating an ALP parameter pair once it cannot beat the best one",
-      "status": "results-in",
+      "status": "ready-to-build",
       "priority": 5,
       "branch": "lilred-perf-alp-search-early-exit",
-      "head": "d4c58e0009b46e9e99a7eff37103452154534a4b",
+      "head": "d6f173c6e3d3228867a5815d441e561fc572a94a",
       "base": "c189bd99fbda59c78489a6734c49397533bdd591",
       "issue": 11,
       "pr_text": "prs/alp-search-early-exit.md",
       "report": "reports/2026-11-01-alp-search-early-exit.md",
-      "ab_plan": null,
+      "ab_plan": "ab-plans/alp-search-early-exit.md",
       "tests": {
         "stateless": [
           "05480_alp_codec_small_compress_blocks"
@@ -176,9 +176,9 @@
       "guard_perf_tests": [
         "tests/performance/codecs_float_insert.xml"
       ],
-      "claim": "ALP encode CPU -40-90% on decimal-like values and -2-9% on full-precision ones; compressed bytes identical.",
-      "pass_if": "05480 passes with its exact sizes; the 04612 and 05054 tests pass unchanged; codecs_float_alp_small_blocks INSERTs are faster; no codecs_float_insert query is reported slower.",
-      "notes": "ALP is a beta codec behind enable_alp_codec; codec owners should review."
+      "claim": "Run 2 (head d6f173c6e3d3): same bytes as master. In the encoder-alone harness under clang 20 at the release flags, Float64 decimal-like values take 38-93% less encode CPU, full-precision and random doubles 1-9% less, Float32 6-88% less; nothing is slower. End to end (prediction): small-block rtn about -45%, small-block rnd about -2%, codecs_float_insert ALP rows faster or unchanged.",
+      "pass_if": "05480 (4 pinned sizes) passes on A and B; 04612 and 05054 pass on B; codecs_float_alp_small_blocks rtn at least 30% faster and rnd not significantly slower; codecs_float_insert ALP rtn significantly faster, and no ALP row of codecs_float_insert slower than the slowest unchanged-codec row (NONE, LZ4, ZSTD, DoubleDelta, Gorilla, FPC) of the same run.",
+      "notes": "Run 1 (d4c58e0009b4) failed: codecs_float_insert ALP mon +10.2%, seq +4.0%. Cause: clang vectorizes master's scoring loop; the per-value cut-off made it scalar, which loses where pairs are cut late (values that are not decimals). My harness used g++ and missed it. Fix 32eb990cdbb9 (cut-off only under RD_SIZE_THRESHOLD_LIMIT, each sample seeded with the previous best pair + 1); 05480 gained two pinned sizes (bd592b96a5d7, ded70dddecf1, d6f173c6e3d3) and a chassert. Price: the small-block rnd gain shrinks from -16% to about -2%. Run 1's A binary (c189bd99fbda) can be reused. If a debug build is at hand, run 05480 on it once (chassert). ALP is GA on master since 129732: enable_alp_codec is a no-op there, harmless in the test. Merges cleanly with master 2f701ba6d627. After a pass I add T1's end-to-end number to the changelog entry."
     }
   ]
 }

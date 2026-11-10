@@ -1,0 +1,101 @@
+## res_8192.txt
+ins_seq block=8192 pervalue master=371.9 variant=348.6 -6.3% bytes-same
+ins_seq block=8192 chunk4 master=350.7 variant=462.6 +31.9% bytes-same
+ins_seq block=8192 chunk8 master=349.4 variant=382.8 +9.6% bytes-same
+ins_seq block=8192 chunk16 master=346.9 variant=365.6 +5.4% bytes-same
+ins_mon block=8192 pervalue master=367.6 variant=381.4 +3.8% bytes-same
+ins_mon block=8192 chunk4 master=365.4 variant=492.7 +34.8% bytes-same
+ins_mon block=8192 chunk8 master=368.4 variant=415.6 +12.8% bytes-same
+ins_mon block=8192 chunk16 master=366.9 variant=391.6 +6.7% bytes-same
+ins_rnd block=8192 pervalue master=439.0 variant=357.4 -18.6% bytes-same
+ins_rnd block=8192 chunk4 master=442.9 variant=561.5 +26.8% bytes-same
+ins_rnd block=8192 chunk8 master=439.7 variant=499.5 +13.6% bytes-same
+ins_rnd block=8192 chunk16 master=440.2 variant=455.5 +3.5% bytes-same
+ins_rtn block=8192 pervalue master=372.0 variant=238.7 -35.8% bytes-same
+ins_rtn block=8192 chunk4 master=370.3 variant=271.0 -26.8% bytes-same
+ins_rtn block=8192 chunk8 master=370.8 variant=246.7 -33.5% bytes-same
+ins_rtn block=8192 chunk16 master=371.6 variant=271.1 -27.0% bytes-same
+## res_8192_b.txt
+ins_seq block=8192 pervalue master=348.3 variant=345.4 -0.8% bytes-same
+ins_seq block=8192 fixed4 master=347.7 variant=351.9 +1.2% bytes-same
+ins_seq block=8192 fixed8 master=349.6 variant=350.6 +0.3% bytes-same
+ins_seq block=8192 seeded master=351.6 variant=321.3 -8.6% bytes-same
+ins_mon block=8192 pervalue master=369.1 variant=380.3 +3.0% bytes-same
+ins_mon block=8192 fixed4 master=365.5 variant=387.4 +6.0% bytes-same
+ins_mon block=8192 fixed8 master=366.2 variant=387.2 +5.7% bytes-same
+ins_mon block=8192 seeded master=367.0 variant=362.5 -1.2% bytes-same
+ins_rnd block=8192 pervalue master=442.9 variant=360.8 -18.5% bytes-same
+ins_rnd block=8192 fixed4 master=445.4 variant=355.1 -20.3% bytes-same
+ins_rnd block=8192 fixed8 master=443.3 variant=375.0 -15.4% bytes-same
+ins_rnd block=8192 seeded master=443.3 variant=353.7 -20.2% bytes-same
+ins_rtn block=8192 pervalue master=380.9 variant=249.4 -34.5% bytes-same
+ins_rtn block=8192 fixed4 master=372.3 variant=261.7 -29.7% bytes-same
+ins_rtn block=8192 fixed8 master=371.1 variant=295.9 -20.3% bytes-same
+ins_rtn block=8192 seeded master=372.3 variant=222.1 -40.3% bytes-same
+## res_256.txt
+perf_rtn block=256 pervalue master=893.7 variant=427.5 -52.2% bytes-same
+perf_rtn block=256 seeded master=892.8 variant=254.3 -71.5% bytes-same
+perf_rnd block=256 pervalue master=950.8 variant=686.4 -27.8% bytes-same
+perf_rnd block=256 seeded master=951.0 variant=668.5 -29.7% bytes-same
+fresh_mixed block=256 pervalue master=447.3 variant=392.5 -12.3% bytes-same
+fresh_mixed block=256 seeded master=447.4 variant=394.2 -11.9% bytes-same
+fresh_counter block=256 pervalue master=442.7 variant=101.0 -77.2% bytes-same
+fresh_counter block=256 seeded master=442.7 variant=101.2 -77.1% bytes-same
+fresh_gauge2 block=256 pervalue master=448.6 variant=216.9 -51.6% bytes-same
+fresh_gauge2 block=256 seeded master=446.6 variant=124.3 -72.2% bytes-same
+fresh_fullprec block=256 pervalue master=465.6 variant=545.4 +17.1% bytes-same
+fresh_fullprec block=256 seeded master=469.0 variant=545.2 +16.2% bytes-same
+fresh_accsec block=256 pervalue master=466.4 variant=544.0 +16.6% bytes-same
+fresh_accsec block=256 seeded master=466.9 variant=536.7 +14.9% bytes-same
+merged_mixed block=256 pervalue master=445.6 variant=187.1 -58.0% bytes-same
+merged_mixed block=256 seeded master=444.7 variant=173.3 -61.0% bytes-same
+merged_fullprec block=256 pervalue master=456.0 variant=501.5 +10.0% bytes-same
+merged_fullprec block=256 seeded master=456.2 variant=466.3 +2.2% bytes-same
+## res_gate_256.txt
+fresh_fullprec block=256 gate_seed master=471.9 variant=458.1 -2.9% bytes-same
+fresh_fullprec block=256 gate_condseed master=475.1 variant=457.4 -3.7% bytes-same
+fresh_fullprec block=256 gate_noseed master=472.5 variant=472.4 -0.0% bytes-same
+fresh_accsec block=256 gate_seed master=469.9 variant=460.0 -2.1% bytes-same
+fresh_accsec block=256 gate_condseed master=471.8 variant=456.8 -3.2% bytes-same
+fresh_accsec block=256 gate_noseed master=468.7 variant=470.7 +0.4% bytes-same
+merged_fullprec block=256 gate_seed master=456.4 variant=449.6 -1.5% bytes-same
+merged_fullprec block=256 gate_condseed master=455.4 variant=440.1 -3.4% bytes-same
+merged_fullprec block=256 gate_noseed master=455.4 variant=457.6 +0.5% bytes-same
+perf_rtn block=256 gate_seed master=896.2 variant=261.4 -70.8% bytes-same
+perf_rtn block=256 gate_condseed master=893.0 variant=260.3 -70.9% bytes-same
+perf_rtn block=256 gate_noseed master=898.2 variant=420.9 -53.1% bytes-same
+perf_rnd block=256 gate_seed master=944.5 variant=912.3 -3.4% bytes-same
+perf_rnd block=256 gate_condseed master=946.1 variant=909.0 -3.9% bytes-same
+perf_rnd block=256 gate_noseed master=946.5 variant=942.5 -0.4% bytes-same
+fresh_gauge2 block=256 gate_seed master=445.4 variant=126.5 -71.6% bytes-same
+fresh_gauge2 block=256 gate_condseed master=447.7 variant=127.3 -71.6% bytes-same
+fresh_gauge2 block=256 gate_noseed master=448.5 variant=215.9 -51.9% bytes-same
+fresh_mixed block=256 gate_seed master=447.2 variant=384.4 -14.0% bytes-same
+fresh_mixed block=256 gate_condseed master=448.2 variant=384.5 -14.2% bytes-same
+fresh_mixed block=256 gate_noseed master=447.4 variant=384.8 -14.0% bytes-same
+## res_gate_8192.txt
+ins_seq block=8192 gate_seed master=348.0 variant=317.4 -8.8% bytes-same
+ins_seq block=8192 gate_condseed master=347.9 variant=316.5 -9.0% bytes-same
+ins_seq block=8192 gate_noseed master=347.4 variant=330.4 -4.9% bytes-same
+ins_mon block=8192 gate_seed master=366.1 variant=344.6 -5.9% bytes-same
+ins_mon block=8192 gate_condseed master=365.8 variant=344.3 -5.9% bytes-same
+ins_mon block=8192 gate_noseed master=365.7 variant=351.8 -3.8% bytes-same
+ins_rnd block=8192 gate_seed master=436.5 variant=426.9 -2.2% bytes-same
+ins_rnd block=8192 gate_condseed master=437.1 variant=427.5 -2.2% bytes-same
+ins_rnd block=8192 gate_noseed master=439.0 variant=437.9 -0.3% bytes-same
+ins_rtn block=8192 gate_seed master=368.7 variant=222.2 -39.7% bytes-same
+ins_rtn block=8192 gate_condseed master=368.9 variant=222.2 -39.8% bytes-same
+ins_rtn block=8192 gate_noseed master=369.9 variant=237.4 -35.8% bytes-same
+## res_gate_f32.txt
+f32 fresh_fullprec block=256 pervalue master=172.9 variant=157.7 -8.8% bytes-same
+f32 fresh_fullprec block=256 gate_condseed master=172.8 variant=154.6 -10.5% bytes-same
+f32 fresh_accsec block=256 pervalue master=151.1 variant=50.2 -66.8% bytes-same
+f32 fresh_accsec block=256 gate_condseed master=151.1 variant=49.0 -67.6% bytes-same
+f32 perf_rtn block=256 pervalue master=302.8 variant=151.2 -50.1% bytes-same
+f32 perf_rtn block=256 gate_condseed master=304.3 variant=127.1 -58.2% bytes-same
+f32 perf_rnd block=256 pervalue master=353.5 variant=242.5 -31.4% bytes-same
+f32 perf_rnd block=256 gate_condseed master=352.9 variant=315.8 -10.5% bytes-same
+f32 fresh_gauge2 block=256 pervalue master=151.0 variant=62.9 -58.3% bytes-same
+f32 fresh_gauge2 block=256 gate_condseed master=151.4 variant=57.3 -62.2% bytes-same
+f32 merged_mixed block=256 pervalue master=151.2 variant=58.2 -61.5% bytes-same
+f32 merged_mixed block=256 gate_condseed master=151.0 variant=57.3 -62.1% bytes-same

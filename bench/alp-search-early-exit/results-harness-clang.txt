@@ -1,0 +1,305 @@
+## fresh_accsec block=256 type=f64
+master blocks=3907 rd_blocks=3907 alp_bytes=8065344 alp_zstd_bytes=5173642 alp_ms_median=470.5 min=466.4 max=475.4
+branch blocks=3907 rd_blocks=3907 alp_bytes=8065344 alp_zstd_bytes=5173642 alp_ms_median=451.5 min=451.1 max=452.6
+zstd_only_bytes=5151734 raw_bytes=8000000
+## fresh_accsec block=256 type=f32
+master blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=3063678 alp_ms_median=151.2 min=151.1 max=166.8
+branch blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=3063678 alp_ms_median=49.0 min=49.0 max=49.1
+zstd_only_bytes=3048788 raw_bytes=4000000
+## fresh_accsec block=8192 type=f64
+master blocks=123 rd_blocks=123 alp_bytes=7223122 alp_zstd_bytes=4888419 alp_ms_median=17.8 min=17.6 max=21.4
+branch blocks=123 rd_blocks=123 alp_bytes=7223122 alp_zstd_bytes=4888419 alp_ms_median=17.1 min=17.0 max=17.3
+zstd_only_bytes=3762407 raw_bytes=8000000
+## fresh_accsec block=8192 type=f32
+master blocks=123 rd_blocks=0 alp_bytes=1638921 alp_zstd_bytes=1639482 alp_ms_median=7.8 min=7.8 max=7.8
+branch blocks=123 rd_blocks=0 alp_bytes=1638921 alp_zstd_bytes=1639482 alp_ms_median=4.6 min=4.6 max=4.6
+zstd_only_bytes=2582345 raw_bytes=4000000
+## fresh_bucket block=256 type=f64
+master blocks=3907 rd_blocks=0 alp_bytes=5566567 alp_zstd_bytes=1601612 alp_ms_median=441.5 min=441.5 max=443.0
+branch blocks=3907 rd_blocks=0 alp_bytes=5566567 alp_zstd_bytes=1601612 alp_ms_median=74.9 min=74.7 max=75.3
+zstd_only_bytes=2211474 raw_bytes=8000000
+## fresh_bucket block=256 type=f32
+master blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=2608120 alp_ms_median=151.5 min=151.3 max=151.6
+branch blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=2608120 alp_ms_median=29.5 min=29.4 max=35.8
+zstd_only_bytes=2595702 raw_bytes=4000000
+## fresh_bucket block=8192 type=f64
+master blocks=123 rd_blocks=0 alp_bytes=1388809 alp_zstd_bytes=1389466 alp_ms_median=17.0 min=17.0 max=17.5
+branch blocks=123 rd_blocks=0 alp_bytes=1388809 alp_zstd_bytes=1389466 alp_ms_median=5.3 min=5.2 max=5.4
+zstd_only_bytes=2185877 raw_bytes=8000000
+## fresh_bucket block=8192 type=f32
+master blocks=123 rd_blocks=0 alp_bytes=1388809 alp_zstd_bytes=1389466 alp_ms_median=7.8 min=7.8 max=8.0
+branch blocks=123 rd_blocks=0 alp_bytes=1388809 alp_zstd_bytes=1389466 alp_ms_median=4.0 min=4.0 max=4.0
+zstd_only_bytes=2075706 raw_bytes=4000000
+## fresh_const block=256 type=f64
+master blocks=3907 rd_blocks=0 alp_bytes=566515 alp_zstd_bytes=320416 alp_ms_median=440.6 min=440.0 max=441.4
+branch blocks=3907 rd_blocks=0 alp_bytes=566515 alp_zstd_bytes=320416 alp_ms_median=169.2 min=169.0 max=169.7
+zstd_only_bytes=480386 raw_bytes=8000000
+## fresh_const block=256 type=f32
+master blocks=3907 rd_blocks=0 alp_bytes=566515 alp_zstd_bytes=320416 alp_ms_median=151.1 min=150.8 max=151.1
+branch blocks=3907 rd_blocks=0 alp_bytes=566515 alp_zstd_bytes=320416 alp_ms_median=67.6 min=67.5 max=67.9
+zstd_only_bytes=403729 raw_bytes=4000000
+## fresh_const block=8192 type=f64
+master blocks=123 rd_blocks=0 alp_bytes=138249 alp_zstd_bytes=78295 alp_ms_median=17.1 min=16.9 max=17.4
+branch blocks=123 rd_blocks=0 alp_bytes=138249 alp_zstd_bytes=78295 alp_ms_median=8.7 min=8.6 max=8.7
+zstd_only_bytes=241659 raw_bytes=8000000
+## fresh_const block=8192 type=f32
+master blocks=123 rd_blocks=0 alp_bytes=138249 alp_zstd_bytes=78295 alp_ms_median=7.8 min=7.8 max=7.8
+branch blocks=123 rd_blocks=0 alp_bytes=138249 alp_zstd_bytes=78295 alp_ms_median=5.3 min=5.2 max=5.4
+zstd_only_bytes=193760 raw_bytes=4000000
+## fresh_counter block=256 type=f64
+master blocks=3907 rd_blocks=0 alp_bytes=8019535 alp_zstd_bytes=4126458 alp_ms_median=442.5 min=442.2 max=442.6
+branch blocks=3907 rd_blocks=0 alp_bytes=8019535 alp_zstd_bytes=4126458 alp_ms_median=107.1 min=107.1 max=107.4
+zstd_only_bytes=4117955 raw_bytes=8000000
+## fresh_counter block=256 type=f32
+master blocks=3907 rd_blocks=3907 alp_bytes=4075856 alp_zstd_bytes=3868949 alp_ms_median=172.6 min=170.3 max=183.6
+branch blocks=3907 rd_blocks=3907 alp_bytes=4075856 alp_zstd_bytes=3868949 alp_ms_median=152.7 min=152.5 max=152.8
+zstd_only_bytes=3802477 raw_bytes=4000000
+## fresh_counter block=8192 type=f64
+master blocks=123 rd_blocks=0 alp_bytes=3014537 alp_zstd_bytes=3014462 alp_ms_median=17.0 min=16.9 max=17.3
+branch blocks=123 rd_blocks=0 alp_bytes=3014537 alp_zstd_bytes=3014462 alp_ms_median=6.2 min=6.1 max=6.3
+zstd_only_bytes=3963261 raw_bytes=8000000
+## fresh_counter block=8192 type=f32
+master blocks=123 rd_blocks=123 alp_bytes=3648754 alp_zstd_bytes=3542545 alp_ms_median=8.8 min=8.7 max=8.8
+branch blocks=123 rd_blocks=123 alp_bytes=3648754 alp_zstd_bytes=3542545 alp_ms_median=8.2 min=8.2 max=8.3
+zstd_only_bytes=3548738 raw_bytes=4000000
+## fresh_fullprec block=256 type=f64
+master blocks=3907 rd_blocks=3907 alp_bytes=8068174 alp_zstd_bytes=7818344 alp_ms_median=466.6 min=466.3 max=475.2
+branch blocks=3907 rd_blocks=3907 alp_bytes=8068174 alp_zstd_bytes=7818344 alp_ms_median=451.6 min=451.4 max=451.9
+zstd_only_bytes=7702440 raw_bytes=8000000
+## fresh_fullprec block=256 type=f32
+master blocks=3907 rd_blocks=3907 alp_bytes=4068174 alp_zstd_bytes=3867740 alp_ms_median=171.9 min=171.6 max=172.6
+branch blocks=3907 rd_blocks=3907 alp_bytes=4068174 alp_zstd_bytes=3867740 alp_ms_median=157.2 min=155.1 max=166.6
+zstd_only_bytes=3802272 raw_bytes=4000000
+## fresh_fullprec block=8192 type=f64
+master blocks=123 rd_blocks=123 alp_bytes=7284238 alp_zstd_bytes=7258010 alp_ms_median=18.0 min=17.9 max=18.4
+branch blocks=123 rd_blocks=123 alp_bytes=7284238 alp_zstd_bytes=7258010 alp_ms_median=17.4 min=17.3 max=17.9
+zstd_only_bytes=7518546 raw_bytes=8000000
+## fresh_fullprec block=8192 type=f32
+master blocks=123 rd_blocks=123 alp_bytes=3475530 alp_zstd_bytes=3470134 alp_ms_median=8.2 min=8.2 max=9.0
+branch blocks=123 rd_blocks=123 alp_bytes=3475530 alp_zstd_bytes=3470134 alp_ms_median=7.7 min=7.6 max=8.0
+zstd_only_bytes=3575066 raw_bytes=4000000
+## fresh_gauge2 block=256 type=f64
+master blocks=3907 rd_blocks=0 alp_bytes=8019535 alp_zstd_bytes=3829446 alp_ms_median=447.2 min=446.1 max=450.1
+branch blocks=3907 rd_blocks=0 alp_bytes=8019535 alp_zstd_bytes=3829446 alp_ms_median=127.5 min=127.1 max=128.7
+zstd_only_bytes=3861365 raw_bytes=8000000
+## fresh_gauge2 block=256 type=f32
+master blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=3673725 alp_ms_median=151.8 min=151.3 max=152.5
+branch blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=3673725 alp_ms_median=56.6 min=56.4 max=56.6
+zstd_only_bytes=3655666 raw_bytes=4000000
+## fresh_gauge2 block=8192 type=f64
+master blocks=123 rd_blocks=0 alp_bytes=2139145 alp_zstd_bytes=2139479 alp_ms_median=17.1 min=17.1 max=18.1
+branch blocks=123 rd_blocks=0 alp_bytes=2139145 alp_zstd_bytes=2139479 alp_ms_median=6.8 min=6.8 max=6.9
+zstd_only_bytes=3352976 raw_bytes=8000000
+## fresh_gauge2 block=8192 type=f32
+master blocks=123 rd_blocks=0 alp_bytes=2139145 alp_zstd_bytes=2139479 alp_ms_median=7.9 min=7.8 max=8.5
+branch blocks=123 rd_blocks=0 alp_bytes=2139145 alp_zstd_bytes=2139479 alp_ms_median=4.8 min=4.8 max=5.2
+zstd_only_bytes=3397519 raw_bytes=4000000
+## fresh_mixed block=256 type=f64
+master blocks=3907 rd_blocks=0 alp_bytes=8019535 alp_zstd_bytes=5163621 alp_ms_median=449.3 min=448.2 max=451.0
+branch blocks=3907 rd_blocks=0 alp_bytes=8019535 alp_zstd_bytes=5163621 alp_ms_median=392.2 min=387.3 max=401.9
+zstd_only_bytes=5164973 raw_bytes=8000000
+## fresh_mixed block=256 type=f32
+master blocks=3907 rd_blocks=3907 alp_bytes=4084750 alp_zstd_bytes=3658626 alp_ms_median=178.6 min=177.8 max=179.4
+branch blocks=3907 rd_blocks=3907 alp_bytes=4084750 alp_zstd_bytes=3658626 alp_ms_median=159.4 min=158.8 max=160.4
+zstd_only_bytes=3602898 raw_bytes=4000000
+## fresh_mixed block=8192 type=f64
+master blocks=123 rd_blocks=0 alp_bytes=6004085 alp_zstd_bytes=4662575 alp_ms_median=20.8 min=20.6 max=21.0
+branch blocks=123 rd_blocks=0 alp_bytes=6004085 alp_zstd_bytes=4662575 alp_ms_median=19.0 min=18.9 max=19.3
+zstd_only_bytes=4551153 raw_bytes=8000000
+## fresh_mixed block=8192 type=f32
+master blocks=123 rd_blocks=123 alp_bytes=3696680 alp_zstd_bytes=3263736 alp_ms_median=11.2 min=11.1 max=11.4
+branch blocks=123 rd_blocks=123 alp_bytes=3696680 alp_zstd_bytes=3263736 alp_ms_median=10.5 min=10.4 max=10.6
+zstd_only_bytes=3265690 raw_bytes=4000000
+## merged_accsec block=256 type=f64
+master blocks=3904 rd_blocks=3854 alp_bytes=8042964 alp_zstd_bytes=4422947 alp_ms_median=462.8 min=458.6 max=470.3
+branch blocks=3904 rd_blocks=3854 alp_bytes=8042964 alp_zstd_bytes=4422947 alp_ms_median=459.1 min=442.8 max=521.8
+zstd_only_bytes=4391249 raw_bytes=7995392
+## merged_accsec block=256 type=f32
+master blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=2926045 alp_ms_median=151.7 min=151.2 max=152.0
+branch blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=2926045 alp_ms_median=64.0 min=63.3 max=65.1
+zstd_only_bytes=2911182 raw_bytes=3997696
+## merged_accsec block=8192 type=f64
+master blocks=122 rd_blocks=118 alp_bytes=7002332 alp_zstd_bytes=4952727 alp_ms_median=17.2 min=17.1 max=18.4
+branch blocks=122 rd_blocks=118 alp_bytes=7002332 alp_zstd_bytes=4952727 alp_ms_median=16.6 min=16.5 max=16.7
+zstd_only_bytes=5017911 raw_bytes=7995392
+## merged_accsec block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=1762168 alp_zstd_bytes=1763388 alp_ms_median=7.8 min=7.8 max=7.8
+branch blocks=122 rd_blocks=0 alp_bytes=1762168 alp_zstd_bytes=1763388 alp_ms_median=5.0 min=5.0 max=5.1
+zstd_only_bytes=2725663 raw_bytes=3997696
+## merged_bucket block=256 type=f64
+master blocks=3904 rd_blocks=0 alp_bytes=4563776 alp_zstd_bytes=1315210 alp_ms_median=442.8 min=441.4 max=448.7
+branch blocks=3904 rd_blocks=0 alp_bytes=4563776 alp_zstd_bytes=1315210 alp_ms_median=106.4 min=106.2 max=107.1
+zstd_only_bytes=1081484 raw_bytes=7995392
+## merged_bucket block=256 type=f32
+master blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=1844826 alp_ms_median=151.5 min=151.1 max=152.5
+branch blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=1844826 alp_ms_median=57.6 min=56.8 max=59.6
+zstd_only_bytes=1827952 raw_bytes=3997696
+## merged_bucket block=8192 type=f64
+master blocks=122 rd_blocks=0 alp_bytes=1387384 alp_zstd_bytes=1343824 alp_ms_median=17.2 min=16.9 max=17.3
+branch blocks=122 rd_blocks=0 alp_bytes=1387384 alp_zstd_bytes=1343824 alp_ms_median=6.4 min=6.2 max=6.5
+zstd_only_bytes=883520 raw_bytes=7995392
+## merged_bucket block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=1387384 alp_zstd_bytes=1343824 alp_ms_median=7.8 min=7.8 max=7.8
+branch blocks=122 rd_blocks=0 alp_bytes=1387384 alp_zstd_bytes=1343824 alp_ms_median=4.9 min=4.8 max=4.9
+zstd_only_bytes=1440015 raw_bytes=3997696
+## merged_const block=256 type=f64
+master blocks=3904 rd_blocks=0 alp_bytes=66368 alp_zstd_bytes=97832 alp_ms_median=442.1 min=439.6 max=606.8
+branch blocks=3904 rd_blocks=0 alp_bytes=66368 alp_zstd_bytes=97832 alp_ms_median=31.4 min=31.4 max=31.8
+zstd_only_bytes=98648 raw_bytes=7995392
+## merged_const block=256 type=f32
+master blocks=3904 rd_blocks=0 alp_bytes=66368 alp_zstd_bytes=97832 alp_ms_median=150.8 min=150.4 max=152.9
+branch blocks=3904 rd_blocks=0 alp_bytes=66368 alp_zstd_bytes=97832 alp_ms_median=18.8 min=18.7 max=20.1
+zstd_only_bytes=81168 raw_bytes=3997696
+## merged_const block=8192 type=f64
+master blocks=122 rd_blocks=0 alp_bytes=13176 alp_zstd_bytes=3045 alp_ms_median=17.2 min=16.7 max=18.6
+branch blocks=122 rd_blocks=0 alp_bytes=13176 alp_zstd_bytes=3045 alp_ms_median=3.6 min=3.5 max=4.5
+zstd_only_bytes=3630 raw_bytes=7995392
+## merged_const block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=13176 alp_zstd_bytes=3045 alp_ms_median=7.7 min=7.6 max=8.2
+branch blocks=122 rd_blocks=0 alp_bytes=13176 alp_zstd_bytes=3045 alp_ms_median=3.5 min=3.5 max=3.5
+zstd_only_bytes=2994 raw_bytes=3997696
+## merged_counter block=256 type=f64
+master blocks=3904 rd_blocks=0 alp_bytes=6784992 alp_zstd_bytes=1867655 alp_ms_median=442.7 min=442.1 max=443.4
+branch blocks=3904 rd_blocks=0 alp_bytes=6784992 alp_zstd_bytes=1867655 alp_ms_median=107.7 min=107.5 max=109.1
+zstd_only_bytes=1884304 raw_bytes=7995392
+## merged_counter block=256 type=f32
+master blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=2856291 alp_ms_median=152.7 min=151.1 max=153.8
+branch blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=2856291 alp_ms_median=55.5 min=55.3 max=56.2
+zstd_only_bytes=2842285 raw_bytes=3997696
+## merged_counter block=8192 type=f64
+master blocks=122 rd_blocks=0 alp_bytes=2293240 alp_zstd_bytes=2191327 alp_ms_median=16.9 min=16.5 max=17.6
+branch blocks=122 rd_blocks=0 alp_bytes=2293240 alp_zstd_bytes=2191327 alp_ms_median=6.3 min=6.2 max=6.4
+zstd_only_bytes=1716163 raw_bytes=7995392
+## merged_counter block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=2293240 alp_zstd_bytes=2191327 alp_ms_median=7.8 min=7.8 max=8.1
+branch blocks=122 rd_blocks=0 alp_bytes=2293240 alp_zstd_bytes=2191327 alp_ms_median=4.9 min=4.8 max=5.1
+zstd_only_bytes=3003175 raw_bytes=3997696
+## merged_fullprec block=256 type=f64
+master blocks=3904 rd_blocks=3795 alp_bytes=8039853 alp_zstd_bytes=7530770 alp_ms_median=458.3 min=455.7 max=472.6
+branch blocks=3904 rd_blocks=3795 alp_bytes=8039853 alp_zstd_bytes=7530770 alp_ms_median=440.5 min=440.2 max=442.0
+zstd_only_bytes=7453426 raw_bytes=7995392
+## merged_fullprec block=256 type=f32
+master blocks=3904 rd_blocks=7 alp_bytes=4017299 alp_zstd_bytes=3508518 alp_ms_median=151.1 min=150.8 max=151.2
+branch blocks=3904 rd_blocks=7 alp_bytes=4017299 alp_zstd_bytes=3508518 alp_ms_median=93.2 min=93.0 max=93.4
+zstd_only_bytes=3489430 raw_bytes=3997696
+## merged_fullprec block=8192 type=f64
+master blocks=122 rd_blocks=115 alp_bytes=6877914 alp_zstd_bytes=6721451 alp_ms_median=16.8 min=16.8 max=17.1
+branch blocks=122 rd_blocks=115 alp_bytes=6877914 alp_zstd_bytes=6721451 alp_ms_median=16.4 min=16.3 max=16.4
+zstd_only_bytes=7493558 raw_bytes=7995392
+## merged_fullprec block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=3170038 alp_zstd_bytes=3171258 alp_ms_median=8.2 min=8.1 max=8.2
+branch blocks=122 rd_blocks=0 alp_bytes=3170038 alp_zstd_bytes=3171258 alp_ms_median=6.4 min=6.3 max=6.7
+zstd_only_bytes=3458489 raw_bytes=3997696
+## merged_gauge2 block=256 type=f64
+master blocks=3904 rd_blocks=0 alp_bytes=4658624 alp_zstd_bytes=1402982 alp_ms_median=444.7 min=444.5 max=446.1
+branch blocks=3904 rd_blocks=0 alp_bytes=4658624 alp_zstd_bytes=1402982 alp_ms_median=115.9 min=115.8 max=115.9
+zstd_only_bytes=2883587 raw_bytes=7995392
+## merged_gauge2 block=256 type=f32
+master blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=2621153 alp_ms_median=151.2 min=151.0 max=153.0
+branch blocks=3904 rd_blocks=0 alp_bytes=4017216 alp_zstd_bytes=2621153 alp_ms_median=52.9 min=52.9 max=53.1
+zstd_only_bytes=2609256 raw_bytes=3997696
+## merged_gauge2 block=8192 type=f64
+master blocks=122 rd_blocks=0 alp_bytes=1293176 alp_zstd_bytes=1294396 alp_ms_median=17.5 min=16.7 max=25.5
+branch blocks=122 rd_blocks=0 alp_bytes=1293176 alp_zstd_bytes=1294396 alp_ms_median=6.2 min=6.1 max=6.3
+zstd_only_bytes=2250803 raw_bytes=7995392
+## merged_gauge2 block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=1293176 alp_zstd_bytes=1294396 alp_ms_median=7.8 min=7.7 max=7.8
+branch blocks=122 rd_blocks=0 alp_bytes=1293176 alp_zstd_bytes=1294396 alp_ms_median=4.6 min=4.6 max=4.7
+zstd_only_bytes=2258236 raw_bytes=3997696
+## merged_mixed block=256 type=f64
+master blocks=3904 rd_blocks=772 alp_bytes=5800654 alp_zstd_bytes=2369733 alp_ms_median=445.2 min=445.1 max=445.5
+branch blocks=3904 rd_blocks=772 alp_bytes=5800654 alp_zstd_bytes=2369733 alp_ms_median=169.5 min=169.4 max=169.8
+zstd_only_bytes=2465278 raw_bytes=7995392
+## merged_mixed block=256 type=f32
+master blocks=3904 rd_blocks=1 alp_bytes=3628613 alp_zstd_bytes=2460306 alp_ms_median=151.5 min=151.3 max=151.6
+branch blocks=3904 rd_blocks=1 alp_bytes=3628613 alp_zstd_bytes=2460306 alp_ms_median=57.6 min=57.5 max=57.8
+zstd_only_bytes=2445174 raw_bytes=3997696
+## merged_mixed block=8192 type=f64
+master blocks=122 rd_blocks=0 alp_bytes=2965856 alp_zstd_bytes=2672909 alp_ms_median=17.5 min=17.3 max=17.9
+branch blocks=122 rd_blocks=0 alp_bytes=2965856 alp_zstd_bytes=2672909 alp_ms_median=8.9 min=8.9 max=9.0
+zstd_only_bytes=2548283 raw_bytes=7995392
+## merged_mixed block=8192 type=f32
+master blocks=122 rd_blocks=0 alp_bytes=1853710 alp_zstd_bytes=1814138 alp_ms_median=8.1 min=8.0 max=8.1
+branch blocks=122 rd_blocks=0 alp_bytes=1853710 alp_zstd_bytes=1814138 alp_ms_median=5.1 min=5.1 max=5.2
+zstd_only_bytes=2556537 raw_bytes=3997696
+## perf_rnd block=256 type=f64
+master blocks=7813 rd_blocks=7813 alp_bytes=16161314 alp_zstd_bytes=15836467 alp_ms_median=946.5 min=945.5 max=958.6
+branch blocks=7813 rd_blocks=7813 alp_bytes=16161314 alp_zstd_bytes=15836467 alp_ms_median=909.4 min=908.7 max=1053.1
+zstd_only_bytes=15595958 raw_bytes=16000000
+## perf_rnd block=256 type=f32
+master blocks=7813 rd_blocks=7813 alp_bytes=8161314 alp_zstd_bytes=8013001 alp_ms_median=345.5 min=345.3 max=359.7
+branch blocks=7813 rd_blocks=7813 alp_bytes=8161314 alp_zstd_bytes=8013001 alp_ms_median=309.8 min=309.0 max=310.1
+zstd_only_bytes=7873841 raw_bytes=8000000
+## perf_rnd block=8192 type=f64
+master blocks=245 rd_blocks=245 alp_bytes=14938654 alp_zstd_bytes=14817390 alp_ms_median=43.5 min=43.4 max=48.9
+branch blocks=245 rd_blocks=245 alp_bytes=14938654 alp_zstd_bytes=14817390 alp_ms_median=42.2 min=42.1 max=42.3
+zstd_only_bytes=15221398 raw_bytes=16000000
+## perf_rnd block=8192 type=f32
+master blocks=245 rd_blocks=245 alp_bytes=7328176 alp_zstd_bytes=7244907 alp_ms_median=16.8 min=16.7 max=16.9
+branch blocks=245 rd_blocks=245 alp_bytes=7328176 alp_zstd_bytes=7244907 alp_ms_median=15.7 min=15.5 max=15.8
+zstd_only_bytes=7384903 raw_bytes=8000000
+## perf_rtn block=256 type=f64
+master blocks=7813 rd_blocks=0 alp_bytes=14285363 alp_zstd_bytes=4148924 alp_ms_median=894.2 min=892.3 max=897.4
+branch blocks=7813 rd_blocks=0 alp_bytes=14285363 alp_zstd_bytes=4148924 alp_ms_median=262.1 min=261.3 max=269.1
+zstd_only_bytes=10183362 raw_bytes=16000000
+## perf_rtn block=256 type=f32
+master blocks=7813 rd_blocks=0 alp_bytes=8039065 alp_zstd_bytes=5447774 alp_ms_median=302.8 min=302.6 max=304.3
+branch blocks=7813 rd_blocks=0 alp_bytes=8039065 alp_zstd_bytes=5447774 alp_ms_median=138.1 min=125.2 max=148.5
+zstd_only_bytes=5403240 raw_bytes=8000000
+## perf_rtn block=8192 type=f64
+master blocks=245 rd_blocks=0 alp_bytes=4183888 alp_zstd_bytes=4184824 alp_ms_median=35.2 min=34.8 max=44.0
+branch blocks=245 rd_blocks=0 alp_bytes=4183888 alp_zstd_bytes=4184824 alp_ms_median=15.2 min=14.3 max=15.5
+zstd_only_bytes=6197764 raw_bytes=16000000
+## perf_rtn block=8192 type=f32
+master blocks=245 rd_blocks=0 alp_bytes=4026626 alp_zstd_bytes=4029014 alp_ms_median=15.7 min=15.6 max=15.7
+branch blocks=245 rd_blocks=0 alp_bytes=4026626 alp_zstd_bytes=4029014 alp_ms_median=10.0 min=10.0 max=10.1
+zstd_only_bytes=5714627 raw_bytes=8000000
+## bench_q block=256 type=f64
+master blocks=3907 rd_blocks=0 alp_bytes=6814311 alp_zstd_bytes=1928097 alp_ms_median=443.4 min=441.3 max=457.3
+branch blocks=3907 rd_blocks=0 alp_bytes=6814311 alp_zstd_bytes=1928097 alp_ms_median=99.8 min=99.6 max=100.0
+zstd_only_bytes=1124120 raw_bytes=8000000
+## bench_q block=256 type=f32
+master blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=2224979 alp_ms_median=150.9 min=150.8 max=151.4
+branch blocks=3907 rd_blocks=0 alp_bytes=4019535 alp_zstd_bytes=2224979 alp_ms_median=56.7 min=56.6 max=58.8
+zstd_only_bytes=2214988 raw_bytes=4000000
+## bench_q block=8192 type=f64
+master blocks=123 rd_blocks=0 alp_bytes=1888905 alp_zstd_bytes=1579496 alp_ms_median=17.1 min=17.0 max=17.4
+branch blocks=123 rd_blocks=0 alp_bytes=1888905 alp_zstd_bytes=1579496 alp_ms_median=5.8 min=5.7 max=6.5
+zstd_only_bytes=115181 raw_bytes=8000000
+## bench_q block=8192 type=f32
+master blocks=123 rd_blocks=0 alp_bytes=1888905 alp_zstd_bytes=1579496 alp_ms_median=7.8 min=7.8 max=7.9
+branch blocks=123 rd_blocks=0 alp_bytes=1888905 alp_zstd_bytes=1579496 alp_ms_median=4.8 min=4.8 max=4.9
+zstd_only_bytes=286312 raw_bytes=4000000
+## ins_seq block=8192 type=f64
+master blocks=2442 rd_blocks=897 alp_bytes=131996018 alp_zstd_bytes=88178071 alp_ms_median=349.9 min=347.5 max=360.6
+branch blocks=2442 rd_blocks=897 alp_bytes=131996018 alp_zstd_bytes=88178071 alp_ms_median=319.3 min=317.1 max=324.4
+zstd_only_bytes=124568353 raw_bytes=160000000
+## ins_seq block=8192 type=f32
+master blocks=2442 rd_blocks=0 alp_bytes=31721594 alp_zstd_bytes=13758820 alp_ms_median=159.0 min=158.6 max=188.5
+branch blocks=2442 rd_blocks=0 alp_bytes=31721594 alp_zstd_bytes=13758820 alp_ms_median=102.5 min=100.4 max=108.5
+zstd_only_bytes=43307974 raw_bytes=80000000
+## ins_mon block=8192 type=f64
+master blocks=2442 rd_blocks=943 alp_bytes=133007676 alp_zstd_bytes=123206106 alp_ms_median=365.9 min=365.0 max=368.2
+branch blocks=2442 rd_blocks=943 alp_bytes=133007676 alp_zstd_bytes=123206106 alp_ms_median=346.5 min=343.6 max=365.2
+zstd_only_bytes=125129666 raw_bytes=160000000
+## ins_mon block=8192 type=f32
+master blocks=2442 rd_blocks=0 alp_bytes=30476588 alp_zstd_bytes=14836968 alp_ms_median=159.5 min=159.2 max=160.1
+branch blocks=2442 rd_blocks=0 alp_bytes=30476588 alp_zstd_bytes=14836968 alp_ms_median=102.6 min=101.6 max=102.9
+zstd_only_bytes=34386780 raw_bytes=80000000
+## ins_rnd block=8192 type=f64
+master blocks=2442 rd_blocks=2442 alp_bytes=149638122 alp_zstd_bytes=148360959 alp_ms_median=443.9 min=439.8 max=450.7
+branch blocks=2442 rd_blocks=2442 alp_bytes=149638122 alp_zstd_bytes=148360959 alp_ms_median=435.4 min=429.1 max=493.0
+zstd_only_bytes=152214089 raw_bytes=160000000
+## ins_rnd block=8192 type=f32
+master blocks=2442 rd_blocks=2442 alp_bytes=73445250 alp_zstd_bytes=72601870 alp_ms_median=173.0 min=171.5 max=173.9
+branch blocks=2442 rd_blocks=2442 alp_bytes=73445250 alp_zstd_bytes=72601870 alp_ms_median=160.7 min=160.5 max=161.7
+zstd_only_bytes=73848108 raw_bytes=80000000
+## ins_rtn block=8192 type=f64
+master blocks=2442 rd_blocks=0 alp_bytes=62949738 alp_zstd_bytes=55310132 alp_ms_median=375.4 min=370.5 max=380.4
+branch blocks=2442 rd_blocks=0 alp_bytes=62949738 alp_zstd_bytes=55310132 alp_ms_median=231.9 min=229.6 max=243.0
+zstd_only_bytes=65565115 raw_bytes=160000000
+## ins_rtn block=8192 type=f32
+master blocks=2442 rd_blocks=0 alp_bytes=33747326 alp_zstd_bytes=33320695 alp_ms_median=161.3 min=160.6 max=164.7
+branch blocks=2442 rd_blocks=0 alp_bytes=33747326 alp_zstd_bytes=33320695 alp_ms_median=105.4 min=105.3 max=108.1
+zstd_only_bytes=42750679 raw_bytes=80000000
+DONE

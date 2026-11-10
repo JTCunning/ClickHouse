@@ -3,6 +3,12 @@
 **Task:** 2026-10-31-alp-codec-scale-the-parameter-search-to (scout, follow-up of the remote-write baseline) · **Build:** 26.11.1.974 (a7f713612c80); code at c189bd99fbda · **Date:** 2026-11-01
 **A/B plan:** ab-plans/alp-search-early-exit.md
 
+> **Correction (2026-11-10, after James's run 1 of `d4c58e0009b4`).** Run 1 failed: `codecs_float_insert` `ALP` `mon` +10.2% and `seq` +4.0% (significant), while the small-block `INSERT`s got faster (`rtn` −32.6%, `rnd` −16.2%). The numbers below came from a harness built with **g++ 13 `-O2 -march=x86-64-v2`**, which vectorizes neither master's scoring loop nor the branch's. ClickHouse builds with clang at `-O3 -march=x86-64-v3`, and clang vectorizes master's loop (4 values per AVX2 instruction). The per-value cut-off has an early exit, so it made that loop scalar. Rebuilt with clang 20 at ClickHouse's flags, `d4c58e0009b4` costs **+15–17% encode CPU on full-precision and float-accumulated values at 256-value blocks** and +4% on `mon`, so "no case got slower" and "2–9% lower on full-precision doubles" below are wrong for the real compiler. On data where every pair stays close, a pair is cut after most of the sample at best, and the scalar loop costs more than it saves.
+>
+> **Fix (`32eb990cdbb9`; tests `bd592b96a5d7`, `ded70dddecf1`, `d6f173c6e3d3`).** The cut-off is compiled only into a `with_limit` variant, used only while the sample's best score is under `RD_SIZE_THRESHOLD_LIMIT` (48 bits per value, the existing `AUTO` cut-over to `RD`). Above that line the search keeps master's vectorized loop. Each sample also starts from the score of the previous sample's best pair plus one, which is still exact. Under clang the bytes are identical in all 76 cases and 300,000 random blocks, and nothing is slower. `Float64` decimal-like values take 38–93% less CPU, full-precision and random doubles 1–9% less; `Float32` 6–88% less. The cost is the `rnd` sequence (random doubles, above the line), which keeps master's loop: its small-block gain falls from −16% to about −2%. The variants tried, and the clang tables, are in `prs/alp-search-early-exit.md` (below the upstream text), `bench/alp-search-early-exit/summary-clang.md` and `results-variants.txt`. **Lesson:** build any encoder harness with the compiler and flags of the real build (clang, `-O3 -march=x86-64-v3`); g++ hid a regression here.
+>
+> **Context changes since 2026-11-01:** `ALP` became GA on master (#129732, 2026-11-07), so `enable_alp_codec` is obsolete there (a no-op). TimeSeries samples tables store buckets: merged parts hold many samples per row, but a part written by one remote-write request holds about one sample per row, which is where ingest pays the search.
+
 ## What happens (plain language)
 ALP stores floats as small integers by finding a decimal scale (an exponent/fraction pair) per block. It finds the scale by brute force. It takes up to 8 samples of 32 values and scores every pair on each sample by estimated size: 190 pairs for Float64, 55 for Float32, about 48,600 trial encodings per compressed block. That cost doesn't depend on the block size. TimeSeries samples tables use 256-row granules, and compact parts compress every granule on its own, so on ingest the search runs once per 256 values. Even at 8,192-value blocks it is most of ALP's encode time.
 
@@ -69,9 +75,13 @@ git -C $R show origin/master:src/Compression/CompressionCodecALP.cpp > /tmp/alp_
 ./extract.sh /tmp/alp_master.cpp enc_master.h
 ./extract.sh $R/src/Compression/CompressionCodecALP.cpp enc_branch.h
 ./extract_decoder.sh /tmp/alp_master.cpp dec_master.h
-g++ -std=c++20 -O2 -march=x86-64-v2 -Istub -I$R/src -o harness harness.cpp $R/src/Compression/FFOR.cpp /usr/lib/x86_64-linux-gnu/libzstd.so.1
+# since 2026-11-10: build with the release compiler and flags (g++ hid the run-1 regression)
+clang++-20 -std=c++20 -O3 -march=x86-64-v3 -ffp-contract=off -fno-math-errno -falign-functions=64 -falign-loops=32 -mbranches-within-32B-boundaries \
+  -w -Istub -I$R/src -o harness harness.cpp $R/src/Compression/FFOR.cpp /usr/lib/x86_64-linux-gnu/libzstd.so.1
+clang++-20 -std=c++20 -O2 -march=x86-64-v3 -w -Istub -I$R/src -o fuzz fuzz.cpp $R/src/Compression/FFOR.cpp && ./fuzz 200000 42   # exactness on random blocks
+./gen_insert.sh <clickhouse binary> data    # the codecs_float_insert sequences and the 05480 NaN / shared-pair data
 mkdir -p data && python3 gen.py data
-./run_matrix.sh data > results-harness.txt && python3 summarize.py results-harness.txt
+./matrix.sh ./harness results-harness-clang.txt data && python3 summarize.py results-harness-clang.txt
 ```
 
 Calibration against a build (ALP bytes = harness bytes + 25 bytes of block header per granule):
