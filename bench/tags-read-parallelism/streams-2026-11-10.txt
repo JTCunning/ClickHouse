@@ -1,0 +1,16 @@
+# streams.sh at max_threads=16 on the 2 vCPU / 4 GiB host, master 26.11.1.1642 (binary of 2026-11-08), 1,000,000 series x 1 sample
+# (the tags subquery reads only the tags and time ranges tables, whose rows don't depend on samples per series), every inner table one part.
+# "N MergeTreeSelect(...)" without "x M" = N reads of one stream each (one per join side, or the in-order pool's per-range streams).
+shape1 (metric_0)         cap_on:                    2 MergeTreeSelect(pool: ReadPoolInOrder, algorithm: InOrder); 1 MergeJoinTransform 2 → 1
+shape1 (metric_0)         cap_off:                   same
+shape1 (metric_0)         cap_off+default_thresholds: same
+shape1 (metric_0)         cap_off+read_in_order_off: 2 MergeTreeSelect(pool: ReadPool, algorithm: Thread) × 2; 2 MergingSortedTransform 2 → 1
+shape2 ({job="job3"})     cap_on:                    tags side ReadPool × 2; time ranges side 2 in-order streams; MergingSortedTransform 2 → 1 (×2)
+shape2 ({job="job3"})     cap_off:                   tags side ReadPool × 16; time ranges side 15 in-order streams; MergingSortedTransform 16 → 1, 15 → 1
+shape2 ({job="job3"})     cap_off+default_thresholds: tags side ReadPool × 12; time ranges side 5 in-order streams
+shape2 ({job="job3"})     cap_off+read_in_order_off: both sides ReadPool × 16
+shape3 (name regex)       cap_on:                    tags side ReadPool × 2; time ranges side 2 in-order streams
+shape3 (name regex)       cap_off:                   tags side ReadPool × 8; time ranges side 15 in-order streams
+shape3 (name regex)       cap_off+default_thresholds: tags side ReadPool × 9; time ranges side 5 in-order streams
+shape3 (name regex)       cap_off+read_in_order_off: tags side ReadPool × 8; time ranges side ReadPool × 16
+# Every variant: one MergeJoinTransform 2 → 1. With hash or parallel_hash the probe side runs in 16 streams (Resize 16 → 1 only into the build side).

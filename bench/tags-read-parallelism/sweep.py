@@ -1,8 +1,10 @@
 # Sweeps settings over the tags subquery of each shape (sub_<k>.sql); warm median of N runs; JSON lines to stdout.
 import subprocess, sys, json, statistics, time, itertools
-CH="/root/nerve-workspace/tools/clickhouse/master/clickhouse"
+import os
+CH=os.environ.get("CH","/root/nerve-workspace/tools/clickhouse/master/clickhouse"); PORT=os.environ.get("PORT","19000")
+EXTRA=(", "+os.environ["EXTRA_SETTINGS"]) if os.environ.get("EXTRA_SETTINGS") else ""  # e.g. max_threads_min_free_memory_per_thread=0
 def q(sql):
-    r=subprocess.run([CH,"client","--port","19000","--max_query_size","1000000000","--queries-file","/dev/stdin"],input=sql,capture_output=True,text=True)
+    r=subprocess.run([CH,"client","--port",PORT,"--max_query_size","1000000000","--queries-file","/dev/stdin"],input=sql,capture_output=True,text=True)
     if r.returncode: raise RuntimeError(r.stderr[:1500])
     return r.stdout
 AS_EXECUTED="merge_tree_min_bytes_for_concurrent_read=4194304, merge_tree_min_rows_for_concurrent_read=0"  # what readImpl adds on v11 tables
@@ -26,7 +28,7 @@ for k in shapes:
         for v in VARIANTS: tags[v]=f"r{run_id}_{k}_{mt}_{v}"
         for i in range(N):          # interleave variants: A B C D A B C D ...
             for v,s in VARIANTS.items():
-                out=q(f"{sql} SETTINGS {s}, {AS_EXECUTED}, max_threads={mt}, log_queries=1, log_profile_events=1, use_query_cache=0, log_comment='{tags[v]}#{i}' FORMAT TSV").strip()
+                out=q(f"{sql} SETTINGS {s}, {AS_EXECUTED}, max_threads={mt}{EXTRA}, log_queries=1, log_profile_events=1, use_query_cache=0, log_comment='{tags[v]}#{i}' FORMAT TSV").strip()
                 if ref is None: ref=out
                 assert out==ref, (v,out,ref)
         q("SYSTEM FLUSH LOGS")

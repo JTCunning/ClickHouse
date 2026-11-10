@@ -2,6 +2,8 @@
 
 **Verdict:** not worth a settings change. In-order reading and the merge join are not what holds the tags subquery back: no alternative setting gives a lower wall time beyond noise, and turning in-order reading off is 10–40% slower. The serial part that matters is the tags collector, which takes an exclusive lock for every series it hasn't seen yet, and that lock is outside `StorageTimeSeriesSelector.cpp`.
 **Task:** 2026-10-31-handoff-measure-and-raise-read-parallel, https://github.com/JTCunning/ClickHouse/issues/9 · **Build:** 26.11.1.974, `a7f713612c8` (same as the handoff) · **Date:** 2026-11-01
+**A/B plan:** ab-plans/tags-read-parallelism.md
+**Correction (2026-11-10):** the "2 streams at any `max_threads`" on this host came from the free-memory cap (`max_threads_min_free_memory_per_thread`, 1 GiB per thread), not from the read pool. With the cap lifted (`=0`), the two shapes without a metric name read with 8–16 streams per side at `max_threads = 16`, and the concurrent-read thresholds do change those counts (`bench/tags-read-parallelism/streams-2026-11-10.txt`). The `metric_0` findings and the timings below are unaffected (they ran at 1 and 2 threads). Idea 2 is open until the 16-thread run in the plan.
 
 ## What happens (plain language)
 The tags subquery reads the matching series from the tags table, joins them by `id` with the time ranges table to keep only series active in the window, and passes each surviving series to `timeSeriesStoreTags`. That function registers the series' tags with the query's tags collector, and its output becomes the `id IN (...)` set.
@@ -78,6 +80,7 @@ Report only: no change inside `StorageTimeSeriesSelector.cpp` meets "lower tags-
 Scripts and raw results: `bench/tags-read-parallelism/` on `lilred/research`.
 ```bash
 # server on 127.0.0.1:19000 with query_log and text_log (config.xml); load the handoff's generator with range(20) samples, OPTIMIZE ... FINAL on each .inner_id.* table
+SERIES=1000000 SAMPLES=20 ./load.sh # the load step above as a script (added 2026-11-10); MT=16 ./streams.sh shows the stream counts
 python3 gen.py && python3 derive.py # extract the logged tags subquery per shape; derive the no-join and id-only variants
 python3 sweep.py 7 0,1,2,3 1,2      # table 1: join algorithm × optimize_read_in_order × max_threads
 python3 sweep2.py 6 0,1,2,3 1,2     # table 2: current vs no join vs id onlypython3 full.py                     # table 3: full selector queries
