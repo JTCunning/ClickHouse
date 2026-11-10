@@ -47,8 +47,8 @@ DROP TABLE alp_small_blocks_d2;
 
 SELECT '# Compressed size of 256-value blocks whose samples start with an exception';
 
--- The samples of a 256-value block start at multiples of 32, so here every sample starts with NaN: the search must not cut a pair
--- while none of its values is encoded yet, because the bit-width of its range is not known before that.
+-- The samples of a 256-value block start at multiples of 32, so here every sample starts with NaN, and even the best pair encodes
+-- no value at first: until a value of a pair is encoded, the bound on its size must count 0 bits for the range, not 64.
 DROP TABLE IF EXISTS alp_small_blocks_nan;
 CREATE TABLE alp_small_blocks_nan (v Float64 CODEC(ALP)) ENGINE = MergeTree ORDER BY tuple()
 SETTINGS index_granularity = 256, index_granularity_bytes = '10Mi', min_bytes_for_wide_part = '1Gi', min_compress_block_size = 65536, max_compress_block_size = 1048576;
