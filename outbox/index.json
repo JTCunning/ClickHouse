@@ -146,7 +146,7 @@
     {
       "slug": "alp-search-early-exit",
       "title": "Stop evaluating an ALP parameter pair once it cannot beat the best one",
-      "status": "ready-to-build",
+      "status": "results-in",
       "priority": 5,
       "branch": "lilred-perf-alp-search-early-exit",
       "head": "d4c58e0009b46e9e99a7eff37103452154534a4b",
