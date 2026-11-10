@@ -28,6 +28,12 @@ gap_late	1
 gap_mid	1
 gap_sparse	1
 late_start	1
+-- merge into a state that holds the run before the gap
+every_2nd	1
+gap_late	1
+gap_mid	1
+gap_sparse	1
+late_start	1
 -- states written to a table and read back (deserialize)
 every_2nd	1
 gap_late	1

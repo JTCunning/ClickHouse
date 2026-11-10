@@ -69,7 +69,11 @@ struct TimeSeriesBucketsHashTableGrower : public HashTableGrower<4>
 /// tunes `BUCKET_DENSITY_TO_ENABLE_RANGE_SCAN` for this exact container. Insert through
 /// `AggregateFunctionTimeseriesBase::getOrInsertBucket`, which grows the map earlier on colliding keys.
 template <typename Bucket>
-using TimeSeriesBucketsMap = HashMap<UInt64, Bucket, TrivialHash, TimeSeriesBucketsHashTableGrower>;
+struct TimeSeriesBucketsMap : public HashMap<UInt64, Bucket, TrivialHash, TimeSeriesBucketsHashTableGrower>
+{
+    /// The key in cell `cell_index` (taken modulo the buffer size), or 0 if the cell is empty: key 0 is not kept in the cells.
+    UInt64 keyInCell(size_t cell_index) const { return this->buf[this->grower.place(cell_index)].getKey(); }
+};
 
 /// Base class for time series aggregate functions that map values to a grid specified by start timestamp, end timestamp, step and window.
 /// It implements the common logic for handling input data as either scalar timestamps and values or vectors of timestamps and values of
@@ -115,21 +119,26 @@ public:
     /// by the other run walks the whole run, whichever run comes first (in time order, in reverse, or in a merge).
     /// So a missing key whose home cell and the cell after it hold other keys (the start of a run, not a one-cell
     /// collision such as a sample in every 2nd bucket) is inserted only after the map is doubled if it is more than
-    /// half full, unless the key itself would wrap after the doubling as well. The map then grows on such collisions
-    /// as it did with the 1/2 limit, and never beyond that size; maps without them keep the 3/4 limit. A key at least
-    /// twice the buffer size (the run after the gap starts far past the map size, on a long grid or a sparse series)
-    /// keeps master's growth and walks the run until the map is 3/4 full: after one doubling it can still wrap onto
-    /// the same run, so growing for it may cost memory and save nothing.
+    /// half full and the doubling puts the key and the key in its home cell into different halves (they differ in
+    /// bit `bufSize`), so that they stop colliding. The map then grows on such collisions as it did with the 1/2 limit,
+    /// and never beyond that size; maps without them keep the 3/4 limit, and so do the runs that a doubling leaves on
+    /// the same cells (a sparse series whose gap ends far past the map size, in either order). Keys at least twice the
+    /// buffer size keep master's growth too, so the run after the gap still walks when it starts that far past the map
+    /// size (a gap on a long grid): growing for those keys would also grow the maps whose keys are scattered over the
+    /// grid, such as the partial states of a multi-threaded `GROUP BY` over many parts.
     static ALWAYS_INLINE Bucket & getOrInsertBucket(TimeSeriesBucketsMap<Bucket> & buckets, size_t bucket_index)
     {
         const size_t buffer_size = buckets.getBufferSizeInCells();
-        const size_t home = buckets.hash(bucket_index);
-        if (buckets.size() * 2 > buffer_size && bucket_index < 2 * buffer_size && !buckets.isEmptyCell(home)
-            && !buckets.isEmptyCell(home + 1))
+        if (buckets.size() * 2 > buffer_size && bucket_index < 2 * buffer_size && bucket_index != 0)
         {
-            if (auto * it = buckets.find(bucket_index))
-                return it->getMapped();
-            buckets.reserve(buffer_size);
+            const size_t home = buckets.hash(bucket_index);
+            const UInt64 home_key = buckets.keyInCell(home);
+            if (home_key != 0 && ((home_key ^ bucket_index) & buffer_size) != 0 && !buckets.isEmptyCell(home + 1))
+            {
+                if (auto * it = buckets.find(bucket_index))
+                    return it->getMapped();
+                buckets.reserve(buffer_size);
+            }
         }
         return buckets[bucket_index];
     }

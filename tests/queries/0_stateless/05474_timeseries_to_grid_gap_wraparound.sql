@@ -3,7 +3,7 @@
 -- the cells of its first run of buckets; the map grows before such an index is inserted if it is more than half full
 -- and the index collides with another one.
 -- This test pins down the results on the shapes that take that path (the add, batch add, merge and deserialize paths,
--- in time order and with the run after the gap first) against the expected grid computed without the aggregate functions.
+-- in time order, in reverse and in both merge orders) against the expected grid computed without the aggregate functions.
 
 SET enable_time_series_aggregate_functions = 1;
 
@@ -13,8 +13,8 @@ DROP TABLE IF EXISTS grid_gap_states;
 -- One sample per minute at value = minute, on a 7-day grid at a 60 s step (10081 points) with a 60 s window, so grid
 -- point `i` holds the sample of minute `i` if there is one and NULL otherwise.
 --   gap_mid:    minutes [0, 3100) and [6981, 10081): with 8192 cells and 4311 buckets the indexes from 8192 wrap.
---   gap_sparse: minutes [0, 1500) and [8581, 10081): the wrapping indexes are more than twice the 2048-cell map, so the
---               map is not grown for them.
+--   gap_sparse: minutes [0, 1500) and [8581, 10081): a doubling leaves the wrapping indexes on the cells of the first run,
+--               so the map is not grown for them, in either order.
 --   gap_late:   minutes [0, 6000) and [10000, 10081): the map is 3/4 full when the wrapping indexes arrive.
 --   late_start: minutes [4000, 10081): the indexes wrap without colliding, so the map keeps filling to 3/4.
 --   every_2nd:  every 2nd minute: the wrapping indexes collide with one cell only, so the map keeps filling to 3/4.
@@ -95,6 +95,22 @@ FROM
     (
         SELECT shape, value >= if(shape = 'gap_late', 10000, 5000) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s
         FROM grid_gap_samples GROUP BY shape, late ORDER BY shape, late DESC
+    ) AS b
+    GROUP BY shape
+) AS a
+JOIN grid_gap_expected USING shape
+ORDER BY shape
+SETTINGS max_threads = 1, query_plan_remove_redundant_sorting = 0; -- keep the ORDER BY that feeds the merge
+
+SELECT '-- merge into a state that holds the run before the gap';
+SELECT shape, r = grid
+FROM
+(
+    SELECT shape, timeSeriesLastToGridMerge(0, 604800, 60, 60)(s) AS r
+    FROM
+    (
+        SELECT shape, value >= if(shape = 'gap_late', 10000, 5000) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s
+        FROM grid_gap_samples GROUP BY shape, late ORDER BY shape, late ASC
     ) AS b
     GROUP BY shape
 ) AS a

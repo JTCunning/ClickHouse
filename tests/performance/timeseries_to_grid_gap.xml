@@ -11,12 +11,12 @@
           - contiguous: minutes [0, 6200), the baseline with the same number of samples;
           - gap: minutes [0, 3100) and [6981, 10081);
           - late start: minutes [4000, 10081), whose indexes wrap without colliding;
-          - gap sparse: minutes [0, 1500) and [8581, 10081), whose indexes are more than twice the map size, so the map
-            is not grown for them;
+          - gap sparse: minutes [0, 1500) and [8581, 10081), whose wrapping indexes a doubling leaves on the cells of the
+            first run, so the map is not grown for them (also when the run after the gap is merged first);
           - every 2nd: every 2nd minute, whose wrapping indexes collide with one cell only;
           - dense: minutes [0, 6200) with four samples per minute, so most adds find an existing bucket.
-        The merge queries merge the states of the two runs of the gap series, the run after the gap first and the run
-        before it first; `query_plan_remove_redundant_sorting = 0` keeps the ORDER BY that sets that order. The rate
+        The merge queries merge the states of the two runs of the gap series (the run after the gap first and the run
+        before it first) and of the gap sparse series (the run after the gap first); `query_plan_remove_redundant_sorting = 0` keeps the ORDER BY that sets that order. The rate
         window is 120 s so that every grid point with two samples gets a value.
     -->
 
@@ -68,6 +68,7 @@
     <query>SELECT id, timeSeriesLastToGrid(0, 604800, 60, 60)(timestamp, value) FROM ts_gap WHERE shape = 'dense' GROUP BY id FORMAT Null</query>
     <query>SELECT id, timeSeriesLastToGridMerge(0, 604800, 60, 60)(s) FROM (SELECT id, timestamp &gt;= toDateTime64(6981 * 60, 3) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s FROM ts_gap WHERE shape = 'gap' GROUP BY id, late ORDER BY id, late DESC) GROUP BY id FORMAT Null SETTINGS query_plan_remove_redundant_sorting = 0</query>
     <query>SELECT id, timeSeriesLastToGridMerge(0, 604800, 60, 60)(s) FROM (SELECT id, timestamp &gt;= toDateTime64(6981 * 60, 3) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s FROM ts_gap WHERE shape = 'gap' GROUP BY id, late ORDER BY id, late ASC) GROUP BY id FORMAT Null SETTINGS query_plan_remove_redundant_sorting = 0</query>
+    <query>SELECT id, timeSeriesLastToGridMerge(0, 604800, 60, 60)(s) FROM (SELECT id, timestamp &gt;= toDateTime64(8581 * 60, 3) AS late, timeSeriesLastToGridState(0, 604800, 60, 60)(timestamp, value) AS s FROM ts_gap WHERE shape = 'gap_sparse' GROUP BY id, late ORDER BY id, late DESC) GROUP BY id FORMAT Null SETTINGS query_plan_remove_redundant_sorting = 0</query>
     <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 120)(timestamp, value) FROM ts_gap WHERE shape = 'contiguous' GROUP BY id FORMAT Null</query>
     <query>SELECT id, timeSeriesRateToGrid(0, 604800, 60, 120)(timestamp, value) FROM ts_gap WHERE shape = 'gap' GROUP BY id FORMAT Null</query>
 
