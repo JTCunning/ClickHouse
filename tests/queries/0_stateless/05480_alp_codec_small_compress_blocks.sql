@@ -45,6 +45,19 @@ SELECT
 DROP TABLE alp_small_blocks_d3;
 DROP TABLE alp_small_blocks_d2;
 
+SELECT '# Compressed size of 256-value blocks whose samples start with an exception';
+
+-- The samples of a 256-value block start at multiples of 32, so here every sample starts with NaN: the search must not cut a pair
+-- while none of its values is encoded yet, because the bit-width of its range is not known before that.
+DROP TABLE IF EXISTS alp_small_blocks_nan;
+CREATE TABLE alp_small_blocks_nan (v Float64 CODEC(ALP)) ENGINE = MergeTree ORDER BY tuple()
+SETTINGS index_granularity = 256, index_granularity_bytes = '10Mi', min_bytes_for_wide_part = '1Gi', min_compress_block_size = 65536, max_compress_block_size = 1048576;
+INSERT INTO alp_small_blocks_nan SELECT if(number % 32 = 0, nan, (100000 + intHash32(number) % 4096) / 1000) FROM numbers(25600);
+SELECT part_type, marks, data_compressed_bytes FROM system.parts WHERE database = currentDatabase() AND table = 'alp_small_blocks_nan' AND active;
+SELECT (SELECT sum(cityHash64(bin(v))) FROM alp_small_blocks_nan)
+    = (SELECT sum(cityHash64(bin(if(number % 32 = 0, nan, (100000 + intHash32(number) % 4096) / 1000)))) FROM numbers(25600));
+DROP TABLE alp_small_blocks_nan;
+
 SELECT '# Compressed size of a block whose samples share their best pair';
 
 -- One compressed block of 131,072 values: 3-decimal values, except for 8 runs of 1,024 integers that no search sample covers.

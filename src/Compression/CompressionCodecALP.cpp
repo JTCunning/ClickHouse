@@ -644,6 +644,9 @@ private:
                 }
             }
 
+            /// The search starts above the smallest size of the sample, so it always takes a pair.
+            chassert(best_estimation.occurred_times == 1);
+
             previous_best_params = best_estimation.params;
             previous_best_size = sample_best_size;
 
@@ -693,7 +696,9 @@ private:
      * Estimate the encoded size in bits for a given set of parameters on a sample.
      * With `with_limit`, returns `size_limit` as soon as the estimate cannot be less than `size_limit`. The bit-width of the encoded
      * range and the number of exceptions only grow with every value, so the estimate computed from the values seen so far is a lower
-     * bound. A caller that passes a limit must compare the result with strict `<`: a cut-off result equals `size_limit`.
+     * bound. Until a value is encoded the bound counts 0 bits, not the 64 bits of `calculateEncodeBits`, which would exceed the final
+     * size of a pair whose later values encode. A caller that passes a limit must compare the result with strict `<`: a cut-off
+     * result equals `size_limit`.
      * The check per value keeps the loop from being vectorized, so it is compiled only into the `with_limit` variant.
      */
     template <bool with_limit>

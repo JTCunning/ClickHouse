@@ -1,6 +1,7 @@
 <test>
-    <!-- Compact parts compress every granule separately, so with small granules (256 rows, as in the inner samples tables
-         of TimeSeries) the ALP codec sees one compressed block of a few hundred values per granule. -->
+    <!-- Compact parts compress every granule separately, so with small granules the ALP codec sees one compressed block of a
+         few hundred values per granule. The samples tables of TimeSeries use 256-row granules, and a part written by one
+         remote-write request holds about one sample per row. -->
     <settings>
         <enable_alp_codec>1</enable_alp_codec>
     </settings>
