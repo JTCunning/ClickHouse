@@ -562,7 +562,7 @@ private:
 
         for (const auto & params : param_candidates)
         {
-            const size_t estimated_size = estimateEncodedSize(sample, sample_count, params);
+            const size_t estimated_size = estimateEncodedSize<false>(sample, sample_count, params);
             if (estimated_size < best_size)
             {
                 best_size = estimated_size;
@@ -600,6 +600,8 @@ private:
         T sample[ALP_PARAMS_ESTIMATION_SAMPLE_FLOATS];
 
         size_t best_size = std::numeric_limits<size_t>::max();
+        EncodingParams previous_best_params = {0, 0};
+        size_t previous_best_size = std::numeric_limits<size_t>::max();
 
         // For each sample, brute-force over all valid (exponent, fraction) pairs to find the best parameters for that sample.
         for (UInt32 i = 0; i < ALP_PARAMS_ESTIMATION_SAMPLES; ++i)
@@ -617,13 +619,22 @@ private:
             Estimation best_estimation = {{0, 0}, 0};
             size_t sample_best_size = std::numeric_limits<size_t>::max();
 
+            // Start from the size of the previous sample's best pair, so that pairs are cut from the first one on. `+ 1` keeps a pair
+            // of the same size that comes earlier in the search order eligible: the first pair with the smallest size still wins.
+            if (previous_best_size <= ALPFloatTraits<T>::RD_SIZE_THRESHOLD_LIMIT)
+                sample_best_size = estimateEncodedSize<false>(sample, sample_float_count, previous_best_params) + 1;
+
             for (UInt8 exponent = 0; exponent < ALPFloatTraits<T>::EXPONENT_COUNT; ++exponent)
             {
                 for (UInt8 fraction = 0; fraction <= exponent; ++fraction)
                 {
                     const Estimation estimation{{exponent, fraction}, 1};
                     // Stop evaluating a pair once it cannot beat the best pair of this sample: the result is the same as a full evaluation.
-                    const size_t estimated_size = estimateEncodedSize(sample, sample_float_count, estimation.params, sample_best_size);
+                    // Only below `RD_SIZE_THRESHOLD_LIMIT`: above it a pair is cut after most of the sample at best, and the
+                    // vectorized loop without the check is faster.
+                    const size_t estimated_size = sample_best_size <= ALPFloatTraits<T>::RD_SIZE_THRESHOLD_LIMIT
+                        ? estimateEncodedSize<true>(sample, sample_float_count, estimation.params, sample_best_size)
+                        : estimateEncodedSize<false>(sample, sample_float_count, estimation.params);
 
                     if (estimated_size < sample_best_size)
                     {
@@ -632,6 +643,9 @@ private:
                     }
                 }
             }
+
+            previous_best_params = best_estimation.params;
+            previous_best_size = sample_best_size;
 
             /// Scale partial tail samples s.t. comparison against RD_SIZE_THRESHOLD_LIMIT below does not favour STD because the sample was short.
             best_size = std::min(best_size, sample_best_size * ALP_PARAMS_ESTIMATION_SAMPLE_FLOATS / sample_float_count);
@@ -677,15 +691,17 @@ private:
 
     /**
      * Estimate the encoded size in bits for a given set of parameters on a sample.
-     * Returns `size_limit` as soon as the estimate cannot be less than `size_limit`. The bit-width of the encoded range and
-     * the number of exceptions only grow with every value, so the estimate computed from the values seen so far is a lower bound.
-     * A caller that passes a limit must compare the result with strict `<`: a cut-off result equals `size_limit`.
+     * With `with_limit`, returns `size_limit` as soon as the estimate cannot be less than `size_limit`. The bit-width of the encoded
+     * range and the number of exceptions only grow with every value, so the estimate computed from the values seen so far is a lower
+     * bound. A caller that passes a limit must compare the result with strict `<`: a cut-off result equals `size_limit`.
+     * The check per value keeps the loop from being vectorized, so it is compiled only into the `with_limit` variant.
      */
+    template <bool with_limit>
     static size_t estimateEncodedSize(
         const T * const source,
         const UInt32 float_count,
         const EncodingParams & params,
-        const size_t size_limit = std::numeric_limits<size_t>::max())
+        [[maybe_unused]] const size_t size_limit = std::numeric_limits<size_t>::max())
     {
         Int64 min = std::numeric_limits<Int64>::max();
         Int64 max = std::numeric_limits<Int64>::min();
@@ -705,10 +721,13 @@ private:
             else
                 ++exception_count;
 
-            const UInt8 bits_lower_bound
-                = min <= max ? ALPUtils<T>::calculateBitWidth(static_cast<UInt64>(max) - static_cast<UInt64>(min)) : 0;
-            if (float_count * bits_lower_bound + exception_count * ((sizeof(UInt16) + sizeof(T)) * 8) >= size_limit)
-                return size_limit;
+            if constexpr (with_limit)
+            {
+                const UInt8 bits_lower_bound
+                    = min <= max ? ALPUtils<T>::calculateBitWidth(static_cast<UInt64>(max) - static_cast<UInt64>(min)) : 0;
+                if (float_count * bits_lower_bound + exception_count * ((sizeof(UInt16) + sizeof(T)) * 8) >= size_limit)
+                    return size_limit;
+            }
         }
 
         const UInt8 bits = calculateEncodeBits(min, max);
