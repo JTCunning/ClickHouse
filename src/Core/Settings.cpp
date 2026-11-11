@@ -10818,9 +10818,9 @@ Read from the recent samples table of a [TimeSeries](/reference/engines/table-en
 )", PRIVATE_PREVIEW, \
         {"26.8", true, true, "New setting to read from the recent samples table of a TimeSeries table when the requested time range fits in its TTL window."}) \
     DECLARE(Bool, time_series_prefer_rollup_tables, true, R"(
-Read a rollup column `samples_<step>` of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table when the query step is at least as large as one of the configured rollup steps (see the `samples_rollup_steps` setting of the TimeSeries table engine). The largest rollup step that does not exceed the query step is chosen.
+Read a rollup column `samples_<step>` of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table when one of the configured rollup steps divides the query step (see the `samples_rollup_steps` setting of the TimeSeries table engine). The largest such rollup step is chosen. PromQL uses a rollup column only for instant selectors evaluated at multiples of the step, where the result is the same as with the raw samples; range selectors such as `rate(x[5m])` always read the raw samples.
 )", PRIVATE_PREVIEW, \
-        {"26.11", true, true, "New setting to read a TimeSeries rollup column when the query step meets or exceeds a configured rollup step."}) \
+        {"26.11", true, true, "New setting to read a TimeSeries rollup column when a configured rollup step divides the query step."}) \
     DECLARE(UInt64, unique_key_max_encoded_size, 256, R"(
 Maximum size (in bytes) of the order-preserving binary encoding of a single `UNIQUE KEY` row.
 )", EXPERIMENTAL, \

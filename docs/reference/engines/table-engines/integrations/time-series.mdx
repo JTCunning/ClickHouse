@@ -198,15 +198,21 @@ They are disabled by default and enabled by the [samples_rollup_steps](#settings
 Every step adds one column named `samples_<step>`, where `<step>` is the step in seconds. Rollup columns require a table of [version](#schema-versioning) 12 or later.
 The [recent samples](#recent-samples-table) table does not get these columns.
 
-A column `samples_<step>` keeps the last raw sample of every interval of `<step>` seconds, with its original timestamp.
+A column `samples_<step>` keeps, in every row, the last raw sample of every interval `(k * step, (k + 1) * step]`, with its original timestamp.
+The intervals are closed on the right, so for every time which is a multiple of the step the last sample at or before that time is kept.
 The column type is `SimpleAggregateFunction(timeSeriesGroupArray(step), Array(Tuple(timestamp DateTime64(3), value Float64)))`.
 The tuple element types match the `samples` column. The row stays one bucket of `samples_bucket_step_seconds`, and `min_time` and `max_time` stay the range of the raw samples.
 
-A query with a step reads the rollup column with the largest step which is less than or equal to the query step
+A query with a step reads the rollup column with the largest step which divides the query step
 when the query-level setting `time_series_prefer_rollup_tables` is enabled (it is enabled by default).
-The query step is the step of the [prometheusQueryRange](/reference/functions/table-functions/prometheusQueryRange) table function,
+The query step is the step of the [prometheusQueryRange](/reference/functions/table-functions/prometheusQueryRange) table function or of a subquery,
 or the optional last argument `step` of the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function.
-Instant queries, which have the step 0, a range that fits in the recent samples TTL, and reads with `time_series_prefer_rollup_tables` disabled use the raw `samples` column.
+A rollup column is preferred to the [recent samples](#recent-samples-table) table, because it keeps fewer samples per row.
+
+PromQL reads a rollup column only for an instant selector whose evaluation times are multiples of the step, that is, when the start time is a multiple of the step.
+An instant selector uses the last sample at or before every evaluation time, so its result is the same as with the raw samples.
+A range selector, for example in `rate(http_requests_total[5m])` or `max_over_time(cpu_usage[1h])`, uses every sample of its window and always reads the raw `samples` column.
+So do instant queries, which have the step 0, and queries with `time_series_prefer_rollup_tables` disabled.
 
 ### Tags table {#tags-table}
 
@@ -516,7 +522,6 @@ The values of the tags `instance` and `job` will be stored both in those columns
 By default inner target tables use the following table engines:
 - the [samples](#samples-table) table uses [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) because the rows
 of the same time series and the same bucket must be merged into one sorted array of samples; it's partitioned by month (see the [samples_partition_by](#settings) setting);
-- the [rollup samples](#rollup-samples-tables) tables use [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) like the samples table, because their rows are merged by `timeSeriesGroupArray` in the same way;
 - the [recent samples](#recent-samples-table) table uses [AggregatingMergeTree](/reference/engines/table-engines/mergetree-family/aggregatingmergetree) partitioned by 5-hour intervals (see the [recent_samples_partition_by](#settings) setting) with a `TTL` derived from
 the [recent_samples_ttl_seconds](#settings) setting and with `ttl_only_drop_parts` enabled, so expired parts are dropped as a whole;
 - the [tags](#tags-table) table uses [ReplacingMergeTree](/reference/engines/table-engines/mergetree-family/replacingmergetree) because the same data is often inserted multiple times to this table so we need a way
@@ -689,7 +694,7 @@ the `promql` dialect, and the Prometheus HTTP query API):
 | 9 | The default partition key of an inner [recent samples](#recent-samples-table) table names the timezone: `toStartOfInterval(toDateTime(timestamp, 'UTC'), toIntervalHour(5))`. Earlier versions generate it without one, and `toStartOfInterval` counts hours from local midnight, so a change of the server timezone moves the meaning of the partition values they have already written. Existing tables keep the key they were created with, which no `ALTER` can change |
 | 10 | External target tables are not supported for new tables: every target of a table of this version is an inner table. The settings `id_type` and `id_generator` are not supported either: the type of the `id` column and the expression generating identifiers are declared in `TAGS INNER COLUMNS` (see [The `id` column](#id-column)). Tables of earlier versions keep their external target tables and these settings. The stored data didn't change |
 | 11 | The [samples](#samples-table) and [recent samples](#recent-samples-table) tables store buckets of samples: a row keeps the samples of one time series within one time bucket (the columns `samples`, `bucket`, `min_time`, `max_time`) in an `AggregatingMergeTree` ordered by `(id, bucket)`. The settings [`samples_bucket_step_seconds`](#settings), [`samples_partition_by`](#settings), [`samples_index_granularity_bytes`](#settings), [`recent_samples_bucket_step_seconds`](#settings) and [`recent_samples_index_granularity_bytes`](#settings) were introduced, and the defaults of [`samples_index_granularity`](#settings) and [`recent_samples_index_granularity`](#settings) changed. Tables of earlier versions store one sample per row in the columns `timestamp` and `value`: they can still be read, written into and queried with PromQL, and the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function reads them without a conversion when its argument `return_columns` is `'timestamp_and_value'` |
-| 12 | Optional [rollup columns](#rollup-columns) were added to the [samples](#samples-table) table. The setting [`samples_rollup_steps`](#settings) adds one column `samples_<step>` per step, with the type `SimpleAggregateFunction(timeSeriesGroupArray(step), ...)`. A query with a step reads the rollup column with the largest step not greater than the query step, see the query-level setting `time_series_prefer_rollup_tables`. Tables of earlier versions have no rollup columns |
+| 12 | Optional [rollup columns](#rollup-columns) were added to the [samples](#samples-table) table. The setting [`samples_rollup_steps`](#settings) adds one column `samples_<step>` per step, with the type `SimpleAggregateFunction(timeSeriesGroupArray(step), ...)`. A query with a step reads the rollup column with the largest step dividing the query step, see the query-level setting `time_series_prefer_rollup_tables`. Tables of earlier versions have no rollup columns |
 
 # Functions {#functions}
 
