@@ -571,48 +571,105 @@ namespace
         std::optional<Block> recent_samples_block;
     };
 
-    /// Keeps the last sample of each rollup interval per series from already-sorted indices.
+    /// Builds the rollup columns `samples_<step>` for the rows of the block which makeSamplesBlock() makes from the same sorted samples
+    /// with `bucket_step`: the result has one column per step in `rollup_steps` (with the scale of the timestamp type), each with
+    /// as many rows as that block. A row keeps the last sample of every interval `(k * step, (k + 1) * step]` of its bucket, which is
+    /// what `timeSeriesGroupArray(<step>)` keeps when the rows are merged (see AggregateFunctionTimeSeriesGroupArray.h).
+    /// The intervals start over in every row: a sample at the start of a bucket is the only sample of its interval in its row.
+    /// One pass over the samples serves every step: a sample is compared with the end of the current interval of each step,
+    /// and the end is computed again only when a new interval starts.
     template <typename TimestampColumn>
-    void filterLastSamplePerInterval(
+    std::vector<ColumnPtr> makeRollupSamplesColumns(
         const PaddedPODArray<UInt8> & filter,
         const TimestampColumn & ts_timestamps,
+        const IColumn & ts_values,
         const PaddedPODArray<size_t> & sorted_indices,
         const PaddedPODArray<size_t> & sorted_offsets,
-        Decimal64 rollup_step,
-        PaddedPODArray<size_t> & out_indices,
-        PaddedPODArray<size_t> & out_offsets)
+        Decimal64 bucket_step,
+        const std::vector<Decimal64> & rollup_steps)
     {
         const auto & timestamps = ts_timestamps.getData();
-        out_indices.clear();
-        out_offsets.clear();
-        out_offsets.resize(sorted_offsets.size());
+        const size_t num_steps = rollup_steps.size();
+
+        std::vector<MutableColumnPtr> out_timestamps;
+        std::vector<MutableColumnPtr> out_values;
+        std::vector<ColumnArray::ColumnOffsets::MutablePtr> out_offsets;
+        for (size_t step_index = 0; step_index < num_steps; ++step_index)
+        {
+            out_timestamps.push_back(ts_timestamps.cloneEmpty());
+            out_values.push_back(ts_values.cloneEmpty());
+            out_offsets.push_back(ColumnArray::ColumnOffsets::create());
+        }
+
+        /// For each step: the indices of the samples kept in the current row, and the end of the interval of the last kept sample.
+        std::vector<PaddedPODArray<size_t>> kept_indices(num_steps);
+        std::vector<Int64> interval_ends(num_steps);
 
         for (size_t i = 0; i < filter.size(); ++i)
         {
             if (!filter[i])
-            {
-                out_offsets[i] = out_indices.size();
                 continue;
-            }
 
             size_t row_begin = (i == 0) ? 0 : sorted_offsets[i - 1];
             size_t row_end = sorted_offsets[i];
-            std::optional<Decimal64> current_interval;
-            for (size_t pos = row_begin; pos < row_end; ++pos)
+
+            /// The samples are sorted, so the samples of one bucket are adjacent (the same rows as in makeSamplesBlock()).
+            size_t bucket_begin = row_begin;
+            while (bucket_begin < row_end)
             {
-                const Decimal64 interval = getBucket(toDecimal64(timestamps[sorted_indices[pos]]), rollup_step);
-                if (!current_interval || *current_interval != interval)
+                const Int64 bucket_end
+                    = getBucket(toDecimal64(timestamps[sorted_indices[bucket_begin]]), bucket_step).value + bucket_step.value;
+
+                for (auto & indices : kept_indices)
+                    indices.clear();
+
+                size_t pos = bucket_begin;
+                for (; pos < row_end; ++pos)
                 {
-                    out_indices.push_back(sorted_indices[pos]);
-                    current_interval = interval;
+                    const size_t index = sorted_indices[pos];
+                    const Int64 timestamp = toDecimal64(timestamps[index]).value;
+                    if (timestamp >= bucket_end)
+                        break;
+
+                    for (size_t step_index = 0; step_index < num_steps; ++step_index)
+                    {
+                        auto & indices = kept_indices[step_index];
+                        if (!indices.empty() && (timestamp <= interval_ends[step_index]))
+                        {
+                            /// A later sample of the same interval.
+                            indices.back() = index;
+                        }
+                        else
+                        {
+                            /// The first sample of a new interval `(end - step, end]`.
+                            const Int64 step = rollup_steps[step_index].value;
+                            indices.push_back(index);
+                            interval_ends[step_index] = DateLUTImpl::roundDownToMultiple(timestamp - 1, step) + step;
+                        }
+                    }
                 }
-                else
+
+                for (size_t step_index = 0; step_index < num_steps; ++step_index)
                 {
-                    out_indices.back() = sorted_indices[pos];
+                    const auto & indices = kept_indices[step_index];
+                    insertSamplesByIndices(
+                        indices.data(), 0, indices.size(), ts_timestamps, ts_values, *out_timestamps[step_index], *out_values[step_index]);
+                    out_offsets[step_index]->getData().push_back(out_timestamps[step_index]->size());
                 }
+
+                bucket_begin = pos;
             }
-            out_offsets[i] = out_indices.size();
         }
+
+        std::vector<ColumnPtr> res;
+        res.reserve(num_steps);
+        for (size_t step_index = 0; step_index < num_steps; ++step_index)
+        {
+            res.push_back(ColumnArray::create(
+                ColumnTuple::create(Columns{std::move(out_timestamps[step_index]), std::move(out_values[step_index])}),
+                std::move(out_offsets[step_index])));
+        }
+        return res;
     }
 
     /// Builds the blocks for the samples tables from the series in the input block: the samples of each series
@@ -653,20 +710,20 @@ namespace
                     filter, id_column, id_type, ts_timestamps, timestamp_type, ts_values, value_type, sorted_indices, sorted_offsets, *recent_samples_bucket_step);
         }
 
-        for (size_t step_index = 0; step_index < rollup_steps.size(); ++step_index)
+        if (!rollup_steps.empty())
         {
-            PaddedPODArray<size_t> rollup_indices;
-            PaddedPODArray<size_t> rollup_offsets;
-            filterLastSamplePerInterval(filter, ts_timestamps, sorted_indices, sorted_offsets, rollup_steps[step_index], rollup_indices, rollup_offsets);
-            Block rollup_block = makeSamplesBlock(
-                filter, id_column, id_type, ts_timestamps, timestamp_type, ts_values, value_type, rollup_indices, rollup_offsets, samples_bucket_step);
-            if (rollup_block.rows() != res.samples_block.rows())
-                throw Exception(ErrorCodes::LOGICAL_ERROR,
-                    "Rollup column {} has {} rows and the samples block has {}",
-                    TimeSeriesColumnNames::rollupSamplesColumn(rollup_steps_seconds[step_index]), rollup_block.rows(), res.samples_block.rows());
-            auto column = rollup_block.getByName(TimeSeriesColumnNames::Samples);
-            column.name = TimeSeriesColumnNames::rollupSamplesColumn(rollup_steps_seconds[step_index]);
-            res.samples_block.insert(std::move(column));
+            auto rollup_columns = makeRollupSamplesColumns(
+                filter, ts_timestamps, ts_values, sorted_indices, sorted_offsets, samples_bucket_step, rollup_steps);
+            const auto samples_type = makeSamplesType(timestamp_type, value_type);
+            for (size_t step_index = 0; step_index < rollup_steps.size(); ++step_index)
+            {
+                const String column_name = TimeSeriesColumnNames::rollupSamplesColumn(rollup_steps_seconds[step_index]);
+                if (rollup_columns[step_index]->size() != res.samples_block.rows())
+                    throw Exception(ErrorCodes::LOGICAL_ERROR,
+                        "Rollup column {} has {} rows and the samples block has {}",
+                        column_name, rollup_columns[step_index]->size(), res.samples_block.rows());
+                res.samples_block.insert(ColumnWithTypeAndName{std::move(rollup_columns[step_index]), samples_type, column_name});
+            }
         }
 
         return res;
