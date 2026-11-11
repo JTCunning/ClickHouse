@@ -26,9 +26,22 @@ namespace
             make_intrusive<ASTLiteral>(STALE_NAN_BITS));
     }
 
+    /// Whether the selector can read a rollup column (see `samples_rollup_steps`): the query step is then passed to timeSeriesSelector(),
+    /// which reads the rollup column with the largest step dividing the query step. A rollup column keeps the last sample of every
+    /// interval `(k * rollup_step, (k + 1) * rollup_step]`, so the last sample at or before any multiple of the rollup step is the same
+    /// as in the raw samples. That is all an instant selector uses, if every evaluation time is a multiple of the query step, i.e.
+    /// `start_time` is (offsets and subqueries are already applied to the range). A range selector is not allowed: the functions
+    /// over a range vector (`rate`, `increase`, `max_over_time`, `count_over_time` ...) use every sample of the window,
+    /// and it drops the stale markers, which can hide the last real sample of an interval.
+    bool canReadRollupColumn(const NodeEvaluationRange & node_range, bool is_instant_selector)
+    {
+        return is_instant_selector && (node_range.step.value > 0) && (node_range.start_time.value % node_range.step.value == 0);
+    }
+
     SQLQueryPiece fromRangeSelector(std::string_view instant_selector_text,
                                     const Node * node,
                                     bool filter_stale_markers,
+                                    bool is_instant_selector,
                                     ConverterContext & context)
     {
         auto node_range = context.node_range_getter.get(node);
@@ -89,29 +102,20 @@ namespace
         TimestampType min_time = node_range.start_time - node_range.window + 1;
         TimestampType max_time = node_range.end_time;
 
-        if (node_range.step > 0)
-        {
-            builder.from_table_function = makeASTFunction(
-                "timeSeriesSelector",
-                make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
-                make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
-                make_intrusive<ASTLiteral>(String{instant_selector_text}),
-                timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
-                timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
-                make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}),
-                timeSeriesDurationToAST(node_range.step, context.result_timestamp_type));
-        }
-        else
-        {
-            builder.from_table_function = makeASTFunction(
-                "timeSeriesSelector",
-                make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
-                make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
-                make_intrusive<ASTLiteral>(String{instant_selector_text}),
-                timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
-                timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
-                make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}));
-        }
+        auto table_function = makeASTFunction(
+            "timeSeriesSelector",
+            make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
+            make_intrusive<ASTLiteral>(context.time_series_storage_id.getTableName()),
+            make_intrusive<ASTLiteral>(String{instant_selector_text}),
+            timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
+            timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
+            make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}));
+
+        /// The optional 7th argument `step` lets the table function read a rollup column.
+        if (table_has_bucketed_samples && canReadRollupColumn(node_range, is_instant_selector))
+            table_function->arguments->children.push_back(timeSeriesDurationToAST(node_range.step, context.result_timestamp_type));
+
+        builder.from_table_function = std::move(table_function);
 
         res.select_query = builder.getSelectQuery();
         return res;
@@ -191,7 +195,7 @@ SQLQueryPiece fromSelector(const PrometheusQueryTree::InstantSelector * instant_
 {
     auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
     auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, /* is_instant_selector = */ true, context);
     auto vector_grid = applyFunctionOverRange(
         instant_selector_node, "last_over_time", {std::move(range_selector)}, context);
     return replaceStaleMarkersWithNulls(std::move(vector_grid), context);
@@ -202,7 +206,7 @@ SQLQueryPiece fromSelectorSampleTimestamps(const PrometheusQueryTree::InstantSel
 {
     auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
     auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, /* is_instant_selector = */ true, context);
 
     /// Replaces the value of every sample with its timestamp. Stale markers are kept so that last_over_time() can still
     /// select them and they are turned into absence below, exactly as for a plain instant selector.
@@ -295,7 +299,7 @@ SQLQueryPiece fromSelector(const PrometheusQueryTree::RangeSelector * range_sele
 {
     auto instant_selector_text = range_selector_node->getInstantSelector()->toString(*context.promql_tree);
     return fromRangeSelector(
-        instant_selector_text, range_selector_node, /* filter_stale_markers = */ true, context);
+        instant_selector_text, range_selector_node, /* filter_stale_markers = */ true, /* is_instant_selector = */ false, context);
 }
 
 }
