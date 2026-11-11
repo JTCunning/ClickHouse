@@ -1,0 +1,1 @@
+SELECT * FROM prometheusQueryRange('ts', 'max by (pod) (metric_0{label_a="v1",label_b="v1",label_c=~"v1",label_d=~"v1",label_e="v1",label_f="v1",pod=~".*server.*"})', 1794384000, 1794394800, 30)

@@ -1,0 +1,44 @@
+<clickhouse>
+  <logger><level>information</level><log>$D/server/log/server.log</log><errorlog>$D/server/log/err.log</errorlog><size>200M</size><count>2</count></logger>
+  <listen_host>127.0.0.1</listen_host>
+  <tcp_port>9301</tcp_port>
+  <http_port>8323</http_port>
+  <path>$D/server/data/</path>
+  <tmp_path>$D/server/tmp/</tmp_path>
+  <user_files_path>$D/server/user_files/</user_files_path>
+  <max_server_memory_usage>2800000000</max_server_memory_usage>
+  <mark_cache_size>536870912</mark_cache_size>
+  <users>
+    <default><password></password><networks><ip>127.0.0.1</ip><ip>::1</ip></networks><profile>default</profile><quota>default</quota><access_management>1</access_management></default>
+  </users>
+  <profiles><default><max_memory_usage>2500000000</max_memory_usage><enable_time_series_table>1</enable_time_series_table></default></profiles>
+  <quotas><default/></quotas>
+  <storage_configuration>
+    <disks>
+      <s3>
+        <type>s3</type>
+        <endpoint>http://127.0.0.1:9100/bucket/data/</endpoint>
+        <access_key_id>x</access_key_id><secret_access_key>x</secret_access_key>
+        <skip_access_check>true</skip_access_check>
+        <s3_max_single_part_upload_size>536870912</s3_max_single_part_upload_size>
+      </s3>
+      <s3_cache>
+        <type>cache</type>
+        <disk>s3</disk>
+        <path>$D/server/fscache/</path>
+        <max_size>3221225472</max_size>
+      </s3_cache>
+    </disks>
+    <policies>
+      <s3><volumes><main><disk>s3_cache</disk></main></volumes></s3>
+    </policies>
+  </storage_configuration>
+  <query_log><database>system</database><table>query_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></query_log>
+  <processors_profile_log><database>system</database><table>processors_profile_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></processors_profile_log>
+  <filesystem_cache_log><database>system</database><table>filesystem_cache_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></filesystem_cache_log>
+  <trace_log><database>system</database><table>trace_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></trace_log>
+  <text_log remove="1"/>
+  <metric_log remove="1"/>
+  <asynchronous_metric_log remove="1"/>
+  <part_log><database>system</database><table>part_log</table></part_log>
+</clickhouse>
