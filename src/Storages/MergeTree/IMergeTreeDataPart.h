@@ -850,6 +850,9 @@ protected:
     mutable IndexPtr index;
 
 private:
+    /// The key of the primary index of this part in the primary index cache.
+    UInt128 getPrimaryIndexCacheKey() const;
+
     void calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked() const TSA_REQUIRES(columns_and_secondary_indices_sizes_mutex);
 
     /// Columns and secondary indices sizes can be calculated lazily on first request.

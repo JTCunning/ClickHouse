@@ -272,12 +272,15 @@ bool MergeTreeDataSelectExecutor::hasFewerMarksToReadThan(
     /// another replica). On a remote disk each read is a request, and one part after another the probe would wait for
     /// all of them in turn, while the range analysis after it loads the indexes in parallel. So probe the parts in
     /// parallel too when more than one index has to be read. Otherwise the probe is cheap and stays serial.
-    const size_t parts_to_read_index = std::ranges::count_if(
-        parts, [](const RangesInDataPart & part) { return !part.data_part->isIndexInMemory(); });
-
-    size_t num_threads = std::min<size_t>(settings[Setting::max_threads], parts_to_read_index);
+    size_t max_num_threads = settings[Setting::max_threads];
     if (settings[Setting::max_threads_for_indexes])
-        num_threads = std::min<size_t>(num_threads, settings[Setting::max_threads_for_indexes]);
+        max_num_threads = std::min<size_t>(max_num_threads, settings[Setting::max_threads_for_indexes]);
+
+    /// One thread per part that reads its index, so counting stops once all threads have one.
+    size_t num_threads = 0;
+    for (const auto & part : parts)
+        if (!part.data_part->isIndexInMemory() && ++num_threads == max_num_threads)
+            break;
 
     if (num_threads <= 1)
     {

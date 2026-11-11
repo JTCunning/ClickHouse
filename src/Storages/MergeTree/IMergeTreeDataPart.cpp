@@ -712,9 +712,14 @@ IMergeTreeDataPart::IndexPtr IMergeTreeDataPart::tryGetIndex() const
     return index;
 }
 
+UInt128 IMergeTreeDataPart::getPrimaryIndexCacheKey() const
+{
+    return PrimaryIndexCache::hash(getDataPartStorage().getDiskName() + ":" + getRelativePathOfActivePart());
+}
+
 IMergeTreeDataPart::IndexPtr IMergeTreeDataPart::loadIndexToCache(PrimaryIndexCache & index_cache) const
 {
-    auto key = PrimaryIndexCache::hash(getDataPartStorage().getDiskName() + ":" + getRelativePathOfActivePart());
+    auto key = getPrimaryIndexCacheKey();
     auto callback = [this] { return loadIndex(); };
     return index_cache.getOrSet(key, callback);
 }
@@ -725,7 +730,7 @@ void IMergeTreeDataPart::moveIndexToCache(PrimaryIndexCache & index_cache)
     if (!index)
         return;
 
-    auto key = PrimaryIndexCache::hash(getDataPartStorage().getDiskName() + ":" + getRelativePathOfActivePart());
+    auto key = getPrimaryIndexCacheKey();
     index_cache.set(key, std::const_pointer_cast<Index>(index));
     index.reset();
 
@@ -738,7 +743,7 @@ void IMergeTreeDataPart::removeIndexFromCache(PrimaryIndexCache * index_cache) c
     if (!index_cache)
         return;
 
-    auto key = PrimaryIndexCache::hash(getDataPartStorage().getDiskName() + ":" + getRelativePathOfActivePart());
+    auto key = getPrimaryIndexCacheKey();
     index_cache->remove(key);
 }
 
@@ -786,7 +791,7 @@ bool IMergeTreeDataPart::isIndexInMemory() const
         return true;
 
     auto index_cache = storage.getPrimaryIndexCache();
-    return index_cache && index_cache->contains(PrimaryIndexCache::hash(getDataPartStorage().getDiskName() + ":" + getRelativePathOfActivePart()));
+    return index_cache && index_cache->contains(getPrimaryIndexCacheKey());
 }
 
 void IMergeTreeDataPart::setName(const String & new_name)
