@@ -169,14 +169,18 @@ public:
                 return static_cast<Int64>(ts);
         }
 
-        /// Floor-divides timestamp ticks by a positive step towards -infinity.
+        /// The key of the rollup interval containing a timestamp. The intervals are closed on the right:
+        /// `(k * step, (k + 1) * step]` has the key `k`, so a sample at a multiple of the step is the last sample of the
+        /// interval which ends at it. Then for every time `t` which is a multiple of the step, the last sample at or before `t`
+        /// is the last sample of its interval and is kept. The division rounds towards -infinity (timestamps before 1970).
         static Int64 intervalKey(TimestampType ts, TimestampType step)
         {
-            const Int64 value = timestampToInt64(ts);
+            const Int64 value = timestampToInt64(ts) - 1;
             const Int64 step_i64 = timestampToInt64(step);
-            if (value >= 0)
-                return value / step_i64;
-            return -((-value + step_i64 - 1) / step_i64);
+            Int64 key = value / step_i64;
+            if (value % step_i64 < 0)
+                --key;
+            return key;
         }
 
         /// Collapses runs of equal timestamps (or of the same rollup interval when `step` is set)
@@ -189,27 +193,41 @@ public:
                 return 0;
 
             size_t last_unique = 0;
-            for (size_t i = 1; i < size; ++i)
+            if (timestampToInt64(step) == 0)
             {
-                const bool same = timestampToInt64(step) != 0
-                    ? (intervalKey(elements[i].timestamp, step) == intervalKey(elements[last_unique].timestamp, step))
-                    : (elements[i].timestamp == elements[last_unique].timestamp);
-
-                if (same)
+                for (size_t i = 1; i < size; ++i)
                 {
-                    if (elements[i].timestamp != elements[last_unique].timestamp)
-                    {
-                        if (elements[i].timestamp > elements[last_unique].timestamp)
-                            elements[last_unique] = elements[i];
-                    }
-                    else
-                    {
+                    if (elements[i].timestamp == elements[last_unique].timestamp)
                         elements[last_unique].value
                             = timeseriesMaxValueForDuplicateTimestamp(elements[last_unique].value, elements[i].value);
-                    }
+                    else
+                        elements[++last_unique] = elements[i];
+                }
+                return last_unique + 1;
+            }
+
+            /// The elements are sorted, so a later element of the same interval replaces the kept one.
+            /// The key is computed once per distinct timestamp.
+            Int64 last_unique_key = intervalKey(elements[0].timestamp, step);
+            for (size_t i = 1; i < size; ++i)
+            {
+                if (elements[i].timestamp == elements[last_unique].timestamp)
+                {
+                    elements[last_unique].value
+                        = timeseriesMaxValueForDuplicateTimestamp(elements[last_unique].value, elements[i].value);
+                    continue;
+                }
+
+                const Int64 key = intervalKey(elements[i].timestamp, step);
+                if (key == last_unique_key)
+                {
+                    elements[last_unique] = elements[i];
                 }
                 else
+                {
                     elements[++last_unique] = elements[i];
+                    last_unique_key = key;
+                }
             }
             return last_unique + 1;
         }

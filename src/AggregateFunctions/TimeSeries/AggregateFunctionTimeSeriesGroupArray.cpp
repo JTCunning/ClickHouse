@@ -4,6 +4,9 @@
 #include <AggregateFunctions/FactoryHelpers.h>
 #include <Core/DecimalFunctions.h>
 #include <DataTypes/DataTypesDecimal.h>
+#include <base/arithmeticOverflow.h>
+
+#include <limits>
 
 
 namespace DB
@@ -36,14 +39,20 @@ namespace
         AggregateFunctionPtr res;
         if (isDateTime64(timestamp_type))
         {
+            /// The step is kept in the ticks of the timestamp type, it must not overflow them.
             const UInt32 scale = getDecimalScale(*timestamp_type);
-            const DateTime64 rollup_step = rollup_step_seconds
-                ? DecimalUtils::decimalFromComponents<DateTime64>(static_cast<Int64>(rollup_step_seconds), 0, scale)
-                : DateTime64{0};
-            res = createWithTypes<DateTime64, ValueType>(argument_types, parameters, rollup_step);
+            Int64 rollup_step_ticks = 0;
+            if ((rollup_step_seconds > static_cast<UInt64>(std::numeric_limits<Int64>::max()))
+                || common::mulOverflow(static_cast<Int64>(rollup_step_seconds), DecimalUtils::scaleMultiplier<Int64>(scale), rollup_step_ticks))
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Aggregate function {} parameter {} is too large for the timestamp type {}", name, rollup_step_seconds, timestamp_type->getName());
+            res = createWithTypes<DateTime64, ValueType>(argument_types, parameters, DateTime64{rollup_step_ticks});
         }
         else if (isDateTime(timestamp_type) || isUInt32(timestamp_type))
         {
+            if (rollup_step_seconds > std::numeric_limits<UInt32>::max())
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Aggregate function {} parameter {} is too large for the timestamp type {}", name, rollup_step_seconds, timestamp_type->getName());
             res = createWithTypes<UInt32, ValueType>(argument_types, parameters, static_cast<UInt32>(rollup_step_seconds));
         }
 
@@ -149,8 +158,10 @@ The samples can be passed in one of three forms:
 If several samples have the same timestamp, only one of them is used: the sample with the greatest value. A NaN value loses to any other value, so a NaN value is used only if all samples at this timestamp are NaN.
 
 When called with a positive `rollup_step_seconds` parameter, the function keeps only the last sample of each
-rollup interval (`floor(timestamp / rollup_step)`), preserving that sample's original timestamp. Equal
-timestamps within an interval still keep the greatest value.
+rollup interval, preserving that sample's original timestamp. The intervals are closed on the right,
+`(k * rollup_step_seconds, (k + 1) * rollup_step_seconds]`, so a sample at a multiple of the step is the last sample
+of the interval which ends at it, and for every time which is a multiple of the step the last sample at or before it is kept.
+Equal timestamps within an interval still keep the greatest value.
 
 <Note>
 This function is in private preview.
