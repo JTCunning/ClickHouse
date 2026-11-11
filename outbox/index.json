@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-10T12:08:15Z",
+  "updated": "2026-11-11T00:05:23Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -119,7 +119,7 @@
     {
       "slug": "grid-gap-wraparound",
       "title": "Grow the timeSeries*ToGrid bucket map before inserting a colliding key",
-      "status": "results-in",
+      "status": "needs-work",
       "priority": 4,
       "branch": "lilred-perf-grid-gap-wraparound",
       "head": "e6d27f5cc1d46392c894e989a64266fc7cf20568",
@@ -145,7 +145,7 @@
       ],
       "claim": "Run 2: the gap slowdown goes away in time order (run 1: 8.8x / 6.5x), and the merge with the run after the gap first gets about 3x faster (probes as with the pre-#124773 1/2 limit). Contiguous, late-start, sparse-gap, every-2nd-minute and 4-samples-per-minute series are unchanged in time and memory.",
       "pass_if": "05474 passes on A and B; gap LastToGrid and RateToGrid at least 3x faster; the later-run-first merge at least 2x faster; no guard query significantly slower (contiguous, late_start, gap_sparse, every_2nd, dense, bucketing, aggregation_functions); gap_sparse and every_2nd memory_usage within 5%.",
-      "notes": "Run 1 (head 46291048116b) passed; the final review then found two Majors run 1 did not cover (arrival order; memory doubling on sparse gaps and every-2nd-bucket series), fixed in 0113a7c96c12 and e6d27f5cc1d4. Needs run 2 with memory_usage reported. Disclosed, not fixed: a sparse gap inserted in reverse or merged into the later run doubles the map once (1/2-limit size, same speed). Backport label (26.10) is your call. Closes upstream issue 125759. Related upstream: 124773 (caused it), 124777."
+      "notes": "Run 2 (head e6d27f5cc1d4) failed its pass rule: T3 1.93x vs a 2x floor that was my mis-prediction, and 5 of 7 timeseries_to_grid_bucketing queries slower, most likely the part-layout draw of that file's fill (A/A on one master binary: medians 10% apart across fills). Gap T1/T2 8.4x/5.7x, aggregation_functions 21 of 35 faster, none slower. Review rounds 5-7 found three more shapes where the rule misfires (long-grid gaps; a sparse gap arriving later-run-first; jittered every-2nd-bucket series). Branch tip 84bdb18276cb is pushed but unbuilt, with two round-7 Majors open; `head` stays at the measured e6d27f5cc1d4. DECISION FOR JAMES (issue 10): (A, recommended) park this branch and treat upstream 124777 (dense array) as the fix for 125759; (B) one more iteration (8-cell run check, displaced-key fix), then a build and run 3 with the bucketing guard on byte-identical data copies. Closes upstream issue 125759. Related upstream: 124773 (caused it), 124777."
     },
     {
       "slug": "alp-search-early-exit",

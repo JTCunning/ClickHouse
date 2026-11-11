@@ -1,0 +1,36 @@
+T1 gap                             master add   613.23 merge     0.00 final    6.95 total   620.18 ms (  +0.0%) resizes     2000 partial_cells   3276800 final_cells   3276800
+T1 gap                             run1   add    32.25 merge     0.00 final    6.78 total    39.03 ms ( -93.7%) resizes     2000 partial_cells   3276800 final_cells   3276800
+T1 gap                             run2   add    31.18 merge     0.00 final    6.60 total    37.79 ms ( -93.9%) resizes     2000 partial_cells   3276800 final_cells   3276800
+T1 gap                             post   add    31.97 merge     0.00 final    6.74 total    38.72 ms ( -93.8%) resizes     2000 partial_cells   3276800 final_cells   3276800
+T1 gap                             post1  add    31.93 merge     0.00 final    6.57 total    38.50 ms ( -93.8%) resizes     2000 partial_cells   3276800 final_cells   3276800
+T3 merge later first               master add    29.43 merge   331.89 final    7.36 total   368.68 ms (  +0.0%) resizes     3800 partial_cells   3276800 final_cells   3276800
+T3 merge later first               run1   add    30.19 merge   331.00 final    6.83 total   368.02 ms (  -0.2%) resizes     3800 partial_cells   3276800 final_cells   3276800
+T3 merge later first               run2   add    30.62 merge   124.74 final    7.02 total   162.38 ms ( -56.0%) resizes     3800 partial_cells   3276800 final_cells   3276800
+T3 merge later first               post   add    29.88 merge   232.41 final    6.71 total   269.01 ms ( -27.0%) resizes     3800 partial_cells   3276800 final_cells   3276800
+T3 merge later first               post1  add    30.41 merge   232.71 final    7.23 total   270.35 ms ( -26.7%) resizes     3800 partial_cells   3276800 final_cells   3276800
+G1 contiguous                      master add    10.82 merge     0.00 final    6.77 total    17.59 ms (  +0.0%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G1 contiguous                      run1   add    10.75 merge     0.00 final    6.17 total    16.92 ms (  -3.8%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G1 contiguous                      run2   add    11.06 merge     0.00 final    6.14 total    17.21 ms (  -2.2%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G1 contiguous                      post   add    11.27 merge     0.00 final    6.18 total    17.46 ms (  -0.8%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G1 contiguous                      post1  add    10.98 merge     0.00 final    6.17 total    17.16 ms (  -2.4%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G3 late_start                      master add     7.60 merge     0.00 final    9.55 total    17.15 ms (  +0.0%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G3 late_start                      run1   add     7.77 merge     0.00 final    9.52 total    17.29 ms (  +0.8%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G3 late_start                      run2   add     8.18 merge     0.00 final    9.66 total    17.84 ms (  +4.0%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G3 late_start                      post   add     8.52 merge     0.00 final    9.57 total    18.09 ms (  +5.5%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G3 late_start                      post1  add     8.34 merge     0.00 final    9.57 total    17.91 ms (  +4.4%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G4 gap_sparse                      master add   159.84 merge     0.00 final    4.66 total   164.51 ms (  +0.0%) resizes     1600 partial_cells    819200 final_cells    819200
+G4 gap_sparse                      run1   add   215.63 merge     0.00 final    6.72 total   222.36 ms ( +35.2%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G4 gap_sparse                      run2   add   160.71 merge     0.00 final    4.74 total   165.45 ms (  +0.6%) resizes     1600 partial_cells    819200 final_cells    819200
+G4 gap_sparse                      post   add   197.24 merge     0.00 final    5.11 total   202.35 ms ( +23.0%) resizes     1600 partial_cells    819200 final_cells    819200
+G4 gap_sparse                      post1  add   195.50 merge     0.00 final    4.74 total   200.24 ms ( +21.7%) resizes     1600 partial_cells    819200 final_cells    819200
+G6 every_2nd                       master add     6.81 merge     0.00 final    8.46 total    15.26 ms (  +0.0%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G6 every_2nd                       run1   add    24.45 merge     0.00 final    4.87 total    29.32 ms ( +92.1%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G6 every_2nd                       run2   add     7.44 merge     0.00 final    8.27 total    15.71 ms (  +2.9%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G6 every_2nd                       post   add     7.65 merge     0.00 final    8.23 total    15.88 ms (  +4.1%) resizes     1800 partial_cells   1638400 final_cells   1638400
+G6 every_2nd                       post1  add    24.45 merge     0.00 final    4.89 total    29.35 ms ( +92.3%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G7 dense                           master add    25.96 merge     0.00 final    6.89 total    32.85 ms (  +0.0%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G7 dense                           run1   add    25.19 merge     0.00 final    6.69 total    31.88 ms (  -3.0%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G7 dense                           run2   add    26.83 merge     0.00 final    6.58 total    33.41 ms (  +1.7%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G7 dense                           post   add    26.13 merge     0.00 final    6.80 total    32.92 ms (  +0.2%) resizes     2000 partial_cells   3276800 final_cells   3276800
+G7 dense                           post1  add    26.32 merge     0.00 final    6.51 total    32.83 ms (  -0.1%) resizes     2000 partial_cells   3276800 final_cells   3276800
+rc=0

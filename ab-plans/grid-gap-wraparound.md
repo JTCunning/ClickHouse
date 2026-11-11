@@ -44,3 +44,11 @@
 ## Checklist
 - [ ] build B; reuse A from run 1 if still available
 - [ ] run the three XMLs; post results on issue #10
+
+## Run 2 outcome (2026-11-10)
+- Fail on two pass rules: T3 1.93× (floor 2×, my mis-prediction; its ORDER BY was removed by `query_plan_remove_redundant_sorting`, so the order was mixed), and 5 of 7 `timeseries_to_grid_bucketing.xml` queries significantly slower. The second is most likely the layout draw of that file's fill (see the report update), not the change.
+- No run 3 until James decides (issue #10). If there is one:
+  - B = the new head; every query of `timeseries_to_grid_gap.xml` (the merge queries now pin their order: later run first, earlier run first, sparse gap later run first).
+  - `timeseries_to_grid_bucketing.xml` on **byte-identical data**: start A, run the file's create and fill queries, `SYSTEM STOP MERGES`, record `SELECT table, count(), groupArray(rows) FROM system.parts WHERE active GROUP BY table`, stop A, copy its data directory to B's, start both, check the same part list on B. Then per query `clickhouse benchmark --host 127.0.0.1 --port 9001 --host 127.0.0.1 --port 9002 -i 30 --confidence 5`. Plus one A/A pass (A against a second A server on the same copy) for the noise figure. Keeps the multi-part layout, whose cross-thread merges the change touches.
+  - `memory_usage` for every gap and bucketing case.
+

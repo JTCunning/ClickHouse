@@ -7,7 +7,7 @@ These are fix branches that lil red can't build itself. James builds and A/B tes
 | 1 | [promql-shared-selector-sets](../prs/promql-shared-selector-sets.md) | submitted | `lilred-perf-promql-shared-selector-sets` | #5 | `x + x` 41.6 → 35.4 ms (−15%, run 1): the id set is built once per query |
 | 2 | [promql-drop-name-exact-selector](../prs/promql-drop-name-exact-selector.md) | submitted | `lilred-perf-promql-drop-name-exact-selector` | #8 | sum(rate) −19% CPU at 100k series. Overlaps upstream 121069 and 126763: land one of them |
 | 3 | [time-ranges-id-ranges-index-hint](../prs/time-ranges-id-ranges-index-hint.md) | submitted | `lilred-perf-time-ranges-id-ranges-index-hint` | #6 | 100-name selector −19.9% (176 → 141 ms); 50–300 names −35–39% (build, 2026-11-01) |
-| 4 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | results-in | `lilred-perf-grid-gap-wraparound` | #10 | run 2: gap slowdown gone in every arrival order; no memory growth on sparse or every-2nd-minute series |
+| 4 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | needs-work | `lilred-perf-grid-gap-wraparound` | #10 | run 2: gap slowdown gone in every arrival order; no memory growth on sparse or every-2nd-minute series |
 | 5 | [alp-search-early-exit](../prs/alp-search-early-exit.md) | ready-to-build | `lilred-perf-alp-search-early-exit` | #11 | run 2: same bytes; decimal-like values −38–93% encode CPU, full-precision and random doubles −1–9%, nothing slower (clang harness) |
 
 ## How an item moves
