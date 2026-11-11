@@ -268,16 +268,18 @@ bool MergeTreeDataSelectExecutor::hasFewerMarksToReadThan(
             /*exact_ranges=*/nullptr, pk_to_minmax_slot_ptr, probe_settings, log).getNumberOfMarks();
     };
 
-    size_t num_threads = std::min<size_t>(settings[Setting::max_threads], parts.size());
+    /// Probing a part reads its primary index if it is not in memory yet (lazy loading after a restart, a part written by
+    /// another replica). On a remote disk each read is a request, and one part after another the probe would wait for
+    /// all of them in turn, while the range analysis after it loads the indexes in parallel. So probe the parts in
+    /// parallel too when more than one index has to be read. Otherwise the probe is cheap and stays serial.
+    const size_t parts_to_read_index = std::ranges::count_if(
+        parts, [](const RangesInDataPart & part) { return !part.data_part->isIndexInMemory(); });
+
+    size_t num_threads = std::min<size_t>(settings[Setting::max_threads], parts_to_read_index);
     if (settings[Setting::max_threads_for_indexes])
         num_threads = std::min<size_t>(num_threads, settings[Setting::max_threads_for_indexes]);
 
-    /// Probing a part loads its primary index if it is not loaded yet (lazy loading after a restart, a part written by
-    /// another replica). On a remote disk each load is a request, and one part after another the probe would wait for
-    /// all of them in turn, while the range analysis after it loads the indexes in parallel. So probe the parts in
-    /// parallel too, unless all indexes are loaded and the probe is cheap. An index kept in the primary index cache
-    /// does not count as loaded here, so such parts are probed in parallel, from the cache.
-    if (num_threads <= 1 || std::ranges::all_of(parts, [](const RangesInDataPart & part) { return part.data_part->isIndexLoaded(); }))
+    if (num_threads <= 1)
     {
         /// Stop as soon as the limit is reached, so a large read costs the analysis of a few parts only.
         size_t marks = 0;
@@ -311,7 +313,8 @@ bool MergeTreeDataSelectExecutor::hasFewerMarksToReadThan(
                 /// explicitly: loading a primary index may read from a Keeper-backed disk.
                 auto local_component_guard = Coordination::setCurrentComponent(component_name);
 
-                /// Stop as soon as the limit is reached: the jobs probe at most one part each after that.
+                /// Stop once the limit is reached. The jobs probe the parts they took before that, at most one each,
+                /// so the probe can read more indexes than the serial one, which stops at the first part reaching it.
                 /// The pool is finished once a job has thrown or its destructor has started, then the other parts are abandoned.
                 while (!pool.isFinished() && marks.load(std::memory_order_relaxed) < limit)
                 {

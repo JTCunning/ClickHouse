@@ -1,5 +1,5 @@
 -- The primary key probe deciding whether to load statistics (see 05407_statistics_skip_small_reads) runs over the
--- parts in parallel when their primary indexes are not loaded yet. It decides as with one thread.
+-- parts in parallel when the primary indexes of several parts are not in memory. It decides as with one thread.
 
 SET enable_analyzer = 1, optimize_move_to_prewhere = 1;
 SET enable_parallel_replicas = 0;
@@ -9,6 +9,7 @@ SET use_statistics = 1, use_statistics_for_part_pruning = 1;
 SET min_marks_per_part_to_load_statistics = 100, max_threads_for_indexes = 0;
 
 DROP TABLE IF EXISTS statistics_probe;
+DROP TABLE IF EXISTS statistics_probe_cache;
 
 CREATE TABLE statistics_probe (key UInt64, value UInt64, flag UInt8)
 ENGINE = MergeTree ORDER BY key PARTITION BY intDiv(key, 10000)
@@ -43,6 +44,36 @@ ATTACH TABLE statistics_probe;
 SELECT count() FROM statistics_probe WHERE key >= 1 AND value >= 60000 AND flag = 0
 SETTINGS max_threads = 1, log_comment = '05620_large_serial';
 
+-- The same with the primary indexes kept in the primary index cache, from which a reattach removes them.
+CREATE TABLE statistics_probe_cache (key UInt64, value UInt64, flag UInt8)
+ENGINE = MergeTree ORDER BY key PARTITION BY intDiv(key, 10000)
+SETTINGS index_granularity = 16, index_granularity_bytes = '10Mi', auto_statistics_types = 'basic, uniq_v2',
+    primary_key_lazy_load = 1, use_primary_key_cache = 1, prewarm_primary_key_cache = 0, prewarm_statistics_cache = 0;
+
+SYSTEM STOP MERGES statistics_probe_cache;
+
+INSERT INTO statistics_probe_cache SELECT number, number, number % 2 FROM numbers(80000) SETTINGS max_partitions_per_insert_block = 8;
+
+SELECT '-- primary index cache: the primary key leaves two marks of two parts: no statistics';
+DETACH TABLE statistics_probe_cache;
+ATTACH TABLE statistics_probe_cache;
+SELECT count() FROM statistics_probe_cache WHERE key IN (5, 75000) AND value >= 30000 AND flag = 0
+SETTINGS max_threads = 4, log_comment = '05620_cache_small_parallel';
+DETACH TABLE statistics_probe_cache;
+ATTACH TABLE statistics_probe_cache;
+SELECT count() FROM statistics_probe_cache WHERE key IN (5, 75000) AND value >= 30000 AND flag = 0
+SETTINGS max_threads = 1, log_comment = '05620_cache_small_serial';
+
+SELECT '-- primary index cache: a large read: statistics are loaded and prune six parts';
+DETACH TABLE statistics_probe_cache;
+ATTACH TABLE statistics_probe_cache;
+SELECT count() FROM statistics_probe_cache WHERE key >= 1 AND value >= 60000 AND flag = 0
+SETTINGS max_threads = 4, log_comment = '05620_cache_large_parallel';
+DETACH TABLE statistics_probe_cache;
+ATTACH TABLE statistics_probe_cache;
+SELECT count() FROM statistics_probe_cache WHERE key >= 1 AND value >= 60000 AND flag = 0
+SETTINGS max_threads = 1, log_comment = '05620_cache_large_serial';
+
 SYSTEM FLUSH LOGS query_log;
 
 SELECT log_comment, ProfileEvents['LoadedStatistics'] > 0, ProfileEvents['SelectedParts']
@@ -51,3 +82,4 @@ WHERE current_database = currentDatabase() AND type = 'QueryFinish' AND startsWi
 ORDER BY log_comment;
 
 DROP TABLE statistics_probe;
+DROP TABLE statistics_probe_cache;
