@@ -5,7 +5,7 @@
 -- rejections
 -- two inserts into the same 60s interval collapse to the last sample after OPTIMIZE FINAL
 [('1970-01-01 00:00:10.000',1),('1970-01-01 00:00:50.000',2),('1970-01-01 00:01:10.000',3),('1970-01-01 00:01:50.000',4)]	[('1970-01-01 00:00:50.000',2),('1970-01-01 00:01:50.000',4)]	[('1970-01-01 00:01:50.000',4)]
--- timeSeriesSelector chooses the largest rollup step <= query step
+-- timeSeriesSelector chooses the largest rollup step dividing the query step
 4
 1
 4

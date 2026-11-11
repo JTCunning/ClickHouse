@@ -1,0 +1,30 @@
+-- the intervals are closed on the right: a sample at a multiple of the step ends its interval
+[(60,2),(120,4),(121,5)]
+[('1969-12-31 23:59:00.000',2),('1970-01-01 00:00:00.000',4)]
+-- the intervals start over in every bucket
+1970-01-01 00:00:00.000	[('1970-01-01 00:59:10.000',1)]	[('1970-01-01 00:59:10.000',1)]	[('1970-01-01 00:59:10.000',1)]
+1970-01-01 01:00:00.000	[('1970-01-01 01:00:00.000',2),('1970-01-01 01:00:10.000',3)]	[('1970-01-01 01:00:00.000',2),('1970-01-01 01:00:10.000',3)]	[('1970-01-01 01:00:00.000',2),('1970-01-01 01:00:10.000',3)]
+-- the last sample at or before a multiple of the step is kept: at 3600 the value is 2 with and without the rollup
+[('__name__','b'),('k','v')]	[('1970-01-01 01:00:00.000',2),('1970-01-01 01:01:00.000',3)]
+[('__name__','b'),('k','v')]	[('1970-01-01 01:00:00.000',2),('1970-01-01 01:01:00.000',3)]
+-- every row: samples_<step> = timeSeriesGroupArray(<step>)(samples), before and after the merges
+1	0	0
+1	0	0
+-- which column PromQL reads (raw, samples_60, samples_300), and whether the result is the same as with time_series_prefer_rollup_tables = 0
+r, step 1m	(0,1,0)	1	1
+r, step 5m	(0,0,1)	1	1
+r, step 10m: 300 divides it	(0,0,1)	1	1
+r, step 90s: no rollup step divides it	(1,0,0)	1	1
+r, step 5m, start not a multiple of the step	(1,0,0)	1	1
+r offset 30s, step 5m	(1,0,0)	1	1
+r offset 5m, step 5m	(0,0,1)	1	1
+sum(r), step 5m	(0,0,1)	1	1
+timestamp(r), step 5m	(0,0,1)	1	1
+max_over_time(r[30m:5m]), step 5m	(0,0,1)	1	1
+rate(r[5m]), step 5m	(1,0,0)	1	1
+max_over_time(r[10m]), step 5m	(1,0,0)	1	1
+count_over_time(r[10m]), step 5m	(1,0,0)	1	1
+last_over_time(r[10m]), step 5m	(1,0,0)	1	1
+-- a rollup column is preferred to the recent samples table, which keeps every sample
+1	0
+0	1

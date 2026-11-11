@@ -47,7 +47,7 @@ SELECT arraySort(arrayFlatten(groupArray(samples))) AS raw,
        arraySort(arrayFlatten(groupArray(samples_300))) AS rollup_300
 FROM merge(currentDatabase(), '^\\.inner_id\\.samples\\.');
 
-SELECT '-- timeSeriesSelector chooses the largest rollup step <= query step';
+SELECT '-- timeSeriesSelector chooses the largest rollup step dividing the query step';
 SELECT sum(length(samples)) AS raw_count
 FROM timeSeriesSelector(currentDatabase(), 'ts_rollup', 'm', 0, 1000, 'samples');
 SELECT sum(length(samples)) AS rollup_300_count
