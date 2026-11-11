@@ -1,0 +1,10 @@
+-- the primary key leaves two marks of two parts: no statistics
+1
+1
+-- a large read: statistics are loaded and prune six parts
+10000
+10000
+05620_large_parallel	1	2
+05620_large_serial	1	2
+05620_small_parallel	0	2
+05620_small_serial	0	2

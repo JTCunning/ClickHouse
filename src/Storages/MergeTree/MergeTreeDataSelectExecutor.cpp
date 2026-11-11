@@ -261,19 +261,71 @@ bool MergeTreeDataSelectExecutor::hasFewerMarksToReadThan(
     probe_settings[Setting::merge_tree_generic_exclusion_search_max_steps]
         = user_max_steps ? std::min(user_max_steps, max_steps_per_part) : max_steps_per_part;
 
-    /// Stop as soon as the limit is reached, so a large read costs the analysis of a few parts only.
-    size_t marks = 0;
-    for (const auto & part : parts)
+    auto probe_part = [&](const RangesInDataPart & part)
     {
-        marks += markRangesFromPKRange(
+        return markRangesFromPKRange(
             part, metadata_snapshot, key_condition->generateForPart(part.data_part), nullptr, nullptr,
             /*exact_ranges=*/nullptr, pk_to_minmax_slot_ptr, probe_settings, log).getNumberOfMarks();
+    };
 
-        if (marks >= limit)
-            return false;
+    size_t num_threads = std::min<size_t>(settings[Setting::max_threads], parts.size());
+    if (settings[Setting::max_threads_for_indexes])
+        num_threads = std::min<size_t>(num_threads, settings[Setting::max_threads_for_indexes]);
+
+    /// Probing a part loads its primary index if it is not loaded yet (lazy loading after a restart, a part written by
+    /// another replica). On a remote disk each load is a request, and one part after another the probe would wait for
+    /// all of them in turn, while the range analysis after it loads the indexes in parallel. So probe the parts in
+    /// parallel too, unless all indexes are loaded and the probe is cheap. An index kept in the primary index cache
+    /// does not count as loaded here, so such parts are probed in parallel, from the cache.
+    if (num_threads <= 1 || std::ranges::all_of(parts, [](const RangesInDataPart & part) { return part.data_part->isIndexLoaded(); }))
+    {
+        /// Stop as soon as the limit is reached, so a large read costs the analysis of a few parts only.
+        size_t marks = 0;
+        for (const auto & part : parts)
+        {
+            marks += probe_part(part);
+            if (marks >= limit)
+                return false;
+        }
+
+        return true;
     }
 
-    return true;
+    /// Outlive `pool`, whose destructor joins the jobs that still use them when scheduling throws.
+    std::atomic<size_t> marks = 0;
+    std::atomic<size_t> next_part_index = 0;
+
+    ThreadPool pool(
+        CurrentMetrics::MergeTreeDataSelectExecutorThreads,
+        CurrentMetrics::MergeTreeDataSelectExecutorThreadsActive,
+        CurrentMetrics::MergeTreeDataSelectExecutorThreadsScheduled,
+        num_threads);
+
+    for (size_t job = 0; job < num_threads; ++job)
+    {
+        pool.scheduleOrThrowOnError(
+            [&, thread_group = CurrentThread::getGroup(), component_name = Coordination::getCurrentComponent()]
+            {
+                ThreadGroupSwitcher switcher(thread_group, ThreadName::MERGETREE_INDEX);
+                /// ThreadGroupSwitcher does not carry the Keeper component, so propagate it
+                /// explicitly: loading a primary index may read from a Keeper-backed disk.
+                auto local_component_guard = Coordination::setCurrentComponent(component_name);
+
+                /// Stop as soon as the limit is reached: the jobs probe at most one part each after that.
+                /// The pool is finished once a job has thrown or its destructor has started, then the other parts are abandoned.
+                while (!pool.isFinished() && marks.load(std::memory_order_relaxed) < limit)
+                {
+                    const size_t part_index = next_part_index.fetch_add(1, std::memory_order_relaxed);
+                    if (part_index >= parts.size())
+                        break;
+
+                    marks.fetch_add(probe_part(parts[part_index]), std::memory_order_relaxed);
+                }
+            });
+    }
+
+    pool.wait();
+    return marks.load(std::memory_order_relaxed) < limit;
 }
 
 
