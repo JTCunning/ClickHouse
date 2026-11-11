@@ -1,0 +1,40 @@
+<test>
+    <settings>
+        <allow_experimental_time_series_table>1</allow_experimental_time_series_table>
+        <max_insert_threads>8</max_insert_threads>
+    </settings>
+
+    <!--
+        Wide-step PromQL range queries over a TimeSeries table with rollup columns (`samples_rollup_steps`).
+        An instant selector evaluated at a step which a rollup step divides reads the column `samples_<step>`,
+        which keeps one sample per interval of the rollup step instead of one sample per scrape.
+        The same queries with `time_series_prefer_rollup_tables = 0` read the raw samples: they are the baseline
+        within one run, because a server without rollup columns can't create this table.
+        `rate()` reads a range selector, which always reads the raw samples: it is the control and must not move.
+    -->
+
+    <create_query>CREATE TABLE promql_rollup_ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m, 1h', recent_samples_ttl_seconds = 0</create_query>
+
+    <!-- 2000 series, one sample every 15 s over one day from 1000800 (a multiple of 1h): 5760 samples per series. -->
+    <fill_query>
+        INSERT INTO promql_rollup_ts (metric_name, tags, samples)
+        SELECT
+            'rollup_metric',
+            map('instance', toString(number), 'dc', toString(number % 8)),
+            arrayMap(step -> (toDateTime64(1000800 + step * 15, 3), (sipHash64(number, step) % 1000000) / 1000), range(5760))
+        FROM numbers_mt(2000)
+    </fill_query>
+
+    <!-- step 1h: samples_3600 against the raw samples -->
+    <query>SELECT * FROM prometheusQueryRange('promql_rollup_ts', 'sum(rollup_metric)', 1004400, 1087200, '1h') FORMAT Null</query>
+    <query>SELECT * FROM prometheusQueryRange('promql_rollup_ts', 'sum(rollup_metric)', 1004400, 1087200, '1h') SETTINGS time_series_prefer_rollup_tables = 0 FORMAT Null</query>
+
+    <!-- step 5m: samples_300 against the raw samples -->
+    <query>SELECT * FROM prometheusQueryRange('promql_rollup_ts', 'sum(rollup_metric)', 1004400, 1087200, '5m') FORMAT Null</query>
+    <query>SELECT * FROM prometheusQueryRange('promql_rollup_ts', 'sum(rollup_metric)', 1004400, 1087200, '5m') SETTINGS time_series_prefer_rollup_tables = 0 FORMAT Null</query>
+
+    <!-- control: a range selector reads the raw samples with or without rollups -->
+    <query>SELECT * FROM prometheusQueryRange('promql_rollup_ts', 'sum(rate(rollup_metric[5m]))', 1004400, 1087200, '1h') FORMAT Null</query>
+
+    <drop_query>DROP TABLE IF EXISTS promql_rollup_ts</drop_query>
+</test>
