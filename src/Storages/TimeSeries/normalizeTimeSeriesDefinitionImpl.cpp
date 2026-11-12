@@ -1640,10 +1640,12 @@ namespace
                 UNREACHABLE();
         }
 
-        /// The names `samples_<step>` of the samples table are the names of the rollup columns: a declared column under such a name
-        /// for a step which isn't in `samples_rollup_steps` would never be written. The generated rollup columns of the old table
-        /// of `CREATE TABLE ... AS` are removed before (see `removeGeneratedInnerColumns`).
-        if (inner_table_kind == ViewTarget::Samples)
+        /// From version MIN_WITH_ROLLUP_SAMPLES the names `samples_<step>` of the samples table are the names of the rollup columns:
+        /// a declared column under such a name for a step which isn't in `samples_rollup_steps` would never be written. The generated
+        /// rollup columns of the old table of `CREATE TABLE ... AS` are removed before (see `removeGeneratedInnerColumns`).
+        /// In tables of earlier versions such a name is an ordinary extra column.
+        if ((inner_table_kind == ViewTarget::Samples)
+            && (time_series_settings[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_ROLLUP_SAMPLES))
         {
             for (const auto & name_and_column : original)
             {
