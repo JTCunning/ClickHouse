@@ -44,9 +44,11 @@ std::vector<UInt64> parseTimeSeriesRollupSteps(std::string_view input)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid samples_rollup_steps: empty duration in '{}'", input);
         }
 
+        /// The duration is parsed in milliseconds, so that a duration which isn't a whole number of seconds (`1500ms`)
+        /// is rejected instead of being truncated.
         PrometheusQueryParsingUtil::DurationType duration{};
         String error;
-        if (!PrometheusQueryParsingUtil::tryParseDuration(token, /* duration_scale = */ 0, duration, &error)
+        if (!PrometheusQueryParsingUtil::tryParseDuration(token, /* duration_scale = */ 3, duration, &error)
             || (duration <= 0))
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS,
@@ -57,8 +59,9 @@ std::vector<UInt64> parseTimeSeriesRollupSteps(std::string_view input)
                 error);
         }
 
-        /// Whole seconds only: duration_scale 0 already rejects fractional input when parsing as seconds.
-        const UInt64 step_seconds = static_cast<UInt64>(duration.value);
+        if (duration.value % 1000 != 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid samples_rollup_steps: duration '{}' is not a whole number of seconds", token);
+        const UInt64 step_seconds = static_cast<UInt64>(duration.value / 1000);
         if (std::find(steps.begin(), steps.end(), step_seconds) != steps.end())
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid samples_rollup_steps: duplicate duration '{}'", token);
         steps.push_back(step_seconds);
