@@ -18,13 +18,36 @@ r, step 90s: no rollup step divides it	(1,0,0)	1	1
 r, step 5m, start not a multiple of the step	(1,0,0)	1	1
 r offset 30s, step 5m	(1,0,0)	1	1
 r offset 5m, step 5m	(0,0,1)	1	1
+r @ 3600, step 5m	(0,0,1)	1	1
+r @ 3607, step 5m	(1,0,0)	1	1
 sum(r), step 5m	(0,0,1)	1	1
 timestamp(r), step 5m	(0,0,1)	1	1
+timestamp(r offset 5m), step 5m	(0,0,1)	1	1
 max_over_time(r[30m:5m]), step 5m	(0,0,1)	1	1
 rate(r[5m]), step 5m	(1,0,0)	1	1
 max_over_time(r[10m]), step 5m	(1,0,0)	1	1
 count_over_time(r[10m]), step 5m	(1,0,0)	1	1
 last_over_time(r[10m]), step 5m	(1,0,0)	1	1
+instant query max_over_time(r[1h:5m]): the subquery has a step	(0,0,1)	1	1
+-- the inserts of other timestamp types: every row equals timeSeriesGroupArray(<step>)(samples), before and after the merges
+DateTime, Float64
+1	0	0
+1	0	0
+DateTime64(6), Float32
+1	0	0
+1	0	0
+DateTime64(3) before 1970
+1	0	0
+1	0	0
+DateTime64(9) in the last hour of its range
+1	0	0
+1	0	0
+-- CREATE TABLE ... AS a table with rollup columns: a copy keeps the rollup columns of its own steps only
+ts_rollup_copy_5m	12	0	1	1
+ts_rollup_copy_none	12	0	0	1
+ts_rollup_copy_v11	11	0	0	1
+ts_rollup_src	12	1	1	1
+1
 -- a rollup column is preferred to the recent samples table, which keeps every sample
 1	0
 0	1

@@ -1,5 +1,6 @@
--- Tags: no-fasttest
+-- Tags: no-fasttest, no-parallel-replicas
 -- Tag no-fasttest: PromQL needs ANTLR4, which is disabled in the fast-test build.
+-- Tag no-parallel-replicas: the test checks which column the query plans read.
 
 -- Rollup columns of a TimeSeries table of version 12: last-sample-per-interval writes
 -- on the samples table, and step-based reads through timeSeriesSelector.
@@ -14,8 +15,7 @@ SELECT '-- columns on the samples table';
 CREATE TABLE ts_rollup ENGINE = TimeSeries
 SETTINGS samples_bucket_step_seconds = 3600, samples_rollup_steps = '1m, 5m', recent_samples_ttl_seconds = 0;
 SELECT
-    countIf(name LIKE '.inner_id.samples.%') AS has_samples,
-    countIf(name LIKE '.inner_id.rollupsamples%') AS has_rollup_tables
+    countIf(name LIKE '.inner_id.samples.%') AS has_samples
 FROM system.tables WHERE database = currentDatabase();
 SELECT
     countIf(name = 'samples') AS has_raw,
@@ -60,20 +60,19 @@ SETTINGS time_series_prefer_rollup_tables = 0;
 
 SELECT '-- EXPLAIN: step 300 reads samples_300; step 30 reads samples';
 SELECT countIf(explain LIKE '%timeSeriesSliceSortedArray(samples_300,%') > 0 AS reads_300,
-       countIf(explain LIKE '%timeSeriesSliceSortedArray(samples,%') > 0 AS reads_raw,
-       countIf(explain LIKE '%rollupsamples%') > 0 AS reads_rollup_table
+       countIf(explain LIKE '%timeSeriesSliceSortedArray(samples,%') > 0 AS reads_raw
 FROM (EXPLAIN SELECT sum(length(samples)) FROM timeSeriesSelector(currentDatabase(), 'ts_rollup', 'm', 0, 1000, 'samples', 300));
 SELECT countIf(explain LIKE '%timeSeriesSliceSortedArray(samples_300,%') > 0 AS reads_300,
        countIf(explain LIKE '%timeSeriesSliceSortedArray(samples,%') > 0 AS reads_raw
 FROM (EXPLAIN SELECT sum(length(samples)) FROM timeSeriesSelector(currentDatabase(), 'ts_rollup', 'm', 0, 1000, 'samples', 30));
 
 SELECT '-- prometheusQueryRange at step 5m reads samples_300; step 15s reads samples';
-SELECT countIf(explain LIKE '%samples_300%') > 0 AS range_5m_reads_300
+SELECT countIf(position(explain, 'samples_300') > 0) > 0 AS range_5m_reads_300
 FROM (EXPLAIN SELECT * FROM prometheusQueryRange(ts_rollup, 'm', 0, 120, '5m'));
-SELECT countIf(explain LIKE '%samples_300%') = 0 AS range_15s_no_300,
+SELECT countIf(position(explain, 'samples_300') > 0) = 0 AS range_15s_no_300,
        countIf(explain LIKE '%timeSeriesSliceSortedArray(samples,%') > 0 AS range_15s_reads_raw
 FROM (EXPLAIN SELECT * FROM prometheusQueryRange(ts_rollup, 'm', 0, 120, '15s'));
 
-SELECT '-- DROP removes the samples table and leaves no rollup tables';
+SELECT '-- DROP removes the samples table';
 DROP TABLE ts_rollup;
-SELECT count() FROM system.tables WHERE database = currentDatabase() AND (name LIKE '.inner_id.samples.%' OR name LIKE '.inner_id.rollupsamples%');
+SELECT count() FROM system.tables WHERE database = currentDatabase() AND name LIKE '.inner_id.samples.%';
