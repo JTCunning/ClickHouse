@@ -172,15 +172,14 @@ public:
         /// The key of the rollup interval containing a timestamp. The intervals are closed on the right:
         /// `(k * step, (k + 1) * step]` has the key `k`, so a sample at a multiple of the step is the last sample of the
         /// interval which ends at it. Then for every time `t` which is a multiple of the step, the last sample at or before `t`
-        /// is the last sample of its interval and is kept. The division rounds towards -infinity (timestamps before 1970).
+        /// is the last sample of its interval and is kept. The key is `ceil(ts / step) - 1`, computed without an overflow
+        /// for any timestamp (the division truncates towards zero, so it is the ceiling unless the remainder is positive).
         static Int64 intervalKey(TimestampType ts, TimestampType step)
         {
-            const Int64 value = timestampToInt64(ts) - 1;
+            const Int64 value = timestampToInt64(ts);
             const Int64 step_i64 = timestampToInt64(step);
-            Int64 key = value / step_i64;
-            if (value % step_i64 < 0)
-                --key;
-            return key;
+            const Int64 quotient = value / step_i64;
+            return (value % step_i64 > 0) ? quotient : quotient - 1;
         }
 
         /// Collapses runs of equal timestamps (or of the same rollup interval when `step` is set)

@@ -35,9 +35,11 @@
 #include <Storages/TimeSeries/TimeSeriesIDGenerator.h>
 #include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <base/EnumReflection.h>
+#include <base/arithmeticOverflow.h>
 #include <base/sort.h>
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <string_view>
@@ -613,12 +615,11 @@ namespace
             size_t row_begin = (i == 0) ? 0 : sorted_offsets[i - 1];
             size_t row_end = sorted_offsets[i];
 
-            /// The samples are sorted, so the samples of one bucket are adjacent (the same rows as in makeSamplesBlock()).
+            /// The samples are sorted, so the samples of one bucket are adjacent: the rows are split as in makeSamplesBlock().
             size_t bucket_begin = row_begin;
             while (bucket_begin < row_end)
             {
-                const Int64 bucket_end
-                    = getBucket(toDecimal64(timestamps[sorted_indices[bucket_begin]]), bucket_step).value + bucket_step.value;
+                const Decimal64 bucket = getBucket(toDecimal64(timestamps[sorted_indices[bucket_begin]]), bucket_step);
 
                 for (auto & indices : kept_indices)
                     indices.clear();
@@ -628,7 +629,7 @@ namespace
                 {
                     const size_t index = sorted_indices[pos];
                     const Int64 timestamp = toDecimal64(timestamps[index]).value;
-                    if (timestamp >= bucket_end)
+                    if (getBucket(toDecimal64(timestamps[index]), bucket_step) != bucket)
                         break;
 
                     for (size_t step_index = 0; step_index < num_steps; ++step_index)
@@ -641,10 +642,15 @@ namespace
                         }
                         else
                         {
-                            /// The first sample of a new interval `(end - step, end]`.
+                            /// The first sample of a new interval `(end - step, end]`: `end` is the timestamp rounded up to a multiple
+                            /// of the step. It can be beyond the range of Int64 for the last interval, then every later timestamp is in it.
                             const Int64 step = rollup_steps[step_index].value;
+                            const Int64 remainder = timestamp % step;
+                            Int64 end = timestamp - remainder;
+                            if ((remainder > 0) && common::addOverflow(end, step, end))
+                                end = std::numeric_limits<Int64>::max();
                             indices.push_back(index);
-                            interval_ends[step_index] = DateLUTImpl::roundDownToMultiple(timestamp - 1, step) + step;
+                            interval_ends[step_index] = end;
                         }
                     }
                 }
