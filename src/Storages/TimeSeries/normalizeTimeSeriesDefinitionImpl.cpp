@@ -811,6 +811,11 @@ namespace
             old_settings.removeSettings({"samples_bucket_step_seconds", "samples_partition_by", "samples_index_granularity_bytes",
                                          "recent_samples_bucket_step_seconds", "recent_samples_index_granularity_bytes"});
 
+        /// The rollup columns exist from version MIN_WITH_ROLLUP_SAMPLES (see TimeSeriesVersion.h),
+        /// so `samples_rollup_steps` isn't copied into a table pinned to an earlier version.
+        if (new_version < TimeSeriesVersion::MIN_WITH_ROLLUP_SAMPLES)
+            old_settings.removeSetting("samples_rollup_steps");
+
         /// The default value of `recent_samples_ttl_seconds` is 345600 (4 days), so an absent setting doesn't disable the recent samples table.
         if (const auto * value = get_new_value("recent_samples_ttl_seconds"); value && (SettingFieldUInt64{*value}.value == 0))
             old_settings.removeSettings({"recent_samples_bucket_step_seconds", "recent_samples_partition_by",
@@ -1000,10 +1005,24 @@ namespace
 
                 if (settings.hasBucketedSamples())
                 {
+                    /// A rollup column `samples_<step>` is generated for every step of `samples_rollup_steps` of the samples table,
+                    /// with the type `SimpleAggregateFunction(timeSeriesGroupArray(<step>), ...)` and the codecs of the "samples" column.
+                    std::optional<UInt64> rollup_step;
+                    if ((inner_table_kind == ViewTarget::Samples) && isRollupSamplesColumnName(name))
+                    {
+                        for (UInt64 step : settings.getRollupStepsSeconds())
+                        {
+                            if (name == TimeSeriesColumnNames::rollupSamplesColumn(step))
+                                rollup_step = step;
+                        }
+                        if (!rollup_step || !isTimeSeriesGroupArraySimpleAggregate(type, rollup_step))
+                            return false;
+                    }
+
                     /// The generated "samples" column has no codec of its own, the codecs are declared for its elements
                     /// `timestamp` and `value` (see `normalizeInnerColumns`): the column is generated if it has no codecs at all
-                    /// or exactly the generated ones.
-                    if (name == TimeSeriesColumnNames::Samples)
+                    /// or exactly the generated ones. The same for a rollup column.
+                    if ((name == TimeSeriesColumnNames::Samples) || rollup_step)
                     {
                         auto [samples_timestamp_type, samples_value_type] = trySplitSamplesType(type, /* allow_unnamed_tuple = */ false);
                         if (!samples_timestamp_type || !samples_value_type || !is_timestamp_type(*samples_timestamp_type) || !is_value_type(*samples_value_type))
@@ -1621,9 +1640,21 @@ namespace
                 UNREACHABLE();
         }
 
-        /// A rollup column whose step is no longer in `samples_rollup_steps` is not an extra column.
+        /// The names `samples_<step>` of the samples table are the names of the rollup columns: a declared column under such a name
+        /// for a step which isn't in `samples_rollup_steps` would never be written. The generated rollup columns of the old table
+        /// of `CREATE TABLE ... AS` are removed before (see `removeGeneratedInnerColumns`).
         if (inner_table_kind == ViewTarget::Samples)
-            std::erase_if(original, [](const auto & name_and_column) { return isRollupSamplesColumnName(name_and_column.first); });
+        {
+            for (const auto & name_and_column : original)
+            {
+                const String & name = name_and_column.first;
+                if (isRollupSamplesColumnName(name))
+                    throw Exception(ErrorCodes::INCORRECT_QUERY,
+                        "{}: Column {} of the inner samples table is named as a rollup column, but its step is not in the setting "
+                        "samples_rollup_steps = '{}'",
+                        table_id.getNameForLogs(), name, formatTimeSeriesRollupSteps(time_series_settings.getRollupStepsSeconds()));
+            }
+        }
 
         /// Copy all remaining original columns at the end (user-defined extra columns).
         for (auto & [name, col] : original)
