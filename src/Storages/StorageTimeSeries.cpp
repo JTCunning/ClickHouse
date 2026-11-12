@@ -1153,12 +1153,13 @@ A query with a step reads the rollup column with the largest step which divides 
 when the query-level setting `time_series_prefer_rollup_tables` is enabled (it is enabled by default).
 The query step is the step of the [prometheusQueryRange](/reference/functions/table-functions/prometheusQueryRange) table function or of a subquery,
 or the optional last argument `step` of the [timeSeriesSelector](/reference/functions/table-functions/timeSeriesSelector) table function.
-A rollup column is preferred to the [recent samples](#recent-samples-table) table, because it keeps fewer samples per row.
+A rollup column is preferred to the [recent samples](#recent-samples-table) table: when its step is larger than the scrape interval, it keeps fewer samples per row.
 
 PromQL reads a rollup column only for an instant selector whose evaluation times are multiples of the step, that is, when the start time is a multiple of the step.
 An instant selector uses the last sample at or before every evaluation time, so its result is the same as with the raw samples.
+This includes an instant selector inside a subquery, for example `max_over_time(cpu_usage[1h:5m])`, which is evaluated at multiples of the subquery step.
 A range selector, for example in `rate(http_requests_total[5m])` or `max_over_time(cpu_usage[1h])`, uses every sample of its window and always reads the raw `samples` column.
-So do instant queries, which have the step 0, and queries with `time_series_prefer_rollup_tables` disabled.
+So does an instant selector of an instant query outside a subquery, and every query with `time_series_prefer_rollup_tables` disabled.
 
 ### Tags table {#tags-table}
 
