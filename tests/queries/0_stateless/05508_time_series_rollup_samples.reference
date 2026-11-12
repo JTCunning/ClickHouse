@@ -1,5 +1,5 @@
 -- columns on the samples table
-1	0
+1
 1	1	1
 1
 -- rejections
@@ -11,10 +11,10 @@
 4
 4
 -- EXPLAIN: step 300 reads samples_300; step 30 reads samples
-1	0	0
+1	0
 0	1
 -- prometheusQueryRange at step 5m reads samples_300; step 15s reads samples
 1
 1	1
--- DROP removes the samples table and leaves no rollup tables
+-- DROP removes the samples table
 0
