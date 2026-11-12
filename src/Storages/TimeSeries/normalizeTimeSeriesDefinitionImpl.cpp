@@ -1653,7 +1653,7 @@ namespace
                 if (isRollupSamplesColumnName(name))
                     throw Exception(ErrorCodes::INCORRECT_QUERY,
                         "{}: Column {} of the inner samples table is named as a rollup column, but its step is not in the setting "
-                        "samples_rollup_steps = '{}'",
+                        "samples_rollup_steps = '{}'. Rename the column, or keep it as an extra column in a table of version 11 or earlier",
                         table_id.getNameForLogs(), name, formatTimeSeriesRollupSteps(time_series_settings.getRollupStepsSeconds()));
             }
         }
