@@ -1295,6 +1295,10 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RollupSamplesSettingsAndDeclarations)
         }),
         ErrorCodes::INCORRECT_QUERY);
 
+    /// In tables of earlier versions there are no rollup columns, and such a name is an ordinary extra column.
+    auto definition = normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS version = 11 SAMPLES INNER COLUMNS (samples_5 UInt8)");
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples_5` UInt8")) << definition;
+
     /// The raw samples column has no parameter.
     EXPECT_EQ(getExceptionCode([]
         {
