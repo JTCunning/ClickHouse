@@ -10,6 +10,7 @@ These are fix branches that lil red can't build itself. James builds and A/B tes
 | 4 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | needs-work | `lilred-perf-grid-gap-wraparound` | #10 | run 2: gap slowdown gone in every arrival order; no memory growth on sparse or every-2nd-minute series |
 | 5 | [alp-search-early-exit](../prs/alp-search-early-exit.md) | ready-to-build | `lilred-perf-alp-search-early-exit` | #11 | run 2: same bytes; decimal-like values −38–93% encode CPU, full-precision and random doubles −1–9%, nothing slower (clang harness) |
 | 6 | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | ready-to-build | `lilred-perf-parallel-statistics-probe` | #15 | cold query on `s3` (50 ms/GET) 3.2 s → ~2.6 s (emulated): the statistics probe loads the parts' primary indexes in parallel; warm unchanged |
+| 7 | [rollup-samples](../prs/rollup-samples.md) | ready-to-build | `lilred-perf-rollup-samples` | #16 | instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h) |
 
 ## How an item moves
 

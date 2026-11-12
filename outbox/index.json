@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-11T12:04:15Z",
+  "updated": "2026-11-12T00:31:50Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -215,6 +215,46 @@
       "claim": "Cold reads on a remote disk: the statistics probe of #126627 loads the primary indexes of the parts in parallel instead of one after another. Lab (bench/tags-in-subquery-cold, S3 mock at 50 ms per GET, max_threads 16): the cold PromQL range query 3,204 ms -> about 2,600 ms (emulated 2,540 ms + one round trip); the 13 samples-part index loads go from a 617 ms serial span to one wave. Warm (98 ms), post-prewarm and use_primary_key_cache = 1 warm (103 ms) reads unchanged: the serial path.",
       "pass_if": "05620 passes on B (and under TSan if a sanitizer build is at hand); 05407, 02864, 03788, 04266 pass on B. Lab T1 (cold, 50 ms per GET) at least 15% faster than A and significant at 99.5%, with the recentsamples primary-index GET span at most 2 round trips on B; G1 (post-prewarm), G2 (warm), G3 (warm with use_primary_key_cache = 1) and E1 (local-disk cold start) not significantly slower; the guard perf XMLs not significantly slower.",
       "notes": "The A/B is the S3-mock lab in bench/tags-in-subquery-cold (README there), not an in-tree perf XML: CI perf tests run warm and on local disk, so they can only show 'nothing slower'. Run it on a host with at least 8 vCPU so the Python mock does not queue requests. Generic MergeTree code (MergeTreeDataSelectExecutor, IMergeTreeDataPart), not the TimeSeries engine: category Not for changelog while #126627 (merged 2026-11-07, 26.11.1.1600) is unreleased; if 26.11 is cut with #126627 first, switch to Performance Improvement (suggested entry in prs/). The natural reviewer is the author of #126627. Preflight: 3 rounds; code Approve-ready, the remaining ask is the build numbers."
+    },
+    {
+      "slug": "rollup-samples",
+      "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
+      "status": "ready-to-build",
+      "priority": 7,
+      "branch": "lilred-perf-rollup-samples",
+      "head": "6a1d8e48fae555231bf29e5571f0d0b4cb696eb3",
+      "base": "57ca89d382d260477e43c979acab0b66ef76b3d4",
+      "issue": 16,
+      "pr_text": "prs/rollup-samples.md",
+      "report": "reports/2026-11-11-rollup-samples.md",
+      "ab_plan": "ab-plans/rollup-samples.md",
+      "tests": {
+        "stateless": [
+          "05508_time_series_rollup_samples",
+          "05621_time_series_rollup_samples_exact"
+        ],
+        "integration": [],
+        "gtest_filter": "NormalizeTimeSeriesDefinitionTest.*",
+        "also_run": [
+          "04612_timeseries_version_setting",
+          "05140_time_series_bucketed_samples_table",
+          "04811_promql_topk_bottomk_limitk",
+          "04131_prometheus_query_parser",
+          "04337_prometheus_query_nan_timestamp"
+        ]
+      },
+      "perf_tests": [
+        "tests/performance/promql_range_rollup_samples.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/timeseries_to_grid_aggregation_functions.xml",
+        "tests/performance/timeseries_to_grid_deserialization.xml",
+        "tests/performance/promql_selector_pk_range.xml",
+        "tests/performance/timeseries_to_grid_bucketing.xml"
+      ],
+      "claim": "An instant selector of a PromQL range query evaluated at a step that a rollup step divides reads samples_<step> with a result identical to the raw samples. Emulated on 2 vCPU (1000 series x 7 days, 15 s scrapes): selector grid at 1h ~29x faster, 5m ~5x, 1m ~2x; columns 25% / 5.3% / 0.45% of the raw samples bytes for 1m / 5m / 1h. Range functions read raw and don't change. Fixed against daa5327: left-closed intervals returned the previous scrape at every evaluation time on exact 15 s scrapes.",
+      "pass_if": "05508, 05621, the gtests NormalizeTimeSeriesDefinitionTest.* (ENABLE_TESTS=ON) and the also_run tests pass on B. bench/rollup-samples/ab/run.sh <B> <A> <dir> (the A/B is this harness, not perf.py): equality.tsv has series_differ 0 everywhere; selector at 5m and 1h (1d/7d/30d) >= 2x faster at p50 with >= 4x fewer read_bytes; at 1m >= 1.25x and >= 2x; no guard (range functions, 15s, raw vs master) more than 5% slower; ab_rollup ('1m, 5m, 1h') insert <= 1.25x ab_plain, small inserts <= 1.2x, samples storage <= 1.35x; ab_rollup_coarse ('5m, 1h') <= 1.1x and <= 1.1x; ab_plain on B within 5% of A. Second run SHAPE=aligned DAYS=7: equality still 0. Edge run SCRAPE=60 STEPS='1m' DAYS=7: selector_1d_1m not slower than 0.95x.",
+      "notes": "The branch is James's jtcunning/timeseries-rollup-samples @ daa5327 plus 12 commits; base = its merge base, and it merges cleanly into master e8473460558a. Build A at the base (same base as B), plus master for the insert-cost arm if wanted. The perf XML can't run on A (master has no samples_rollup_steps): at submission add do_not_check_in_pr=\"<PR number>\" to its <create_query> and <fill_query> (perf.py needs the number). James decides: (1) rate-type functions over rollups: A keep exact-only (recommended), B a richer column type later, C approximate behind a setting; the harness's probe.tsv measures their error and speed. (2) rename time_series_prefer_rollup_tables to ..._columns (unreleased, cheap). (3) ALTER MODIFY SETTING / backfill: a route via DEFAULT arrayReduce + MATERIALIZE COLUMN is in the report, not built. (4) #128889 (samples_downsampling_periods) uses toStartOfInterval, the left-closed convention this branch fixed for rollups. The .mdx pages were reverted to the base: the docs live only in the C++ doc strings (generated regions are read-only for the review bot). Preflight: 3 rounds; R1 4 Majors fixed, R2 1 Major fixed, R3 no code findings (the remaining asks are the build, the A/B numbers and do_not_check_in_pr)."
     }
   ]
 }
