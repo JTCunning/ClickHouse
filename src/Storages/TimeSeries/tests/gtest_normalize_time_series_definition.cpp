@@ -138,7 +138,7 @@ namespace
     String extractInnerEngine(const String & definition, const String & target)
     {
         static const std::vector<String> target_clauses
-            = {" SAMPLES INNER ", " RECENT SAMPLES INNER ", " ROLLUP SAMPLES ", " TAGS INNER ", " TIME RANGES INNER ", " METRIC FAMILIES INNER ", " METRICS INNER "};
+            = {" SAMPLES INNER ", " RECENT SAMPLES INNER ", " TAGS INNER ", " TIME RANGES INNER ", " METRIC FAMILIES INNER ", " METRICS INNER "};
 
         String prefix = target + " INNER ENGINE = ";
         size_t start = definition.find(prefix);
@@ -1287,6 +1287,14 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RollupSamplesSettingsAndDeclarations)
         }),
         ErrorCodes::BAD_TYPE_OF_FIELD);
 
+    /// A declared column under the name of a rollup column of another step would never be written.
+    EXPECT_EQ(getExceptionCode([]
+        {
+            normalizeNewTable("CREATE TABLE db.ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1m' "
+                "SAMPLES INNER COLUMNS (samples_300 SimpleAggregateFunction(timeSeriesGroupArray(300), Array(Tuple(timestamp DateTime64(3), value Float64))))");
+        }),
+        ErrorCodes::INCORRECT_QUERY);
+
     /// The raw samples column has no parameter.
     EXPECT_EQ(getExceptionCode([]
         {
@@ -1311,14 +1319,22 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, CreateAsCopiesRollupSamples)
     /// A step which the query drops has no column.
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m'", source);
     EXPECT_TRUE(definition.contains("samples_rollup_steps = '300'")) << definition;
-    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("`samples_60`")) << definition;
+    /// Neither the column nor the codecs of its elements (`samples_60.timestamp`) are copied.
+    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("samples_60")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains("`samples_300`")) << definition;
+    EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8")) << definition;
+
+    /// No rollup steps: no rollup columns.
+    definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries SETTINGS samples_rollup_steps = ''", source);
+    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("samples_60")) << definition;
+    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("samples_300")) << definition;
     EXPECT_TRUE(extractInnerColumns(definition, "SAMPLES").contains(", `extra` UInt8")) << definition;
 
     /// A copy pinned to a version without rollups doesn't copy the setting.
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries SETTINGS version = 11", source);
     EXPECT_FALSE(definition.contains("samples_rollup_steps")) << definition;
     EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("samples_60")) << definition;
+    EXPECT_FALSE(extractInnerColumns(definition, "SAMPLES").contains("samples_300")) << definition;
 
     definition = normalizeNewTableAs("CREATE TABLE db.copy AS db.src ENGINE = TimeSeries", normalizeNewTable("CREATE TABLE db.src ENGINE = TimeSeries"));
     EXPECT_FALSE(definition.contains("samples_60")) << definition;
