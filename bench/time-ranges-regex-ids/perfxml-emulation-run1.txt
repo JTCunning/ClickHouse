@@ -1,0 +1,4 @@
+regex A (master SQL)             median   192 ms  min   182  max   221  read_rows    420992  mem    64.5 MiB  result 2000000
+regex B (+ id IN set)            median   222 ms  min   217  max   247  read_rows    527488  mem    73.5 MiB  result 2000000
+regex, table function            median   196 ms  min   189  max   269  read_rows    420992  mem    65.7 MiB  result 2000000
+100-name list, table function    median   259 ms  min   246  max   316  read_rows    420992  mem    73.5 MiB  result 2000000

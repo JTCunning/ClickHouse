@@ -1,0 +1,117 @@
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 0, "wall_s": 0.22390241799803334, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 0, "wall_s": 0.06144156099981046, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 1, "wall_s": 0.05547955500151147, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 1, "wall_s": 0.2083568549969641, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 2, "wall_s": 0.21090676599851577, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 2, "wall_s": 0.05335908900087816, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 3, "wall_s": 0.0522085970005719, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 3, "wall_s": 0.2028819539991673, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 4, "wall_s": 0.21391470600065077, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 4, "wall_s": 0.05646334799894248, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 5, "wall_s": 0.05188014099985594, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 5, "wall_s": 0.2058894820002024, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "regex", "round": 6, "wall_s": 0.20815944000059972, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 6, "wall_s": 0.05683755599966389, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 0, "wall_s": 0.21532019900041632, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 0, "wall_s": 0.06393069899786497, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 1, "wall_s": 0.08795183600159362, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 1, "wall_s": 0.21702074600034393, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 2, "wall_s": 0.218946777000383, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 2, "wall_s": 0.057512833998771384, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 3, "wall_s": 0.06451615499827312, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 3, "wall_s": 0.21271110599991516, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 4, "wall_s": 0.2134844529973634, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 4, "wall_s": 0.06505845399806276, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 5, "wall_s": 0.06157749699923443, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 5, "wall_s": 0.21653015199990477, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "regex", "round": 6, "wall_s": 0.2086951350029267, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "series", "variant": "resolved", "round": 6, "wall_s": 0.059212956999544986, "n": 15000, "hash": -6692233038504853985, "names": 4}
+{"case": ".*cpu.* (4 names, 15k series in window)", "endpoint": "resolve", "variant": "resolve", "wall_s_list": [0.008765048998611746, 0.008940357001847588, 0.008249040001828689, 0.008270431000710232, 0.0076933309974265285, 0.007131373000447638, 0.007809856000676518], "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 0, "wall_s": 0.1843047900001693, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 0, "wall_s": 0.029472785001416923, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 1, "wall_s": 0.029447445998812327, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 1, "wall_s": 0.2003339139992022, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 2, "wall_s": 0.18498947499756468, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 2, "wall_s": 0.024325946000317344, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 3, "wall_s": 0.023551702000986552, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 3, "wall_s": 0.18303656799980672, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 4, "wall_s": 0.18321885700061102, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 4, "wall_s": 0.02460715000052005, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 5, "wall_s": 0.02220893400226487, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 5, "wall_s": 0.18359847700048704, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 6, "wall_s": 0.18464847699942766, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 6, "wall_s": 0.02448047199868597, "n": 3, "hash": -396807238455410459, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 0, "wall_s": 0.18295333700007177, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 0, "wall_s": 0.02282234599988442, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 1, "wall_s": 0.023578006999741774, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 1, "wall_s": 0.18289625300167245, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 2, "wall_s": 0.19622563499797252, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 2, "wall_s": 0.023926339999889024, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 3, "wall_s": 0.0226163320003252, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 3, "wall_s": 0.19210164600008284, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 4, "wall_s": 0.18788060000224505, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 4, "wall_s": 0.025354741999763064, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 5, "wall_s": 0.022581036999326898, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 5, "wall_s": 0.18409416299982695, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "regex", "round": 6, "wall_s": 0.1873529439981212, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "series", "variant": "resolved", "round": 6, "wall_s": 0.025379055998200784, "n": 30, "hash": 6890733573244953858, "names": 4}
+{"case": ".*cpu.* + instance=host-1 (30 series)", "endpoint": "resolve", "variant": "resolve", "wall_s_list": [0.008287996999570169, 0.008951993000664515, 0.008349424999323674, 0.00780230400050641, 0.008329486001457553, 0.008648839997476898, 0.012115744000766426], "names": 4}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 0, "wall_s": 0.20400092099953326, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 0, "wall_s": 0.040665871998498915, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 1, "wall_s": 0.03802371699930518, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 1, "wall_s": 0.2038068630026828, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 2, "wall_s": 0.20081597700118436, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 2, "wall_s": 0.037990759999956936, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 3, "wall_s": 0.040165487000194844, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 3, "wall_s": 0.21195615900069242, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 4, "wall_s": 0.20169497300230432, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 4, "wall_s": 0.039358927999273874, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 5, "wall_s": 0.03902430599919171, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 5, "wall_s": 0.20543841800099472, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "regex", "round": 6, "wall_s": 0.2012959050007339, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 6, "wall_s": 0.038265610000962624, "n": 2, "hash": -558674572183127438, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 0, "wall_s": 0.2124763259998872, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 0, "wall_s": 0.04736449199845083, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 1, "wall_s": 0.04112134900060482, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 1, "wall_s": 0.21127430900014588, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 2, "wall_s": 0.2232541180019325, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 2, "wall_s": 0.044002754002576694, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 3, "wall_s": 0.04643863999808673, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 3, "wall_s": 0.21189858299840125, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 4, "wall_s": 0.20668442800160847, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 4, "wall_s": 0.04228357399915694, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 5, "wall_s": 0.04497265999816591, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 5, "wall_s": 0.21468030699907104, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "regex", "round": 6, "wall_s": 0.21456142800161615, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "series", "variant": "resolved", "round": 6, "wall_s": 0.04248552400167682, "n": 10000, "hash": 5658197735094368681, "names": 2}
+{"case": "node_cpu.*|process_cpu.* (2 names, 10k)", "endpoint": "resolve", "variant": "resolve", "wall_s_list": [0.010661400003300514, 0.009538175003399374, 0.009185074999550125, 0.009416221000719815, 0.008550115999241825, 0.007990050999069354, 0.009221806001733057], "names": 2}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 0, "wall_s": 1.3923544059980486, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 0, "wall_s": 1.4052071120022447, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 1, "wall_s": 1.4106866900001478, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 1, "wall_s": 1.374655392999557, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 2, "wall_s": 1.5185591890003707, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 2, "wall_s": 1.427543728001183, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 3, "wall_s": 1.493406090001372, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 3, "wall_s": 1.3972964710010274, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 4, "wall_s": 1.423449644997163, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 4, "wall_s": 1.5838450039991585, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 5, "wall_s": 1.5095436470001005, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 5, "wall_s": 1.3766141119995154, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 6, "wall_s": 1.376722274999338, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 6, "wall_s": 1.5280524629997672, "n": 110, "hash": -3801651018095625444, "names": 110}
+{"case": "metric_1.* (110 names, 550k series)", "endpoint": "resolve", "variant": "resolve", "wall_s_list": [0.019398610002099304, 0.011682759002724197, 0.014748608999070711, 0.01390323499799706, 0.012305507996643428, 0.012130061000789283, 0.012795877999451477], "names": 110}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 0, "wall_s": 4.963739766000799, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 0, "wall_s": 5.742660878000606, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 1, "wall_s": 5.64332182599901, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 1, "wall_s": 4.831938142000581, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 2, "wall_s": 5.220855547002429, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 2, "wall_s": 5.356673385998874, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 3, "wall_s": 5.2582365999987815, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 3, "wall_s": 4.998559138999553, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 4, "wall_s": 4.762097434999305, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 4, "wall_s": 5.329498561000946, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 5, "wall_s": 5.1986624720011605, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 5, "wall_s": 4.945043594001618, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "regex", "round": 6, "wall_s": 5.0333775429971865, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "label/__name__/values", "variant": "resolved", "round": 6, "wall_s": 5.42764719799743, "n": 400, "hash": 3823602184015546059, "names": 419}
+{"case": ".+ (419 names, every series)", "endpoint": "resolve", "variant": "resolve", "wall_s_list": [0.02081636500224704, 0.01653695200002403, 0.01510319700173568, 0.020912551000947133, 0.016116599999804748, 0.017581203999725403, 0.01745089299947722], "names": 419}

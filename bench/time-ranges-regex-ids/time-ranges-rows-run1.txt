@@ -1,0 +1,5 @@
+regex, master (time filter only)                 read_rows   2100000  count 2000000
+regex, id set                                    read_rows   2165536  count 15000
+the id set's tags read alone                     read_rows   2100000  count 25000
+literal list of the 4 names (master id ranges)   read_rows     65536  count 15000
+time ranges rows read with the id set                65536
