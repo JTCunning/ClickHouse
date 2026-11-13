@@ -1,8 +1,8 @@
-# [unbuilt] Stop evaluating an `ALP` parameter pair once it cannot beat the best one
+# Stop evaluating an `ALP` parameter pair once it cannot beat the best one
 
-Branch: `lilred-perf-alp-search-early-exit` @ `d6f173c6e3d3` (base `c189bd99fbda`, merges cleanly with master `2f701ba6d627`) · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-alp-search-early-exit
+Branch: `lilred-perf-alp-search-early-exit` @ `d6f173c6e3d3` (base `c189bd99fbda`, merges cleanly with master `2b1bef1d3b52`) · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-alp-search-early-exit
 
-<!-- upstream:start (the PR body is everything between these markers; the title is the heading above without [unbuilt]) -->
+<!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->
 Related: https://github.com/ClickHouse/ClickHouse/pull/120454
 Related: https://github.com/ClickHouse/ClickHouse/pull/129732
 
@@ -10,7 +10,7 @@ Related: https://github.com/ClickHouse/ClickHouse/pull/129732
 - Performance Improvement
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
-The `ALP` codec finds its encoding parameters with less work and the same result, so the compressed data does not change. Encoding decimal-like values (counters, gauges, prices) needs much less CPU, most of all in small compressed blocks, such as the compact parts of small `INSERT`s.
+The `ALP` codec finds its encoding parameters with less work and the same result, so the compressed data does not change. Encoding decimal-like values (counters, gauges, prices) needs much less CPU, most of all in small compressed blocks: an `INSERT` of 2 million values rounded to 3 decimals into a table with 256-row granules is 2.2 times faster.
 
 ### Description
 
@@ -18,22 +18,25 @@ The `ALP` codec finds its encoding parameters with less work and the same result
 
 Now the search stops scoring a pair as soon as it cannot win. The score, `values × bit-width of the encoded range + exceptions × 80 bits`, only grows as values are added, and only a strictly smaller score replaces the best, so a pair that is cut could never have been chosen. Each sample starts from the score of the previous sample's best pair plus one, so pairs are cut from the first one on and the first pair with the smallest score still wins. The cut-off runs only while the best score is under `RD_SIZE_THRESHOLD_LIMIT` (48 bits per value, where `AUTO` switches to `RD`): above it a pair is cut late or never, and the check per value would only make the vectorized scoring loop scalar. Unchanged: the chosen pairs, the `AUTO` choice, the bytes, `selectBlockParams`.
 
-Release build, AMD EPYC 9R14, two servers on 16 pinned cores, `perf.py` 13 runs, base c189bd99fbda:
+Release build (clang 21), AMD EPYC 9R14, master `c189bd99fbda` and this PR on one host, two servers pinned to 16 cores, `perf.py` 13 runs per query:
 
-| case | master | this PR |
-|---|---|---|
-| `codecs_float_alp_small_blocks` `rtn` (2M rows, 256-row granules) | 0.859 s | pending build |
-| same, `rnd` | 0.902 s | pending build |
-| `codecs_float_insert` `ALP` `rtn` / `seq` / `mon` / `rnd` | 0.656 / 0.447 / 0.708 / 0.556 s | pending build |
+| case | master | this PR | change |
+|---|---|---|---|
+| `codecs_float_alp_small_blocks` `rtn` (2M values rounded to 3 decimals, 256-row granules) | 0.858 s | 0.389 s | −54.6% |
+| same, `rnd` (random doubles) | 0.899 s | 0.895 s | −0.4%, not significant |
+| `codecs_float_insert` `ALP` `rtn` | 0.656 s | 0.591 s | −9.9% |
+| `codecs_float_insert` `ALP` `seq` / `mon` / `rnd` | 0.422 / 0.683 / 0.557 s | 0.414 / 0.681 / 0.551 s | −1.9% / −0.3% / −1.0%, not significant |
 
-Controls: the other codecs of `codecs_float_insert` run no changed code (pending build). The encoder alone, both versions built with clang 20 at the build's flags, 1M values per case: `Float64` decimal-like data −38% to −93% CPU, full-precision and random doubles −1% to −9%; `Float32` −6% to −88%; nothing slower.
+Controls: the 24 rows of the other codecs in `codecs_float_insert` run no changed code and moved −7.6% to +6.4% (20 of them not significantly), which is the noise of this pair of builds; no `ALP` row is slower. Random doubles score above `RD_SIZE_THRESHOLD_LIMIT`, so they keep master's loop and their time does not change. The encoder alone, both versions built with clang 20 at the build's flags, 1M values per case: `Float64` decimal-like data −38% to −93% CPU, full-precision doubles −1% to −9%, `Float32` −6% to −88%; nothing slower.
 
-The bytes are identical to master in all 76 encoder cases (17 data sets in 256- and 8,192-value blocks and the 4 `codecs_float_insert` sequences, both types) and in 300,000 random blocks with NaN, ±inf, −0, subnormals and values near the `Int64` limits. `05480_alp_codec_small_compress_blocks` pins a round trip and four compressed sizes that master also prints: a cut at half the limit changes all four, counting 64 bits before any value encodes changes the NaN one (167,720 → 202,600 bytes), and starting without the `+ 1` changes the shared-pair one (216,123 → 205,883). New perf test, because no existing file has a 256-row compact table.
+The bytes are identical to master in all 76 encoder cases (17 data sets in 256- and 8,192-value blocks and the 4 `codecs_float_insert` sequences, both types) and in 300,000 random blocks with NaN, ±inf, −0, subnormals and values near the `Int64` limits. `05480_alp_codec_small_compress_blocks` pins a round trip and four compressed sizes and passes on master and on this PR: a cut at half the limit changes all four, counting 64 bits before any value encodes changes the NaN one (167,720 → 202,600 bytes), and starting without the `+ 1` changes the shared-pair one (216,123 → 205,883). `04612_alp_codec_float32_decimal_ratio` and `05054_adaptive_codec_float_alp` pass. New perf test, because no existing file has a 256-row compact table.
 
 `ALP` became GA in #129732; its owners should review (earlier search work: #109533, #122248).
 <!-- upstream:end -->
 
-<details><summary>Run 1, harness tables, A/B commands and self-review (not for upstream)</summary>
+<details><summary>Run 1 and 2, harness tables, A/B method and self-review (not for upstream)</summary>
+
+**Run 2 (head `d6f173c6e3d3`, James's A/B 2026-11-10, EPYC 9R14, clang 21 release, perf.py 13 runs): pass** (https://github.com/JTCunning/ClickHouse/issues/11#issuecomment-6774261119). Every `pass_if` line holds: 05480 passes on A and B with the four pinned sizes; 04612 and 05054 pass on B; small-block `rtn` −54.6% (prediction about −45%), `rnd` −0.4% (n.s.); `codecs_float_insert` `ALP` `rtn` −9.9%, `seq` −1.9%, `mon` −0.3%, `rnd` −1.0% (n.s.); slowest unchanged codec `FPC` `rtn` +6.4%, fastest `ZSTD` `rnd` −7.6%. Not run: 05480 on a debug or sanitizer build (the `chassert`; upstream CI covers it), and the plan's older cases (500-part bench, `SELECT` guard, edge `INSERT`s, part checksums), which run 2's plan section did not ask for.
 
 **Run 1 (head `d4c58e0009b4`, James's A/B 2026-11-10, EPYC 9R14, clang 21 release, perf.py 13 runs): fail.** Small blocks were faster (`rtn` 0.859 → 0.579 s, −32.6%; `rnd` 0.902 → 0.755 s, −16.2%), but two `codecs_float_insert` `ALP` rows were significantly slower: `mon` 0.708 → 0.781 s (+10.2%), `seq` 0.447 → 0.465 s (+4.0%); `rnd` −9.1%, `rtn` −6.5%. Unchanged codecs moved −17.1% to +6.2% in the same run (binary/order effect).
 
@@ -68,7 +71,7 @@ The bytes are identical to master in all 76 encoder cases (17 data sets in 256- 
 
 Price of the gate: random doubles (`rnd`) sit above the line, so they keep master's loop; the run-1 small-block `rnd` gain (−16% end to end) shrinks to about −2%.
 
-**Commands for the branch column:**
+**A/B method (run 2):** `perf.py` from the branch's tree against two servers on one host, pinned to cores 0-15, 13 runs per query. A = run 1's master binary (`c189bd99fbda`, `GIT_HASH` checked), B = a new build of `d6f173c6e3d3` (`GIT_HASH` checked).
 
 ```bash
 tests/performance/scripts/perf.py --runs 13 tests/performance/codecs_float_alp_small_blocks.xml
@@ -83,6 +86,7 @@ tests/performance/scripts/perf.py --runs 13 tests/performance/codecs_float_inser
   - Nit: add `chassert(occurred_times == 1)`. Done.
   - Nit: "TimeSeries 256-row granules" overstated the effect, because merged parts hold full buckets. The changelog and the perf-test comment now say that a part from one remote-write request holds about one sample per row (`TimeSeriesSink.cpp:460-517`, confirmed in round 2).
   - The changelog's "up to 70%" had no end-to-end source and is removed until run 2.
-- 2026-11-10, round 2 (`ded70dddecf1`): ⚠️ Request changes, only because the numbers are still pending. One Nit: the NaN comment said the search must not cut pairs before a value encodes, but it does, by their exceptions alone. Reworded in `d6f173c6e3d3`, a comment-only change, so no third round. After run 2: fill in the branch column and the controls, put T1's number into the changelog entry, and drop `[unbuilt]`.
+- 2026-11-10, round 2 (`ded70dddecf1`): ⚠️ Request changes, only because the numbers are still pending. One Nit: the NaN comment said the search must not cut pairs before a value encodes, but it does, by their exceptions alone. Reworded in `d6f173c6e3d3`, a comment-only change, so no third round. After run 2 (2026-11-13): branch column, controls and T1's number in the changelog entry filled in, `[unbuilt]` dropped.
+- 2026-11-13, round 3 (final text and the diff at `d6f173c6e3d3`, review prompt at master `d09276d883d5`, which adds the Preconditions gate and puts unchanged code the inputs reach in scope): ✅ Approve. The reviewer re-derived the exact equivalence by hand (the start is above the best size, a cut pair can never win, the first best pair is never cut), checked the memory-safety preconditions (sample buffers of at most 32 values, exponent/fraction indexes under 19 from every producer, the `chassert` safe even if violated) and the unchanged encoders and decoders the inputs reach: no finding. One optional Nit, not taken: 05480 pins sizes only for `Float64`; a `Float32` size pin would cover the 55-pair search's own constants. The proof does not depend on them, and a test change would need another build, so it stays out unless a reviewer asks.
 - The obsolete `enable_alp_codec` (a no-op on master since #129732) stays in 05480 and the perf XML, because the base still needs it.
 </details>

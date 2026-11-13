@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-13T21:22:18Z",
+  "updated": "2026-11-13T23:10:51Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -155,8 +155,8 @@
     {
       "slug": "alp-search-early-exit",
       "title": "Stop evaluating an ALP parameter pair once it cannot beat the best one",
-      "summary": "run 2 (your build, verdict pass): small-block rtn −54.6%, codecs_float_insert ALP rtn −9.9%, small-block rnd not slower",
-      "status": "results-in",
+      "summary": "run 2 passed: small-block INSERT of decimal-like values 2.2x faster (-54.6%), codecs_float_insert ALP rtn -9.9%, nothing slower; same bytes",
+      "status": "ready-to-submit",
       "priority": 5,
       "branch": "lilred-perf-alp-search-early-exit",
       "head": "d6f173c6e3d3228867a5815d441e561fc572a94a",
