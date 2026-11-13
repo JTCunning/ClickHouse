@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-13 21:21 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-13 21:22 UTC.
 
 ## For you, in order
 
@@ -10,15 +10,16 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 |---|---|---|---|---|
 | 1 | **Decide** | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | [#10](https://github.com/JTCunning/ClickHouse/issues/10) | Park this branch and treat upstream 124777 (dense array) as the fix for 125759 (A, lil red recommends), or one more iteration (8-cell run check, displaced-key fix), then run 3 (B)? Answer on #10. |
 | 2 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rate-type functions over rollups: keep exact-only (A, lil red recommends), a richer column type later (B), or approximate behind a setting (C)? And rename `time_series_prefer_rollup_tables` to `..._columns`? Answer on #16; neither blocks the build. |
-| 3 | **Build and A/B**: `ab alp-search-early-exit` | [alp-search-early-exit](../prs/alp-search-early-exit.md) | [#11](https://github.com/JTCunning/ClickHouse/issues/11) | run 2: same bytes; decimal-like values −38–93% encode CPU, full-precision and random doubles −1–9%, nothing slower (clang harness) |
-| 4 | **Build and A/B**: `ab parallel-statistics-probe` | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | [#15](https://github.com/JTCunning/ClickHouse/issues/15) | cold query on `s3` (50 ms/GET) 3.2 s → ~2.6 s (emulated): the statistics probe loads the parts' primary indexes in parallel; warm unchanged |
-| 5 | **Build and A/B**: `ab rollup-samples` | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h) |
+| 3 | **Build and A/B**: `ab parallel-statistics-probe` | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | [#15](https://github.com/JTCunning/ClickHouse/issues/15) | cold query on `s3` (50 ms/GET) 3.2 s → ~2.6 s (emulated): the statistics probe loads the parts' primary indexes in parallel; warm unchanged |
+| 4 | **Build and A/B**: `ab rollup-samples` | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h) |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 
 ## With lil red: nothing for you
 
-None.
+| item | issue | lil red is | what it's for |
+|---|---|---|---|
+| [alp-search-early-exit](../prs/alp-search-early-exit.md) | [#11](https://github.com/JTCunning/ClickHouse/issues/11) | judging your results | run 2 (your build, verdict pass): small-block rtn −54.6%, codecs_float_insert ALP rtn −9.9%, small-block rnd not slower |
 
 ## Submitted
 
