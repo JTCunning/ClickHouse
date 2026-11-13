@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-12T00:31:50Z",
+  "updated": "2026-11-13T21:21:07Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -16,6 +16,7 @@
     {
       "slug": "promql-shared-selector-sets",
       "title": "Build the id set of a repeated PromQL selector once per query",
+      "summary": "x + x −15.5%, x + x + x −21.8% (run 3): a repeated selector's id set is built once per query",
       "status": "submitted",
       "priority": 1,
       "branch": "lilred-perf-promql-shared-selector-sets",
@@ -54,6 +55,7 @@
     {
       "slug": "promql-drop-name-exact-selector",
       "title": "PromQL: skip the duplicate series check when dropping the metric name of one metric",
+      "summary": "sum(rate) −19% CPU at 100k series: no duplicate-series check when the metric name of one metric is dropped",
       "status": "submitted",
       "priority": 2,
       "branch": "lilred-perf-promql-drop-name-exact-selector",
@@ -86,6 +88,7 @@
     {
       "slug": "time-ranges-id-ranges-index-hint",
       "title": "Do not filter every row of the TimeSeries time ranges table by the id ranges of the selected metrics",
+      "summary": "100-name selector −19.9% (176 → 141 ms); 50–300 names −35–39% (build, 2026-11-01)",
       "status": "submitted",
       "priority": 3,
       "branch": "lilred-perf-time-ranges-id-ranges-index-hint",
@@ -119,6 +122,8 @@
     {
       "slug": "grid-gap-wraparound",
       "title": "Grow the timeSeries*ToGrid bucket map before inserting a colliding key",
+      "summary": "run 2: gap slowdown gone in every arrival order; no memory growth on sparse or every-2nd-minute series",
+      "decision": "Park this branch and treat upstream 124777 (dense array) as the fix for 125759 (A, lil red recommends), or one more iteration (8-cell run check, displaced-key fix), then run 3 (B)? Answer on #10.",
       "status": "needs-work",
       "priority": 4,
       "branch": "lilred-perf-grid-gap-wraparound",
@@ -150,6 +155,7 @@
     {
       "slug": "alp-search-early-exit",
       "title": "Stop evaluating an ALP parameter pair once it cannot beat the best one",
+      "summary": "run 2: same bytes; decimal-like values −38–93% encode CPU, full-precision and random doubles −1–9%, nothing slower (clang harness)",
       "status": "ready-to-build",
       "priority": 5,
       "branch": "lilred-perf-alp-search-early-exit",
@@ -183,6 +189,7 @@
     {
       "slug": "parallel-statistics-probe",
       "title": "Probe the primary key of parts in parallel when deciding to load statistics",
+      "summary": "cold query on `s3` (50 ms/GET) 3.2 s → ~2.6 s (emulated): the statistics probe loads the parts' primary indexes in parallel; warm unchanged",
       "status": "ready-to-build",
       "priority": 6,
       "branch": "lilred-perf-parallel-statistics-probe",
@@ -219,6 +226,8 @@
     {
       "slug": "rollup-samples",
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
+      "summary": "instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h)",
+      "decision": "Rate-type functions over rollups: keep exact-only (A, lil red recommends), a richer column type later (B), or approximate behind a setting (C)? And rename `time_series_prefer_rollup_tables` to `..._columns`? Answer on #16; neither blocks the build.",
       "status": "ready-to-build",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",
