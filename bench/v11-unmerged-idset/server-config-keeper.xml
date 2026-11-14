@@ -1,0 +1,29 @@
+<clickhouse>
+  <logger><level>information</level><log>server.log</log><errorlog>err.log</errorlog></logger>
+  <tcp_port>19100</tcp_port><http_port>18124</http_port><interserver_http_port>19109</interserver_http_port><interserver_http_host>127.0.0.1</interserver_http_host>
+  <listen_host>127.0.0.1</listen_host>
+  <path>./db/</path><tmp_path>./tmp/</tmp_path><user_files_path>./uf/</user_files_path>
+  <max_server_memory_usage>2400000000</max_server_memory_usage>
+  <mark_cache_size>268435456</mark_cache_size>
+  <uncompressed_cache_size>268435456</uncompressed_cache_size>
+  <query_log><database>system</database><table>query_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></query_log>
+  <text_log><database>system</database><table>text_log</table><level>debug</level><flush_interval_milliseconds>1000</flush_interval_milliseconds></text_log>
+  <processors_profile_log><database>system</database><table>processors_profile_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></processors_profile_log>
+  <users><default><password></password><networks><ip>127.0.0.1</ip></networks><profile>default</profile><quota>default</quota><access_management>1</access_management></default></users>
+  <profiles><default><max_memory_usage>2000000000</max_memory_usage><enable_time_series_table>1</enable_time_series_table><allow_experimental_time_series_table>1</allow_experimental_time_series_table><session_timezone>UTC</session_timezone></default></profiles>
+  <quotas><default/></quotas>
+  <prometheus>
+    <port>19094</port>
+    <handlers>
+      <api><url_prefix>/api/v1</url_prefix><handler><type>api_v1</type><table>default.ts</table></handler></api>
+    </handlers>
+  </prometheus>
+  <!-- #19: an embedded Keeper, so that tables in a Replicated database (as in the Cloud) get Replicated inner engines whose merges
+       are assigned by the merge selecting task instead of right after each insert. -->
+  <keeper_server><tcp_port>19181</tcp_port><server_id>1</server_id><log_storage_path>./keeper/log</log_storage_path>
+    <snapshot_storage_path>./keeper/snap</snapshot_storage_path>
+    <coordination_settings><operation_timeout_ms>10000</operation_timeout_ms><session_timeout_ms>30000</session_timeout_ms></coordination_settings>
+    <raft_configuration><server><id>1</id><hostname>127.0.0.1</hostname><port>19234</port></server></raft_configuration></keeper_server>
+  <zookeeper><node><host>127.0.0.1</host><port>19181</port></node></zookeeper>
+  <macros><shard>s1</shard><replica>r1</replica></macros>
+</clickhouse>

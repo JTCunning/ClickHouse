@@ -44,3 +44,28 @@ Window: `[1700000000, 1700001800]`. Selectors (`idsq.py` `CASES`): wide `metric_
   `ts_merged`). The narrow and mid selectors still read the whole metric's time ranges rows (1.8M) for the merge join.
 - `max_threads_min_free_memory_per_thread = 0` is set in `idsq.SETTINGS`: without it this host builds one stream.
 - Run the client with `</dev/null` in scripts: an `INSERT ... VALUES` reads stdin when it is not a terminal and waits.
+
+## Steady state (#19)
+
+Report `../../reports/2026-11-14-idlookup-parts-and-rows.md`. Server as above (`server-config-keeper.xml` adds an embedded Keeper and
+the interserver port, only for `REPLICATED=1` runs in a `Replicated` database `rdb`; plain runs use `server-config.xml`).
+
+- `gen-grid.sh <clickhouse> <port> <P> <C>` (idea 4): table `g_p<P>_c<C>`, the rows of `ts_merged` written C times into P parts of the
+  inner tags and time ranges tables (row (id, copy) → part `cityHash64(id, copy) % P`, `optimize_on_insert = 0`, merges stopped).
+  The six tables 1/25/90 parts × 1/30 copies take ~1 min.
+- `loop.py <variant> <table> <seconds> [rate] [series per statement]`: a continuous small-insert loop over HTTP keep-alive (one
+  `INSERT … SELECT` per statement, `SLOTS` = 60,000 series slots of `metric_0` written in turn, one sample each, pods restarting every
+  `CHURN` = 1800 s, `HISTORY` = 300,000 dead series merged first). `TAIL` = 15 stops the merges of the tags and time ranges tables for
+  the last 15 s (the same merge lag in seconds for every variant: plain `MergeTree` here never lags on its own). Variants: `base`,
+  `batch<K>` (K statements as one), `merge:<setting=value,…>` (ALTER of the two inner tables), `trcache<B>` (store_time_ranges = 0 plus
+  table `<table>_tr` written as a time ranges cache with outward rounding to B s would write it; `ALIGN=1` puts a bucket boundary at
+  the tail start). Writes `<table>.parts.json` (summary + part counts every 5 s). Copies of the #19 runs: `steady/`.
+- `steady.sh <name:variant[:ENV=v,…]> …`: runs loop.py variants one after the other (~2 min each).
+- `streams.py <rounds> <out.jsonl> <table|name=tags fq|tr fq>,… [variants] [cases]`: the lookup by table; prints streams (in-order
+  sources), their thread time, `MergingSortedTransform` time, rows into the join, SelectedParts/Marks, read_rows, ids. A table with a
+  `<name>.parts.json` in the current directory is queried over `[end − LOOKBACK, end]` (LOOKBACK = 30 s) of its run.
+- False positives of `trcache`: the lookup's `ids` minus the truth, the series with samples in the window `[t0, t1]`:
+  `SELECT count() FROM <inner tags> WHERE metric_name = 'metric_0' AND id IN (SELECT id FROM <inner samples> WHERE max_time >= t0 AND
+  min_time <= t1 AND arrayExists(x -> x.1 >= t0 AND x.1 <= t1, samples))` (add the selector's matchers on `tags` for mid/narrow).
+- Not reproduced: the Cloud's lagging merge tail. `MergeTree` and single-replica `Replicated*` inner tables stay at 3–6 time ranges
+  parts at 6–15 inserts/s, so merge settings can't be judged here.
