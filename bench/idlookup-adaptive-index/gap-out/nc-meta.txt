@@ -1,0 +1,34 @@
+timeline (ms from query start):
+       4.1  selector query built
+     635.6  join order
+     638.9  last planning line before Creating set
+    1185.7  Creating set
+    1185.8  Created Set
+gap: 547 ms, 82 log lines in it; by logger: {'EnvironmentProxyConfigurationResolver': 46, 'default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor)': 34, 'MemoryTrackerUtils': 1, 'MergeJoinAlgorithm': 1}
+       638.9 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Spreading ranges among streams with order
+       639.2 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_64_64_1, approx. 431 rows starting from 0
+       639.2 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_62_62_1, approx. 431 rows starting from 0
+       639.3 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_60_60_1, approx. 431 rows starting from 0
+       639.5 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_58_58_1, approx. 431 rows starting from 0
+       639.5 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_56_56_1, approx. 431 rows starting from 0
+0 before ids query: 1 samples (5 ms, all threads)
+        1 bool std::__1::any_of[abi:fqe220101]<std::__1::__wrap_iter<std::__1::basic_string<char, std::__1::char_traits<
+1 ids query planning: 1821 samples (5 ms, all threads)
+     1644 DB::receiveHTTPResponseImpl
+      124 DB::MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipIndexes
+        5 DB::WriteBufferFromFile::~WriteBufferFromFile
+        5 DB::KeyMetadata::createBaseDirectory
+        3 DB::HTTPResponseReadBuffer::readBody
+2 gap (planning end .. Creating set): 759 samples (5 ms, all threads)
+      467 DB::receiveHTTPResponseImpl
+      109 DB::Epoll::getManyReady
+       99 DB::CompletedPipelineExecutor::execute
+       43 DB::Runtime::V1::ExecutionThreadContext::wait
+        8 arena_maybe_do_deferred_work.llvm.13473670256973872774
+4 after: 2546 samples (5 ms, all threads)
+     1941 DB::receiveHTTPResponseImpl
+      129 DB::AsynchronousBoundedReadBuffer::nextImpl
+       74 DB::HTTPResponseReadBuffer::readBody
+       45 DB::Epoll::getManyReady
+       40 malloc_mutex_lock_slow
+query_id gap20-254773b1

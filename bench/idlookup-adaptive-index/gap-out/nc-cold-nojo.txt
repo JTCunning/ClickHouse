@@ -1,0 +1,33 @@
+timeline (ms from query start):
+       4.4  selector query built
+     939.3  last planning line before Creating set
+    2005.8  Creating set
+    2005.8  Created Set
+gap: 1066 ms, 108 log lines in it; by logger: {'EnvironmentProxyConfigurationResolver': 92, 'default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor)': 14, 'MemoryTrackerUtils': 1, 'MergeJoinAlgorithm': 1}
+       939.5 default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor): Spreading ranges among streams with order
+       939.7 default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor): Reading 1 ranges in order from part all_64_64_1, approx. 8192 rows starting from 8192
+       939.9 default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor): Reading 1 ranges in order from part all_63_63_1, approx. 8192 rows starting from 8192
+       940.1 default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor): Reading 1 ranges in order from part all_62_62_1, approx. 8192 rows starting from 8192
+       940.2 default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor): Reading 1 ranges in order from part all_61_61_1, approx. 8192 rows starting from 8192
+       940.3 default.`.inner_id.timeranges.a95d167f-9ea5-48c0-bd90-d75fef42985c` (54575872-7ea5-4ec4-83a0-f683fb794c46) (SelectExecutor): Reading 1 ranges in order from part all_60_60_1, approx. 8192 rows starting from 8192
+0 before ids query: 1 samples (5 ms, all threads)
+        1 DB::InDepthQueryTreeVisitorWithContext<DB::
+1 ids query planning: 2719 samples (5 ms, all threads)
+     2443 DB::receiveHTTPResponseImpl
+      184 DB::MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipIndexes
+        9 arena_maybe_do_deferred_work.llvm.13473670256973872774
+        9 DB::EndpointConnectionPool<Poco::Net::HTTPClientSession>::PooledConnection::sendRequestHeaders
+        9 DB::HTTPResponseReadBuffer::readBody
+2 gap (planning end .. Creating set): 3048 samples (5 ms, all threads)
+     1086 DB::MergeTreeMarksLoader::loadMarksSync
+      931 DB::receiveHTTPResponseImpl
+      484 DB::MergeTreeMarksLoader::loadMarks
+      213 DB::Epoll::getManyReady
+      202 DB::CompletedPipelineExecutor::execute
+4 after: 8675 samples (5 ms, all threads)
+     4870 DB::receiveHTTPResponseImpl
+     2517 DB::MergeTreeMarksLoader::loadMarks
+      261 DB::MergeTreePrefetchedReadPool::PrefetchedReaders::wait
+      203 DB::HTTPResponseReadBuffer::readBody
+      131 DB::AsynchronousBoundedReadBuffer::nextImpl
+query_id gap20-e7fbd72c

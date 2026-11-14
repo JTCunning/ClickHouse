@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-14T01:44:22Z",
+  "updated": "2026-11-14T03:00:30Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -299,6 +299,41 @@
       "claim": "On a version 11 table whose tags parts are not merged (bench/v11-unmerged-idset: 60,000 series written by 30 inserts, merges stopped), a selector matching the whole metric builds its id set from 60,000 rows instead of 1.8M and its id lookup is 15-25% faster (emulated 1,820 -> 1,473 ms, CPU -30%); selectors of 6,000 and 10 series and the merged copy unchanged (+-3%).",
       "pass_if": "05638 passes on B and fails on A only on its 'Created Set ... from N rows' / 'LIMIT 1 BY id' lines (its last check, no read-time index lines, passes on both); 05452, 05493, 04836 pass on B. Lab T1 at least 10% faster and T2 'Created Set with 60000 entries from 60000 rows' on B, significant at 99.5%; G1 (6k, 10 series), G2 (ts_merged), G4 (steady.sh s_base, 93 small tags parts: narrow and mid lookup, use_query_condition_cache 0 and 1, SelectedParts equal on A and B) and the guard perf XMLs not significantly slower; E1 (/api/v1/series?limit=1) on ts_merged not significantly slower (on unmerged ts +20-50% is the disclosed cost).",
       "notes": "The A/B is the lab in bench/v11-unmerged-idset (README there), not an in-tree perf XML: the case needs unmerged parts, which a CI fill merges at its own pace. The .reference of 05638 was edited by hand from master's output (three lines); take it from the built branch if it differs only in formatting. Collapse only with the default id generator (tree-hash compare in isDefaultIDGenerator); if T2 shows 1.8M rows on B, that compare did not match the stored DEFAULT. Category Experimental Feature."
+    },
+    {
+      "slug": "selector-ids-fixed-join-order",
+      "title": "Do not optimize the join order of the TimeSeries selector's ids query",
+      "summary": "Ids query skips join planning that only loaded statistics for a fixed-order join: cold S3 lookup -9..-13% (4 selectors, emulated), warm/prewarmed +-2%",
+      "status": "ready-to-build",
+      "priority": 9,
+      "branch": "lilred-perf-selector-ids-fixed-join-order",
+      "head": "df2da4e4f1c30481f4669b5d45b3bafe3a83dd3c",
+      "base": "923c77c860303a9a063c932bc2df6d1aa59eb349",
+      "issue": 20,
+      "pr_text": "prs/selector-ids-fixed-join-order.md",
+      "report": "reports/2026-11-14-idlookup-adaptive-index.md",
+      "ab_plan": "ab-plans/selector-ids-fixed-join-order.md",
+      "tests": {
+        "stateless": [
+          "05640_time_series_selector_ids_query_fixed_join_order"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": [
+          "05452_time_series_selector_time_ranges_any_join",
+          "05493_time_series_selector_id_ranges_index_hint",
+          "04836_time_series_v10_selector_whole_metric_pk_range"
+        ]
+      },
+      "perf_tests": [],
+      "guard_perf_tests": [
+        "tests/performance/promql_selector_id_range_row_cost.xml",
+        "tests/performance/promql_selector_name_alternatives.xml",
+        "tests/performance/promql_selector_pk_range.xml"
+      ],
+      "claim": "On object storage with statistics not cached (bench/tags-in-subquery-cold: 64 fresh parts per inner table, 50 ms per GET), the selector's id lookup is 9-13% faster for narrow, rare-token, wide and metric-only selectors and loads no statistics (92/154 -> 0); prewarmed and warm unchanged (+-3%).",
+      "pass_if": "05640 passes on B; on A its four 'join order optimizations:' lines print 1. 05452, 05493, 04836 pass on B. Lab T1-T4 (cold) at least 7% faster on B at 99.5% with LoadedStatistics 0; G1 (prewarmed), G2 (warm, 30 rounds), the guard perf XMLs and E1 (/api/v1/series, /api/v1/labels) not significantly slower.",
+      "notes": "The A/B is the cold S3 lab (bench/tags-in-subquery-cold + bench/idlookup-adaptive-index, README there), not a perf XML: the gain needs statistics that aren't cached, which CI perf runs never have. The lab server resumes merges on restart: rerun gen.sh after each start. The .reference of 05640 is master's output with the setting forced on the session (the branch's behaviour); take it from the built branch if it differs. Merges cleanly with #18's branch. Users can get the same effect today with query_plan_optimize_join_order_limit = 0 in the PromQL user's profile."
     }
   ]
 }

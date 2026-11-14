@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-14 01:44 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-14 03:00 UTC.
 
 ## For you, in order
 
@@ -14,6 +14,7 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 | 4 | **Build and A/B**: `ab parallel-statistics-probe` | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | [#15](https://github.com/JTCunning/ClickHouse/issues/15) | cold query on `s3` (50 ms/GET) 3.2 s → ~2.6 s (emulated): the statistics probe loads the parts' primary indexes in parallel; warm unchanged |
 | 5 | **Build and A/B**: `ab rollup-samples` | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h) |
 | 6 | **Build and A/B**: `ab selector-one-tags-row-per-id` | [selector-one-tags-row-per-id](../prs/selector-one-tags-row-per-id.md) | [#18](https://github.com/JTCunning/ClickHouse/issues/18) | 30 unmerged tags copies x 60k series: id set from 60k rows instead of 1.8M, lookup 1,881 -> 1,476 ms (-22%, emulated); 2nd commit keeps the text index in the analysis (93 small parts: 186 -> 96 selected parts, = master); merged unchanged |
+| 7 | **Build and A/B**: `ab selector-ids-fixed-join-order` | [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | Ids query skips join planning that only loaded statistics for a fixed-order join: cold S3 lookup -9..-13% (4 selectors, emulated), warm/prewarmed +-2% |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 

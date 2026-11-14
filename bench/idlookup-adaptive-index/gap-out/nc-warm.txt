@@ -1,0 +1,34 @@
+timeline (ms from query start):
+       5.2  selector query built
+      22.1  join order
+      25.3  last planning line before Creating set
+      57.8  Creating set
+      57.9  Created Set
+gap: 32 ms, 36 log lines in it; by logger: {'default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor)': 34, 'MemoryTrackerUtils': 1, 'MergeJoinAlgorithm': 1}
+        25.4 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Spreading ranges among streams with order
+        25.6 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_64_64_1, approx. 431 rows starting from 0
+        25.6 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_62_62_1, approx. 431 rows starting from 0
+        25.7 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_60_60_1, approx. 431 rows starting from 0
+        25.9 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_58_58_1, approx. 431 rows starting from 0
+        25.9 default.`.inner_id.tags.a95d167f-9ea5-48c0-bd90-d75fef42985c` (ff5896fe-420e-49e4-9449-fae2bb10e601) (SelectExecutor): Reading 1 ranges in order from part all_56_56_1, approx. 431 rows starting from 0
+0 before ids query: 1 samples (5 ms, all threads)
+        1 void std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>, st
+1 ids query planning: 9 samples (5 ms, all threads)
+        2 arena_ralloc
+        1 DB::ColumnsDescription::tryGetColumn
+        1 DB::FunctionFactory::tryGetImpl
+        1 je_nallocx
+        1 DB::Block::cloneEmptyColumns
+2 gap (planning end .. Creating set): 39 samples (5 ms, all threads)
+        5 DB::CompletedPipelineExecutor::execute
+        5 DB::Epoll::getManyReady
+        5 DB::Runtime::V1::ExecutionThreadContext::wait
+        4 arena_maybe_do_deferred_work.llvm.13473670256973872774
+        2 ProfileEvents::Counters::increment
+4 after: 93 samples (5 ms, all threads)
+       14 void ThreadPoolImpl<ThreadFromGlobalPoolImpl<false, true>>::scheduleImpl<void>
+       14 ehooks_purge_forced.llvm.5905150971428087497
+       10 bool ConcurrentBoundedQueue<DB::Chunk>::popImpl<true>
+       10 DB::Epoll::getManyReady
+        6 DB::MergeTreePrefetchedReadPool::getTask
+query_id gap20-17c4eb3f

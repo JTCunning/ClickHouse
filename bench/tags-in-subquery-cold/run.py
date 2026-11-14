@@ -21,7 +21,9 @@ EVENTS = ['QueryPlanBuildMicroseconds', 'QueryPlanOptimizeMicroseconds', 'S3GetO
           'TextIndexReadDictionaryBlocks', 'TextIndexReadPostings', 'TextIndexReadSparseIndexBlocks',
           'FilteringMarksWithPrimaryKeyMicroseconds', 'FilteringMarksWithSecondaryKeysMicroseconds', 'SelectedParts', 'SelectedMarks',
           'SelectedRows', 'OSCPUVirtualTimeMicroseconds', 'RealTimeMicroseconds', 'LoadedPrimaryIndexFiles', 'LoadedStatisticsMicroseconds',
-          'PrimaryIndexCacheHits', 'PrimaryIndexCacheMisses', 'CreatedReadBufferOrdinary']
+          'PrimaryIndexCacheHits', 'PrimaryIndexCacheMisses', 'CreatedReadBufferOrdinary',
+          # added for #20 (bench/idlookup-adaptive-index)
+          'QueryAnalysisMicroseconds', 'LoadedStatistics', 'StatisticsCacheHits', 'StatisticsCacheMisses', 'TextIndexReadGranulesMicroseconds']
 
 
 def ch(sql, settings=None, qid=None):
