@@ -1,0 +1,24 @@
+-- rows of the tags and time ranges tables
+tags	9	3
+timeranges	9	3
+-- one tags row per time series before the join, and the id set is built from one row per time series
+Created Set with 2 entries from 2 rows
+LIMIT 1 BY id
+-- the same without a metric name: the tags rows are sorted by id instead of read in that order
+Created Set with 2 entries from 2 rows
+LIMIT 1 BY id
+-- selected samples
+1970-01-01 00:01:40.000	1
+1970-01-01 00:03:20.000	2
+1970-01-01 00:05:00.000	3
+6	66
+6	66
+9	66
+-- a custom id generator keeps every tags row
+Created Set with 1 entries from 2 rows
+2	3
+-- tags stored in their own columns go through the subquery
+Created Set with 1 entries from 1 rows
+LIMIT 1 BY id
+[('__name__','foo'),('env','prod'),('job','a')]	1970-01-01 00:01:40.000	1
+[('__name__','foo'),('env','prod'),('job','a')]	1970-01-01 00:03:20.000	2

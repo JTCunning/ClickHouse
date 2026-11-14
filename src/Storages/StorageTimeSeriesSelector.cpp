@@ -23,6 +23,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTSubquery.h>
@@ -483,9 +484,20 @@ namespace
         return id_generator;
     }
 
+    /// Whether the identifiers are made by the default generator: a hash of the `tags` column, which contains all the tags
+    /// (see TimeSeriesIDGenerator::tryGetDefault). Then the rows of the tags table with the same `id` written with this generator
+    /// are equal; rows of an earlier generator (the setting `id_generator` can be changed on tables of version 9 or earlier)
+    /// are collapsed as a merge of the tags table would collapse them.
+    bool isDefaultIDGenerator(const ASTPtr & id_generator, const DataTypePtr & table_id_type)
+    {
+        auto default_id_generator = TimeSeriesIDGenerator::tryGetDefault(table_id_type);
+        return id_generator && default_id_generator
+            && (id_generator->getTreeHash(/*ignore_aliases=*/ true) == default_id_generator->getTreeHash(/*ignore_aliases=*/ true));
+    }
+
     /// Adds to a query selecting from the tags table the filter of the time series by their time ranges stored in the time ranges table:
     ///
-    ///     SELECT ... FROM tags_table
+    ///     SELECT ... FROM tags_table (or a subquery over it, see makeTagsSubqueryWithOneRowPerID)
     ///     LEFT JOIN (SELECT id, 1 AS matched FROM time_ranges_table
     ///                WHERE max_time >= <min_time> AND min_time <= <max_time> [AND <id is in one of metric_id_ranges>]) AS time_ranges_subquery USING (id)
     ///     WHERE <conditions of the query> AND (time_ranges_subquery.matched = 1 [OR <id is outside all of metric_id_ranges>])
@@ -561,6 +573,12 @@ namespace
         }
     }
 
+    /// Whether applyTimeRangeFilterToSelectIDsQuery joins the time ranges table.
+    bool joinsTimeRangesTable(const StorageID & time_ranges_table_id, const TableTimeRange & time_range_to_filter_ids)
+    {
+        return time_ranges_table_id && !time_range_to_filter_ids.containsAllTimestamps();
+    }
+
     /// Applies the time range filter to a query selecting identifiers from the tags table:
     /// if the time ranges are stored in the time ranges table, that table is joined (see addTimeRangesTableJoin);
     /// if the tags table stores them itself (tables of earlier versions), the conditions are already in the WHERE clause
@@ -572,7 +590,7 @@ namespace
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
         const DataTypePtr & table_timestamp_type)
     {
-        if (!time_ranges_table_id || time_range_to_filter_ids.containsAllTimestamps())
+        if (!joinsTimeRangesTable(time_ranges_table_id, time_range_to_filter_ids))
             return;
 
         addTimeRangesTableJoin(select_query, time_ranges_table_id, makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type), metric_id_ranges);
@@ -623,6 +641,64 @@ namespace
         return wrapIntoSelectWithUnionQuery(select_query);
     }
 
+    /// Makes the source of the tags for a query which joins the time ranges table (see addTimeRangesTableJoin):
+    ///
+    ///     (SELECT id, tags, metric_name, tag_column1, ... FROM tags_table WHERE <filter> ORDER BY id LIMIT 1 BY id) AS tags_subquery
+    ///
+    /// Until its parts are merged, the tags table has a row for a time series in each part written with it. Each such row
+    /// would go through the join, `timeSeriesStoreTags` and the set of identifiers built from the query. Used only with
+    /// the default id generator (see isDefaultIDGenerator), so the dropped rows are equal to the kept one. `ORDER BY id` is the
+    /// order the merge join needs anyway. When the filter selects one metric, the tags table (sorted by `metric_name, id`) is read
+    /// in that order (see StorageTimeSeriesSelector::applySettingsForSelectIDsQuery), so `LIMIT 1 BY id` runs while streaming
+    /// and the reading still stops as soon as the query has enough rows; otherwise the rows are sorted, as the join did before.
+    ASTPtr makeTagsSubqueryWithOneRowPerID(
+        const StorageID & tags_table_id,
+        const std::unordered_map<String, String> & column_name_by_tag_name,
+        ASTPtr where_filter)
+    {
+        auto select_query = make_intrusive<ASTSelectQuery>();
+
+        /// SELECT id, tags, metric_name, tag_column1, ...
+        {
+            auto select_list_exp = make_intrusive<ASTExpressionList>();
+            auto & select_list = select_list_exp->children;
+            select_list.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+            select_list.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Tags));
+            select_list.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
+            for (const auto & [_, column_name] : column_name_by_tag_name)
+                select_list.push_back(make_intrusive<ASTIdentifier>(column_name));
+            select_query->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+        }
+
+        /// FROM tags_table WHERE <filter>
+        select_query->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(tags_table_id)));
+        select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_filter));
+
+        /// ORDER BY id
+        {
+            auto order_by_element = make_intrusive<ASTOrderByElement>();
+            order_by_element->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+            order_by_element->direction = 1;
+            order_by_element->nulls_direction = 1;
+            auto order_by = make_intrusive<ASTExpressionList>();
+            order_by->children.push_back(std::move(order_by_element));
+            select_query->setExpression(ASTSelectQuery::Expression::ORDER_BY, std::move(order_by));
+        }
+
+        /// LIMIT 1 BY id
+        {
+            auto limit_by = make_intrusive<ASTExpressionList>();
+            limit_by->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+            select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY_LENGTH, make_intrusive<ASTLiteral>(UInt64{1}));
+            select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY, std::move(limit_by));
+        }
+
+        /// A subquery joined with another table needs an alias (see the setting `joined_subquery_requires_alias`).
+        auto subquery = make_intrusive<ASTSubquery>(wrapIntoSelectWithUnionQuery(std::move(select_query)));
+        subquery->setAlias("tags_subquery");
+        return subquery;
+    }
+
     ASTPtr makeSelectQueryFromTagsTable(
         const StorageID & tags_table_id,
         const PrometheusQueryTree::MatcherList & matchers,
@@ -630,7 +706,8 @@ namespace
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        bool rows_with_same_id_are_equal)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -655,24 +732,19 @@ namespace
             select_query->setExpression(ASTSelectQuery::Expression::SELECT, select_list_exp);
         }
 
-        /// FROM tags_table_id
-        auto tables = make_intrusive<ASTTablesInSelectQuery>();
+        auto where_filter = makeWhereFilterForTagsTable(matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type);
 
+        if (rows_with_same_id_are_equal && joinsTimeRangesTable(time_ranges_table_id, time_range_to_filter_ids))
         {
-            auto table = make_intrusive<ASTTablesInSelectQueryElement>();
-            auto table_exp = make_intrusive<ASTTableExpression>();
-            table_exp->database_and_table_name = make_intrusive<ASTTableIdentifier>(tags_table_id);
-            table_exp->children.emplace_back(table_exp->database_and_table_name);
-
-            table->table_expression = table_exp;
-            tables->children.push_back(table);
-
-            select_query->setExpression(ASTSelectQuery::Expression::TABLES, tables);
+            /// FROM (SELECT id, tags, metric_name, tag_column1, ... FROM tags_table_id WHERE <filter> ORDER BY id LIMIT 1 BY id) AS tags_subquery
+            select_query->setExpression(
+                ASTSelectQuery::Expression::TABLES,
+                makeTablesInSelectQuery(makeTagsSubqueryWithOneRowPerID(tags_table_id, column_name_by_tag_name, std::move(where_filter))));
         }
-
-        /// WHERE <filter>
+        else
         {
-            auto where_filter = makeWhereFilterForTagsTable(matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type);
+            /// FROM tags_table_id WHERE <filter>
+            select_query->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(tags_table_id)));
             select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_filter));
         }
 
@@ -1209,11 +1281,11 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
     else
     {
         auto tags_table_metadata = time_series_storage.getTargetTable(ViewTarget::Tags, context)->getInMemoryMetadataPtr(context, false);
-        const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
-            matchers, getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type), table_id_type);
+        const auto id_generator = getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type);
+        const auto metric_id_ranges = tryGetTimeSeriesIDRanges(matchers, id_generator, table_id_type);
         select_query = makeSelectQueryFromTagsTable(
             tags_table_id, matchers, makeColumnNameByTagNameMap(time_series_settings), time_ranges_table_id, time_range_to_filter_ids,
-            metric_id_ranges, table_timestamp_type);
+            metric_id_ranges, table_timestamp_type, isDefaultIDGenerator(id_generator, table_id_type));
     }
 
     /// Alias the returned expression (`timeSeriesStoreTags(...)`, which returns `id`) so callers can reference the column by a fixed name.
@@ -1303,8 +1375,8 @@ void StorageTimeSeriesSelector::readImpl(
     if (bucket_step_seconds && !context->getSettingsRef().isChanged("merge_tree_min_rows_for_concurrent_read"))
         modified_context->setSetting("merge_tree_min_rows_for_concurrent_read", UInt64{0});
 
-    const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
-        matchers, getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type), config.table_id_type);
+    const auto id_generator = getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type);
+    const auto metric_id_ranges = tryGetTimeSeriesIDRanges(matchers, id_generator, config.table_id_type);
 
     /// A table storing one sample per row (see `TimeSeriesSettings::hasBucketedSamples`) can read the samples table by a primary-key
     /// range of the whole metric instead of the id set, if a probe of the tags table shows that the selector matches the whole metric
@@ -1331,7 +1403,7 @@ void StorageTimeSeriesSelector::readImpl(
 
     ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
         tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
-        config.table_timestamp_type);
+        config.table_timestamp_type, isDefaultIDGenerator(id_generator, config.table_id_type));
 
     if (whole_metric_id_range_condition)
     {
