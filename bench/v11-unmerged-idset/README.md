@@ -69,3 +69,13 @@ the interserver port, only for `REPLICATED=1` runs in a `Replicated` database `r
   min_time <= t1 AND arrayExists(x -> x.1 >= t0 AND x.1 <= t1, samples))` (add the selector's matchers on `tags` for mid/narrow).
 - Not reproduced: the Cloud's lagging merge tail. `MergeTree` and single-replica `Replicated*` inner tables stay at 3–6 time ranges
   parts at 6–15 inserts/s, so merge settings can't be judged here.
+
+## Re-check of #18 on the steady fixture (2026-11-14)
+
+- `idsq.py` variants `limitbyordst` (the branch's final shape: the subquery with `SETTINGS use_skip_indexes_on_data_read = 0`) and
+  `limitbyordq` (the same setting for the whole ids query). `streams.py` also prints `SelectedRows` now.
+- `iso18.py <table> <rounds>`: the tags subquery alone, the text index applied while reading vs in the index analysis.
+- Results `results18-recheck-*.jsonl` / `results18-recheck-iso.txt` (`steady` = s_base 9 rounds, `steady-narrow21`, `steady-qcc` =
+  `use_query_condition_cache = 1`, `ts`, `ts_merged`). Write-up: the report's section "Re-check 2026-11-14".
+- `idsq.SETTINGS` has `use_query_condition_cache = 0`: with the cache on, a repeated selector prunes parts by the cache after its first run,
+  which hides costs that depend on which parts the analysis keeps.

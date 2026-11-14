@@ -40,8 +40,9 @@ def tables():
 
 
 def extra_settings(variant):
-    """`groupio` = GROUP BY id with aggregation in the order of the table."""
-    return ", optimize_aggregation_in_order = 1" if "groupio" in variant else ""
+    """`groupio` = GROUP BY id with aggregation in the order of the table; `limitbyordq` = skip indexes in the index analysis."""
+    return (", optimize_aggregation_in_order = 1" if "groupio" in variant else "") + (
+        ", use_skip_indexes_on_data_read = 0" if "limitbyordq" in variant else "")
 
 
 def ids_query(variant, case):
@@ -71,6 +72,10 @@ def ids_query(variant, case):
             "limitby": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} LIMIT 1 BY id",
             "distinctord": f"SELECT DISTINCT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id",
             "limitbyord": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id LIMIT 1 BY id",
+            # #18 recheck: limitbyord with the skip indexes of the tags read evaluated in the index analysis (as master's tags read
+            # under the JOIN), set in the subquery (`limitbyordst`) or for the whole ids query (`limitbyordq`, see extra_settings)
+            "limitbyordst": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id LIMIT 1 BY id SETTINGS use_skip_indexes_on_data_read = 0",
+            "limitbyordq": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id LIMIT 1 BY id",
             "limitbynewest": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id, _part_index DESC LIMIT 1 BY id",
             "limitbyallord": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id LIMIT 1 BY id, metric_name, tags",
             "limitbyhashord": f"SELECT id, metric_name, tags FROM {tags} WHERE {matchers} ORDER BY id LIMIT 1 BY id, sipHash64(metric_name, tags)",

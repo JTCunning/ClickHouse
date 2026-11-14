@@ -71,8 +71,8 @@ for case in CASES:
 idsq.client("SYSTEM FLUSH LOGS")
 for r in rows:
     q = idsq.client(f"SELECT query_duration_ms, read_rows, ProfileEvents['OSCPUVirtualTimeMicroseconds'], ProfileEvents['SelectedParts'], "
-                    f"ProfileEvents['SelectedMarks'], memory_usage FROM system.query_log WHERE query_id = '{r['qid']}' AND type = 'QueryFinish'").split()
-    r.update(ms=int(q[0]), read_rows=int(q[1]), cpu_us=int(q[2]), parts=int(q[3]), marks=int(q[4]), memory=int(q[5]))
+                    f"ProfileEvents['SelectedMarks'], memory_usage, ProfileEvents['SelectedRows'] FROM system.query_log WHERE query_id = '{r['qid']}' AND type = 'QueryFinish'").split()
+    r.update(ms=int(q[0]), read_rows=int(q[1]), cpu_us=int(q[2]), parts=int(q[3]), marks=int(q[4]), memory=int(q[5]), sel_rows=int(q[6]))
     p = idsq.client(
         "SELECT countIf(name LIKE 'MergeTreeSelect(pool: ReadPoolInOrder%'), sumIf(elapsed_us, name LIKE 'MergeTreeSelect(pool: ReadPoolInOrder%'), "
         "sumIf(elapsed_us, name = 'MergingSortedTransform'), countIf(name = 'MergingSortedTransform'), "
@@ -93,7 +93,7 @@ def med(xs):
 
 
 print(f"{'case':14} {'table':22} {'variant':16} {'ms':>6} {'min-max':>11} {'cpu':>6} {'streams':>7} {'inorder ms':>10} "
-      f"{'merge ms':>8} {'join ms':>7} {'join in':>9} {'parts':>5} {'marks':>5} {'read_rows':>9} {'ids':>6}")
+      f"{'merge ms':>8} {'join ms':>7} {'join in':>9} {'parts':>5} {'marks':>5} {'sel_rows':>9} {'read_rows':>9} {'ids':>6}")
 for case in CASES:
     for spec in TABLES:
         name = spec.partition("=")[0]
@@ -102,5 +102,5 @@ for case in CASES:
             d = [r["ms"] for r in rs]
             print(f"{case.split(':')[0]:14} {name:22} {v:16} {med(d):6.0f} {min(d):5}-{max(d):<5} {med([r['cpu_us'] for r in rs]) / 1000:6.0f} "
                   f"{rs[0]['streams']:7} {med([r['inorder_us'] for r in rs]) / 1000:10.0f} {med([r['mst_us'] for r in rs]) / 1000:8.0f} "
-                  f"{med([r['join_us'] for r in rs]) / 1000:7.0f} {rs[0]['join_in']:9} {rs[0]['parts']:5} {rs[0]['marks']:5} "
+                  f"{med([r['join_us'] for r in rs]) / 1000:7.0f} {rs[0]['join_in']:9} {rs[0]['parts']:5} {rs[0]['marks']:5} {rs[0]['sel_rows']:9} "
                   f"{med([r['read_rows'] for r in rs]):9.0f} {rs[0]['ids']:6}")

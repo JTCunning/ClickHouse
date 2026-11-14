@@ -1,0 +1,9 @@
+s_base narrow  on-read (branch)       median 38 ms (34-56), SelectedParts 93, n=21
+s_base narrow  index analysis (fix)   median 28 ms (25-40), SelectedParts 3, n=21
+s_base mid     on-read (branch)       median 47 ms (43-57), SelectedParts 93, n=21
+s_base mid     index analysis (fix)   median 40 ms (37-65), SelectedParts 23, n=21
+ts narrow  on-read (branch)       median 84 ms (82-87), SelectedParts 31, n=11
+ts narrow  index analysis (fix)   median 86 ms (79-98), SelectedParts 30, n=11
+ts mid     on-read (branch)       median 168 ms (162-182), SelectedParts 31, n=11
+ts mid     index analysis (fix)   median 166 ms (164-257), SelectedParts 31, n=11
+finished

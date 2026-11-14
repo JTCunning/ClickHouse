@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-14T00:08:47Z",
+  "updated": "2026-11-14T01:44:22Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -268,11 +268,11 @@
     {
       "slug": "selector-one-tags-row-per-id",
       "title": "Keep one tags row per time series before the time ranges join of the TimeSeries selector",
-      "summary": "30 unmerged tags copies x 60k series: id set from 60k rows instead of 1.8M, lookup 1,820 -> 1,473 ms (-19%, emulated); merged unchanged",
+      "summary": "30 unmerged tags copies x 60k series: id set from 60k rows instead of 1.8M, lookup 1,881 -> 1,476 ms (-22%, emulated); 2nd commit keeps the text index in the analysis (93 small parts: 186 -> 96 selected parts, = master); merged unchanged",
       "status": "ready-to-build",
       "priority": 8,
       "branch": "lilred-perf-selector-one-tags-row-per-id",
-      "head": "e7c7718174258c36d3af575c0f2f33073401b8d7",
+      "head": "952df5b41e35ecad32ef1b3d1783fcec9a3ff6ce",
       "base": "2b1bef1d3b52ef64fa7f182943bb392e10c14441",
       "issue": 18,
       "pr_text": "prs/selector-one-tags-row-per-id.md",
@@ -297,7 +297,7 @@
         "tests/performance/promql_selector_pk_range.xml"
       ],
       "claim": "On a version 11 table whose tags parts are not merged (bench/v11-unmerged-idset: 60,000 series written by 30 inserts, merges stopped), a selector matching the whole metric builds its id set from 60,000 rows instead of 1.8M and its id lookup is 15-25% faster (emulated 1,820 -> 1,473 ms, CPU -30%); selectors of 6,000 and 10 series and the merged copy unchanged (+-3%).",
-      "pass_if": "05638 passes on B and fails on A only on its 'Created Set ... from N rows' / 'LIMIT 1 BY id' lines; 05452, 05493, 04836 pass on B. Lab T1 at least 10% faster and T2 'Created Set with 60000 entries from 60000 rows' on B, significant at 99.5%; G1 (6k, 10 series), G2 (ts_merged) and the guard perf XMLs not significantly slower; E1 (/api/v1/series?limit=1) on ts_merged not significantly slower (on unmerged ts +20-50% is the disclosed cost).",
+      "pass_if": "05638 passes on B and fails on A only on its 'Created Set ... from N rows' / 'LIMIT 1 BY id' lines (its last check, no read-time index lines, passes on both); 05452, 05493, 04836 pass on B. Lab T1 at least 10% faster and T2 'Created Set with 60000 entries from 60000 rows' on B, significant at 99.5%; G1 (6k, 10 series), G2 (ts_merged), G4 (steady.sh s_base, 93 small tags parts: narrow and mid lookup, use_query_condition_cache 0 and 1, SelectedParts equal on A and B) and the guard perf XMLs not significantly slower; E1 (/api/v1/series?limit=1) on ts_merged not significantly slower (on unmerged ts +20-50% is the disclosed cost).",
       "notes": "The A/B is the lab in bench/v11-unmerged-idset (README there), not an in-tree perf XML: the case needs unmerged parts, which a CI fill merges at its own pace. The .reference of 05638 was edited by hand from master's output (three lines); take it from the built branch if it differs only in formatting. Collapse only with the default id generator (tree-hash compare in isDefaultIDGenerator); if T2 shows 1.8M rows on B, that compare did not match the stored DEFAULT. Category Experimental Feature."
     }
   ]
