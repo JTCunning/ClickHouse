@@ -1,0 +1,33 @@
+-- regular expression, no id ranges
+1970-01-01 00:01:40.000	1
+1970-01-01 00:03:20.000	2
+1970-01-01 00:04:10.000	8
+1970-01-01 00:05:00.000	4
+-- list of the same names, id ranges
+1970-01-01 00:01:40.000	1
+1970-01-01 00:03:20.000	2
+1970-01-01 00:04:10.000	8
+1970-01-01 00:05:00.000	4
+-- no matcher on __name__
+1970-01-01 00:01:40.000	1
+1970-01-01 00:02:30.000	6
+1970-01-01 00:03:20.000	2
+1970-01-01 00:05:00.000	4
+-- only a negative matcher on __name__
+1970-01-01 00:01:40.000	1
+1970-01-01 00:03:20.000	2
+-- regular expression, id is not a tuple
+1970-01-01 00:01:40.000	1
+1970-01-01 00:05:00.000	4
+-- regular expression, the first component of id is a hash of the tags
+1970-01-01 00:01:40.000	1
+1970-01-01 00:05:00.000	4
+-- generated query: the filter by the first component of id
+05768_list	0
+05768_negative_name	0
+05768_no_name	0
+05768_regex	1
+05768_tags_hash_regex	0
+05768_uint64_regex	0
+-- the regular expression skips the granules of the other metric, as the list does
+1	1

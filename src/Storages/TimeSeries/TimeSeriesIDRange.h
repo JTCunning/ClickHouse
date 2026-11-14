@@ -34,6 +34,11 @@ using TimeSeriesIDRanges = std::vector<TimeSeriesIDRange>;
 std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
     const PrometheusQueryTree::MatcherList & matchers, const ASTPtr & id_generator, const DataTypePtr & id_type);
 
+/// Whether the id generator is `tuple(<expression of the metric name only>, <anything>)` and the id type is a two-component tuple
+/// whose first component is neither LowCardinality nor Nullable: then all the time series of one metric have the same first
+/// component of `id` (see TimeSeriesIDRange), and a condition on it can be used by the primary key of a table ordered by `id`.
+bool hasMetricNameFirstComponent(const ASTPtr & id_generator, const DataTypePtr & id_type);
+
 /// `<id> >= tuple(<first_component>, <min_S>) AND <id> <= tuple(<first_component>, <max_S>)`
 ASTPtr makeIDInRangeCondition(const ASTPtr & id, const TimeSeriesIDRange & range);
 

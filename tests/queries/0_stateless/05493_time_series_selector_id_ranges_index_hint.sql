@@ -68,7 +68,8 @@ SETTINGS max_rows_to_read = 0; -- system.text_log can be really big
 SELECT '-- the id ranges in indexHint still prune the time ranges table';
 
 -- `max_bytes_to_merge_at_max_space_in_pool = 1` keeps the time range of `qux` in a part of its own; every other inner table has one part.
--- The filter by the first component of `id` alone does not prune that part, so without the index hint the list reads as many rows as the regex.
+-- The filter by the first component of `id` alone does not prune that part, so without the index hint the list reads as many rows as
+-- a selector without a matcher on `__name__`. (A regex on `__name__` prunes that part too, by the first components of the ids it selects.)
 DROP TABLE IF EXISTS ts_prune;
 CREATE TABLE ts_prune ENGINE = TimeSeries
 TIME RANGES INNER ENGINE = AggregatingMergeTree ORDER BY id SETTINGS max_bytes_to_merge_at_max_space_in_pool = 1;
@@ -83,15 +84,15 @@ INSERT INTO FUNCTION timeSeriesTimeRanges({CLICKHOUSE_DATABASE:Identifier}.ts_pr
 SELECT sum(value) FROM timeSeriesSelector(ts_prune, '{__name__=~"foo|bar"}', 0, 1000, 'timestamp_and_value')
 SETTINGS log_comment = 'pruning_list', enable_parallel_replicas = 0;
 
-SELECT sum(value) FROM timeSeriesSelector(ts_prune, '{__name__=~"fo.|ba[r]"}', 0, 1000, 'timestamp_and_value')
-SETTINGS log_comment = 'pruning_regex', enable_parallel_replicas = 0;
+SELECT sum(value) FROM timeSeriesSelector(ts_prune, '{env="prod"}', 0, 1000, 'timestamp_and_value')
+SETTINGS log_comment = 'pruning_no_name', enable_parallel_replicas = 0;
 
 SYSTEM FLUSH LOGS query_log;
 SELECT
-    sumIf(read_rows, log_comment = 'pruning_regex') - sumIf(read_rows, log_comment = 'pruning_list') AS rows_pruned,
-    sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_regex') - sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_list') AS parts_pruned
+    sumIf(read_rows, log_comment = 'pruning_no_name') - sumIf(read_rows, log_comment = 'pruning_list') AS rows_pruned,
+    sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_no_name') - sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_list') AS parts_pruned
 FROM system.query_log
-WHERE event_date >= yesterday() AND current_database = currentDatabase() AND type = 'QueryFinish' AND log_comment IN ('pruning_list', 'pruning_regex')
+WHERE event_date >= yesterday() AND current_database = currentDatabase() AND type = 'QueryFinish' AND log_comment IN ('pruning_list', 'pruning_no_name')
 SETTINGS max_rows_to_read = 0; -- system.query_log can be really big
 
 DROP TABLE ts_prune;

@@ -194,6 +194,19 @@ std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
 }
 
 
+bool hasMetricNameFirstComponent(const ASTPtr & id_generator, const DataTypePtr & id_type)
+{
+    ASTPtr first_component = tryGetFirstComponent(id_generator);
+    if (!first_component || !dependsOnMetricNameOnly(first_component) || !tryGetSecondComponentType(id_type))
+        return false;
+
+    /// A condition on a LowCardinality or Nullable element can't be mapped to the bounds of the tuple key column,
+    /// so it couldn't skip granules.
+    const auto & first_component_type = typeid_cast<const DataTypeTuple &>(*id_type).getElements()[0];
+    return !first_component_type->lowCardinality() && !first_component_type->isNullable();
+}
+
+
 ASTPtr makeIDInRangeCondition(const ASTPtr & id, const TimeSeriesIDRange & range)
 {
     return makeASTForLogicalAnd(

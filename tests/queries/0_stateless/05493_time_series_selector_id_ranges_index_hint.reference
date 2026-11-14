@@ -15,7 +15,7 @@
 -- generated query: index hints, filters by the first component of id
 05493_alternatives	1	2
 05493_one_metric	1	2
-05493_regex	0	0
+05493_regex	0	1
 -- the id ranges in indexHint still prune the time ranges table
 3
 3

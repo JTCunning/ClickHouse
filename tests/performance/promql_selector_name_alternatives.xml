@@ -14,6 +14,11 @@
         every sample, so the time ranges table is joined and both the tags and the time ranges
         tables are read for half of the series. The single-metric selector and the regular
         expression over the same 100 metrics (no id ranges) are the controls: they must not regress.
+
+        A regular expression has no id ranges, so the time ranges table is read with a set of the first
+        components of the ids of the selected metrics. The narrow one selects 1 of the 200 metrics: the
+        primary key skips the granules of the others. The broad one selects 100 metrics, which are in
+        every granule, so it reads the whole table and shows the cost of the set.
     -->
 
     <create_query>CREATE TABLE promql_name_alternatives_ts ENGINE = TimeSeries</create_query>
@@ -34,6 +39,9 @@
     <!-- controls: one metric (one id range), and a regular expression over the same 100 metrics (no id ranges) -->
     <query>SELECT count() FROM timeSeriesSelector('promql_name_alternatives_ts', 'm_100', 1000000, 1000300, 'timestamp_and_value') SETTINGS max_threads = 4 FORMAT Null</query>
     <query>SELECT count() FROM timeSeriesSelector('promql_name_alternatives_ts', '{{__name__=~"m_1[0-9][0-9]"}}', 1000000, 1000300, 'timestamp_and_value') SETTINGS max_threads = 4 FORMAT Null</query>
+
+    <!-- a regular expression selecting 1 of the 200 metrics (no id ranges): the time ranges table is read over the granules of that metric -->
+    <query>SELECT count() FROM timeSeriesSelector('promql_name_alternatives_ts', '{{__name__=~".*_199"}}', 1000000, 1000300, 'timestamp_and_value') SETTINGS max_threads = 4 FORMAT Null</query>
 
     <drop_query>DROP TABLE IF EXISTS promql_name_alternatives_ts</drop_query>
 </test>
