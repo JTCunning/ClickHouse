@@ -1,0 +1,18 @@
+CREATE TEMPORARY TABLE tmp (id Tuple(UInt64, LowCardinality(UUID))) ENGINE = Memory;
+INSERT INTO tmp SELECT id FROM tags_p WHERE cityHash64(id) % 35 = 0 LIMIT 8500;
+INSERT INTO tmp SELECT tuple(sipHash64('new'), toLowCardinality(reinterpretAsUUID(sipHash128(toString(number))))) FROM numbers(8500);
+SELECT 'c2', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 2, max_threads = 2;
+SELECT 'c2', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 2, max_threads = 2;
+SELECT 'c2', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 2, max_threads = 2;
+SELECT 'c3', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 3, max_threads = 2;
+SELECT 'c3', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 3, max_threads = 2;
+SELECT 'c3', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 3, max_threads = 2;
+SELECT 'c4', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 4, max_threads = 2;
+SELECT 'c4', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 4, max_threads = 2;
+SELECT 'c4', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 4, max_threads = 2;
+SELECT 'c8', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 8, max_threads = 2;
+SELECT 'c8', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 8, max_threads = 2;
+SELECT 'c8', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 8, max_threads = 2;
+SELECT 'c16', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 16, max_threads = 2;
+SELECT 'c16', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 16, max_threads = 2;
+SELECT 'c16', count() FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, merge_tree_coarse_index_granularity = 16, max_threads = 2;

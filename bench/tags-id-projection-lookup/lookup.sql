@@ -1,0 +1,10 @@
+CREATE TEMPORARY TABLE tmp (id Tuple(UInt64, LowCardinality(UUID))) ENGINE = Memory;
+INSERT INTO tmp SELECT id FROM tags_p WHERE cityHash64(id) % 35 = 0 LIMIT 8500;
+INSERT INTO tmp SELECT tuple(sipHash64('new'), toLowCardinality(reinterpretAsUUID(sipHash128(toString(number))))) FROM numbers(8500);
+SELECT 'tmp', count() FROM tmp;
+SELECT 'explain-sub-exact';
+EXPLAIN indexes = 1 SELECT id FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, use_index_for_in_with_subqueries = 1, statistics_max_set_size_for_exact_selectivity_estimation = 0;
+SELECT 'explain-sub-default';
+EXPLAIN indexes = 1 SELECT id FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, use_index_for_in_with_subqueries = 1;
+SELECT 'explain-no-force';
+EXPLAIN indexes = 1 SELECT id FROM tags_p WHERE id IN (SELECT id FROM tmp) SETTINGS optimize_use_projections = 1, use_index_for_in_with_subqueries = 1, statistics_max_set_size_for_exact_selectivity_estimation = 0;
