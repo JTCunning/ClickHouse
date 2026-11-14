@@ -73,7 +73,8 @@ public:
         const ContextPtr & context);
 
     /// Sets the settings the query made by makeSelectIDsQuery relies on: the time ranges table is joined by a merge join
-    /// over tables read in the order of `id`.
+    /// over tables read in the order of `id`, in the order the query is written (no join order optimization in the plans
+    /// optimized with this context: the in-place set of the samples read and the HTTP API queries).
     static void applySettingsForSelectIDsQuery(Context & context);
 
     void readImpl(

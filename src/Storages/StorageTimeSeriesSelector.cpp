@@ -1180,6 +1180,10 @@ void StorageTimeSeriesSelector::applySettingsForSelectIDsQuery(Context & context
     context.setSetting("optimize_read_in_order", true);
     /// The legacy setting turns `LEFT ANY JOIN` into `RIGHT_ANY`, which the merge join cannot run.
     context.setSetting("any_join_distinct_right_table_keys", false);
+    /// The order of the join is fixed: the time ranges table is the right side and both sides are read in the order of `id`.
+    /// The join order optimization could only swap the two sides, and to decide that, it would load the statistics of the columns
+    /// of both tables in every part left by the primary key, without the bound of `min_marks_per_part_to_load_statistics`.
+    context.setSetting("query_plan_optimize_join_order_limit", UInt64{0});
 }
 
 
