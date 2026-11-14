@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-13T23:10:51Z",
+  "updated": "2026-11-14T00:08:47Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -264,6 +264,41 @@
       "claim": "An instant selector of a PromQL range query evaluated at a step that a rollup step divides reads samples_<step> with a result identical to the raw samples. Emulated on 2 vCPU (1000 series x 7 days, 15 s scrapes): selector grid at 1h ~29x faster, 5m ~5x, 1m ~2x; columns 25% / 5.3% / 0.45% of the raw samples bytes for 1m / 5m / 1h. Range functions read raw and don't change. Fixed against daa5327: left-closed intervals returned the previous scrape at every evaluation time on exact 15 s scrapes.",
       "pass_if": "05508, 05621, the gtests NormalizeTimeSeriesDefinitionTest.* (ENABLE_TESTS=ON) and the also_run tests pass on B. bench/rollup-samples/ab/run.sh <B> <A> <dir> (the A/B is this harness, not perf.py): equality.tsv has series_differ 0 everywhere; selector at 5m and 1h (1d/7d/30d) >= 2x faster at p50 with >= 4x fewer read_bytes; at 1m >= 1.25x and >= 2x; no guard (range functions, 15s, raw vs master) more than 5% slower; ab_rollup ('1m, 5m, 1h') insert <= 1.25x ab_plain, small inserts <= 1.2x, samples storage <= 1.35x; ab_rollup_coarse ('5m, 1h') <= 1.1x and <= 1.1x; ab_plain on B within 5% of A. Second run SHAPE=aligned DAYS=7: equality still 0. Edge run SCRAPE=60 STEPS='1m' DAYS=7: selector_1d_1m not slower than 0.95x.",
       "notes": "The branch is James's jtcunning/timeseries-rollup-samples @ daa5327 plus 12 commits; base = its merge base, and it merges cleanly into master e8473460558a. Build A at the base (same base as B), plus master for the insert-cost arm if wanted. The perf XML can't run on A (master has no samples_rollup_steps): at submission add do_not_check_in_pr=\"<PR number>\" to its <create_query> and <fill_query> (perf.py needs the number). James decides: (1) rate-type functions over rollups: A keep exact-only (recommended), B a richer column type later, C approximate behind a setting; the harness's probe.tsv measures their error and speed. (2) rename time_series_prefer_rollup_tables to ..._columns (unreleased, cheap). (3) ALTER MODIFY SETTING / backfill: a route via DEFAULT arrayReduce + MATERIALIZE COLUMN is in the report, not built. (4) #128889 (samples_downsampling_periods) uses toStartOfInterval, the left-closed convention this branch fixed for rollups. The .mdx pages were reverted to the base: the docs live only in the C++ doc strings (generated regions are read-only for the review bot). Preflight: 3 rounds; R1 4 Majors fixed, R2 1 Major fixed, R3 no code findings (the remaining asks are the build, the A/B numbers and do_not_check_in_pr)."
+    },
+    {
+      "slug": "selector-one-tags-row-per-id",
+      "title": "Keep one tags row per time series before the time ranges join of the TimeSeries selector",
+      "summary": "30 unmerged tags copies x 60k series: id set from 60k rows instead of 1.8M, lookup 1,820 -> 1,473 ms (-19%, emulated); merged unchanged",
+      "status": "ready-to-build",
+      "priority": 8,
+      "branch": "lilred-perf-selector-one-tags-row-per-id",
+      "head": "e7c7718174258c36d3af575c0f2f33073401b8d7",
+      "base": "2b1bef1d3b52ef64fa7f182943bb392e10c14441",
+      "issue": 18,
+      "pr_text": "prs/selector-one-tags-row-per-id.md",
+      "report": "reports/2026-11-13-selector-one-tags-row-per-id.md",
+      "ab_plan": "ab-plans/selector-one-tags-row-per-id.md",
+      "tests": {
+        "stateless": [
+          "05638_time_series_selector_one_tags_row_per_id"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": [
+          "05452_time_series_selector_time_ranges_any_join",
+          "05493_time_series_selector_id_ranges_index_hint",
+          "04836_time_series_v10_selector_whole_metric_pk_range"
+        ]
+      },
+      "perf_tests": [],
+      "guard_perf_tests": [
+        "tests/performance/promql_selector_id_range_row_cost.xml",
+        "tests/performance/promql_selector_name_alternatives.xml",
+        "tests/performance/promql_selector_pk_range.xml"
+      ],
+      "claim": "On a version 11 table whose tags parts are not merged (bench/v11-unmerged-idset: 60,000 series written by 30 inserts, merges stopped), a selector matching the whole metric builds its id set from 60,000 rows instead of 1.8M and its id lookup is 15-25% faster (emulated 1,820 -> 1,473 ms, CPU -30%); selectors of 6,000 and 10 series and the merged copy unchanged (+-3%).",
+      "pass_if": "05638 passes on B and fails on A only on its 'Created Set ... from N rows' / 'LIMIT 1 BY id' lines; 05452, 05493, 04836 pass on B. Lab T1 at least 10% faster and T2 'Created Set with 60000 entries from 60000 rows' on B, significant at 99.5%; G1 (6k, 10 series), G2 (ts_merged) and the guard perf XMLs not significantly slower; E1 (/api/v1/series?limit=1) on ts_merged not significantly slower (on unmerged ts +20-50% is the disclosed cost).",
+      "notes": "The A/B is the lab in bench/v11-unmerged-idset (README there), not an in-tree perf XML: the case needs unmerged parts, which a CI fill merges at its own pace. The .reference of 05638 was edited by hand from master's output (three lines); take it from the built branch if it differs only in formatting. Collapse only with the default id generator (tree-hash compare in isDefaultIDGenerator); if T2 shows 1.8M rows on B, that compare did not match the stored DEFAULT. Category Experimental Feature."
     }
   ]
 }

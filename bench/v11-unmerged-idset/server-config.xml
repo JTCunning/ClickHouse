@@ -1,0 +1,21 @@
+<clickhouse>
+  <logger><level>information</level><log>server.log</log><errorlog>err.log</errorlog></logger>
+  <tcp_port>19100</tcp_port><http_port>18124</http_port>
+  <listen_host>127.0.0.1</listen_host>
+  <path>./db/</path><tmp_path>./tmp/</tmp_path><user_files_path>./uf/</user_files_path>
+  <max_server_memory_usage>2400000000</max_server_memory_usage>
+  <mark_cache_size>268435456</mark_cache_size>
+  <uncompressed_cache_size>268435456</uncompressed_cache_size>
+  <query_log><database>system</database><table>query_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></query_log>
+  <text_log><database>system</database><table>text_log</table><level>debug</level><flush_interval_milliseconds>1000</flush_interval_milliseconds></text_log>
+  <processors_profile_log><database>system</database><table>processors_profile_log</table><flush_interval_milliseconds>1000</flush_interval_milliseconds></processors_profile_log>
+  <users><default><password></password><networks><ip>127.0.0.1</ip></networks><profile>default</profile><quota>default</quota><access_management>1</access_management></default></users>
+  <profiles><default><max_memory_usage>2000000000</max_memory_usage><enable_time_series_table>1</enable_time_series_table><allow_experimental_time_series_table>1</allow_experimental_time_series_table><session_timezone>UTC</session_timezone></default></profiles>
+  <quotas><default/></quotas>
+  <prometheus>
+    <port>19094</port>
+    <handlers>
+      <api><url_prefix>/api/v1</url_prefix><handler><type>api_v1</type><table>default.ts</table></handler></api>
+    </handlers>
+  </prometheus>
+</clickhouse>
