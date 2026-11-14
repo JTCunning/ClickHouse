@@ -2,23 +2,29 @@
 # run.sh LABEL PATH SENDERS SERIES SPS UNIVERSE REQUESTS_PER_SENDER [extra rw.py args]
 # Runs SENDERS parallel rw.py senders against 127.0.0.1:19093/PATH and prints one result line:
 # wall time, samples/s, server CPU (utime+stime of the server process, includes merges), parts written, peak RSS.
+# Env (defaults = the 2026-11-01 setup): PIDFILE, TCP_PORT (19000), RW_PORT (19093), CH (master binary).
+# SETTLE=1 waits for system.merges to be empty before the start and after the senders finish (bounded 600 s each),
+# so the CPU of a run includes the merges it caused and none from the run before (the 2026-11-01 runs were +-20% without it).
 set -euo pipefail
 LABEL=$1 P=$2 S=$3 N=$4 SPS=$5 U=$6 R=$7; shift 7
 DIR=$(cd "$(dirname "$0")" && pwd)
-PID=$(pgrep -P $(cat /root/nerve-workspace/tools/clickhouse/data/remote-write-baseline/server.pid) -x clickhouse)
-C="/root/nerve-workspace/tools/clickhouse/master/clickhouse client --port 19000"
+PID=$(pgrep -P $(cat ${PIDFILE:-/root/nerve-workspace/tools/clickhouse/data/remote-write-baseline/server.pid}) -x clickhouse)
+C="${CH:-/root/nerve-workspace/tools/clickhouse/master/clickhouse} client --port ${TCP_PORT:-19000}"
+settle() { [ "${SETTLE:-0}" = 1 ] || return 0; for _ in $(seq 600); do [ "$($C -q "SELECT count() FROM system.merges")" = 0 ] && return 0; sleep 1; done; echo "merges did not settle in 600 s" >&2; }
+settle
 ev() { $C -q "SELECT sumIf(value, event='MergeTreeDataWriterBlocks'), sumIf(value, event='InsertedRows'), sumIf(value, event='AsyncInsertQuery') FROM system.events"; }
 cpu() { awk '{print $14+$15}' /proc/$PID/stat; }
 read b0 r0 a0 < <(ev); c0=$(cpu); t0=$(date +%s.%N); peak=0
 pids=()
 for i in $(seq 0 $((S-1))); do
   # each sender gets its own slice of the series universe
-  python3 $DIR/rw.py "http://127.0.0.1:19093/$P" --series $N --samples-per-series $SPS --universe $U --requests $R --id-offset $((i*U)) "$@" \
+  python3 $DIR/rw.py "http://127.0.0.1:${RW_PORT:-19093}/$P" --series $N --samples-per-series $SPS --universe $U --requests $R --id-offset $((i*U)) "$@" \
     > /tmp/rw_$i.log 2>&1 &
   pids+=($!)
 done
 while kill -0 "${pids[@]}" 2>/dev/null; do r=$(awk '/VmRSS/{print $2}' /proc/$PID/status); [ "$r" -gt "$peak" ] && peak=$r; sleep 0.2; done
 rc=0; for p in "${pids[@]}"; do wait $p || rc=1; done
+settle
 t1=$(date +%s.%N); c1=$(cpu); read b1 r1 a1 < <(ev)
 [ $rc = 0 ] || { echo "FAILED"; cat /tmp/rw_*.log | tail -5; exit 1; }
 tick=$(getconf CLK_TCK)

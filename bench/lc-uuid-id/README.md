@@ -27,3 +27,5 @@ FROM numbers(150000) SETTINGS max_insert_block_size = 16384, max_threads = 2, ma
 - `python3 pe.py`: re-creates `promql_selector_pk_range` for both and prints the ProfileEvents that differ.
 
 Each case: 1 discarded warm-up, then RUNS (5) interleaved runs per variant, `max_threads = 2`; medians from `system.query_log`.
+
+`ab/` (2026-11-14): the two-server version for the A/B plan (`ab-plans/lowcardinality-uuid-id.md`): `server.sh` starts one server per variant from the same binary, `ab.py` fills identical data (single-threaded, ending at the fill time), checks the layouts match, compares results, then runs `clickhouse benchmark` across the servers at 99.5%. `bench/remote-write-baseline/run.sh` gained `SETTLE=1` and port/pid overrides for the ingest cases.
