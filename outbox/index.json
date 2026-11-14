@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-14T10:00:27Z",
+  "updated": "2026-11-14T11:38:18Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -336,6 +336,44 @@
       "claim": "On object storage with statistics not cached (bench/tags-in-subquery-cold: 64 fresh parts per inner table, 50 ms per GET), the selector's id lookup is 9-13% faster for narrow, rare-token, wide and metric-only selectors and loads no statistics (92/154 -> 0); prewarmed and warm unchanged (+-3%).",
       "pass_if": "05640 passes on B; on A its four 'join order optimizations:' lines print 1. 05452, 05493, 04836 pass on B. Lab T1-T4 (cold) at least 7% faster on B at 99.5% with LoadedStatistics 0; G1 (prewarmed), G2 (warm, 30 rounds), the guard perf XMLs and E1 (/api/v1/series, /api/v1/labels) not significantly slower.",
       "notes": "The A/B is the cold S3 lab (bench/tags-in-subquery-cold + bench/idlookup-adaptive-index, README there), not a perf XML: the gain needs statistics that aren't cached, which CI perf runs never have. The lab server resumes merges on restart: rerun gen.sh after each start. The .reference of 05640 is master's output with the setting forced on the session (the branch's behaviour); take it from the built branch if it differs. Merges cleanly with #18's branch. Users can get the same effect today with query_plan_optimize_join_order_limit = 0 in the PromQL user's profile."
+    },
+    {
+      "slug": "time-ranges-metric-filter",
+      "title": "Read the TimeSeries time ranges table by metric for a regex on the metric name",
+      "summary": "Needs upstream #115482 first. Emulated: a `__name__` regex matching 1 of 200 metrics -22..-31%; the XML's broad-regex control +6..11%",
+      "status": "needs-work",
+      "priority": 10,
+      "branch": "lilred-perf-time-ranges-metric-filter",
+      "head": "22340b032da2c02fbf928ea163deb76b794a6405",
+      "base": "83b6da032407",
+      "issue": 17,
+      "pr_text": "prs/time-ranges-metric-filter.md",
+      "report": "reports/2026-11-14-time-ranges-metric-filter.md",
+      "ab_plan": "ab-plans/time-ranges-metric-filter.md",
+      "tests": {
+        "stateless": [
+          "05768_time_series_selector_regex_time_ranges_metric_filter",
+          "05493_time_series_selector_id_ranges_index_hint"
+        ],
+        "integration": [],
+        "gtest_filter": null,
+        "also_run": [
+          "05452_time_series_selector_time_ranges_any_join",
+          "04836_time_series_v10_selector_whole_metric_pk_range",
+          "05446_time_series_selector_id_set_bucketed_samples"
+        ]
+      },
+      "perf_tests": [
+        "tests/performance/promql_selector_name_alternatives.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/promql_selector_pk_range.xml",
+        "tests/performance/promql_selector_id_range_row_cost.xml"
+      ],
+      "claim": "With upstream #115482, a selector whose __name__ regex matches 1 of 200 metrics (.*_199 in promql_selector_name_alternatives.xml) is at least 15% faster and reads the time ranges table only over that metric's granules; the file's broad regex control m_1[0-9][0-9] is at most 10% slower (emulated +6..11%).",
+      "pass_if": "05768 and 05493 pass on B (= branch + #115482); on master 05768 prints '05768_regex 0' and a last line '0 1'. T1/T3 at least 15% faster at 99.5%, T1 selects at most 2 of ~25 time-ranges granules; G1 (broad regex) at most 10% slower; G2, G3, E2 not significantly slower. Profile G1 with processors_profile_log (A/B plan).",
+      "notes": "Not buildable yet: B needs master + upstream #115482 rebased (it conflicts in KeyCondition.cpp/.h; 412 commits to that file since its base). A = master + #115482, B = A + this branch, A2 = plain master. The .reference of 05768 is predicted (master output with its two branch lines changed); take it from the built B if it differs. Side finding for James, not in this branch: regex matchers with '|' are anchored as ^a|b$ (correctness).",
+      "decision": "Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then."
     }
   ]
 }

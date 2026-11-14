@@ -2,6 +2,7 @@
 **Verdict:** The proposed `id IN (ids from the tags table)` filter works, and it's simple. But it trades one shape against another: it makes the ids query about 3× faster for a regex matching under ~1% of series, is flat at ~10%, and is 17–37% slower above that. That includes +16% on the regex control of the in-tree perf test `promql_selector_name_alternatives.xml`. No branch yet: the regression-free route needs upstream #115482 first. Three options for James are below.
 **Task:** 2026-11-05-handoff-limit-the-time-ranges-read-for- · handoff https://github.com/JTCunning/ClickHouse/issues/17 · **Build:** 26.11.1.2075, `1e2fc59b8f1c` (master 2026-11-12) · **Date:** 2026-11-12
 **A/B plan:** [ab-plans/time-ranges-regex-ids.md](../ab-plans/time-ranges-regex-ids.md)
+**Update 2026-11-14:** James chose option A. Its branch and the emulation are in [2026-11-14-time-ranges-metric-filter.md](2026-11-14-time-ranges-metric-filter.md). Correction: on the in-tree XML's table, the metric-level set costs +6–11% on the broad regex control, not the 0–2% measured below on the 2.1M-series dataset, so option A isn't regression-free.
 
 ## What happens (plain language)
 - A selector like `{__name__=~".*cpu.*"}` has no metric id ranges, so the time ranges side of the selector join is `SELECT id, 1 AS matched FROM time_ranges WHERE max_time >= <start> AND min_time <= <end>`.

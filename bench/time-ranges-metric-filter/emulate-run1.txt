@@ -1,0 +1,9 @@
+narrow .*_199 (1 of 200 metrics): 1 metrics matched
+broad m_1[0-9][0-9] (100 of 200, XML control): 100 metrics matched
+case	result	median_ms	min_ms	max_ms	read_rows	memory_MiB	(n=9, interleaved)
+narrow .*_199 (1 of 200 metrics) | A	20000	26	19	41	266816	12
+narrow .*_199 (1 of 200 metrics) | set	20000	26	22	32	181504	7
+narrow .*_199 (1 of 200 metrics) | B~	20000	18	15	22	83200	7
+broad m_1[0-9][0-9] (100 of 200, XML control) | A	2000000	167	158	180	420992	64
+broad m_1[0-9][0-9] (100 of 200, XML control) | set	2000000	177	167	190	527488	67
+broad m_1[0-9][0-9] (100 of 200, XML control) | B~	2000000	221	213	238	527488	76
