@@ -22,3 +22,6 @@ Created Set with 1 entries from 1 rows
 LIMIT 1 BY id
 [('__name__','foo'),('env','prod'),('job','a')]	1970-01-01 00:01:40.000	1
 [('__name__','foo'),('env','prod'),('job','a')]	1970-01-01 00:03:20.000	2
+-- the text index on the tags drops the parts without the selected time series in the index analysis, not while reading
+0
+[('__name__','foo'),('env','a')]	1970-01-01 00:01:40.000	1

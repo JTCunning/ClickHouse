@@ -26,6 +26,7 @@
 #include <Parsers/ASTOrderByElement.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
+#include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
@@ -486,8 +487,8 @@ namespace
 
     /// Whether the identifiers are made by the default generator: a hash of the `tags` column, which contains all the tags
     /// (see TimeSeriesIDGenerator::tryGetDefault). Then the rows of the tags table with the same `id` written with this generator
-    /// are equal; rows of an earlier generator (the setting `id_generator` can be changed on tables of version 9 or earlier)
-    /// are collapsed as a merge of the tags table would collapse them.
+    /// are equal. Rows whose ids were not made by this generator (an earlier generator: the setting `id_generator` can be changed
+    /// on tables of version 9 or earlier; or ids written explicitly) and share an `id` are collapsed to one of them, which may be any.
     bool isDefaultIDGenerator(const ASTPtr & id_generator, const DataTypePtr & table_id_type)
     {
         auto default_id_generator = TimeSeriesIDGenerator::tryGetDefault(table_id_type);
@@ -643,7 +644,8 @@ namespace
 
     /// Makes the source of the tags for a query which joins the time ranges table (see addTimeRangesTableJoin):
     ///
-    ///     (SELECT id, tags, metric_name, tag_column1, ... FROM tags_table WHERE <filter> ORDER BY id LIMIT 1 BY id) AS tags_subquery
+    ///     (SELECT id, tags, metric_name, tag_column1, ... FROM tags_table WHERE <filter> ORDER BY id LIMIT 1 BY id
+    ///      SETTINGS use_skip_indexes_on_data_read = 0) AS tags_subquery
     ///
     /// Until its parts are merged, the tags table has a row for a time series in each part written with it. Each such row
     /// would go through the join, `timeSeriesStoreTags` and the set of identifiers built from the query. Used only with
@@ -693,6 +695,20 @@ namespace
             select_query->setExpression(ASTSelectQuery::Expression::LIMIT_BY, std::move(limit_by));
         }
 
+        /// SETTINGS use_skip_indexes_on_data_read = 0
+        /// The read in the order of `id` makes a stream for each selected part. Applied while reading, the skip indexes of the tags
+        /// table (the text index on `tags`) would keep a stream for every part of the metric that the query condition cache doesn't
+        /// exclude, also for the parts in which they drop every granule; applied in the index analysis, they leave those parts out
+        /// before the streams are made. A query with a join applies them there anyway (see ReadFromMergeTree::supportsSkipIndexesOnDataRead),
+        /// so the tags table read directly by the joining query did too; this subquery has no join. The other tables of the query keep
+        /// the setting.
+        {
+            auto settings = make_intrusive<ASTSetQuery>();
+            settings->is_standalone = false;
+            settings->changes.emplace_back("use_skip_indexes_on_data_read", Field{false});
+            select_query->setExpression(ASTSelectQuery::Expression::SETTINGS, std::move(settings));
+        }
+
         /// A subquery joined with another table needs an alias (see the setting `joined_subquery_requires_alias`).
         auto subquery = make_intrusive<ASTSubquery>(wrapIntoSelectWithUnionQuery(std::move(select_query)));
         subquery->setAlias("tags_subquery");
@@ -736,7 +752,8 @@ namespace
 
         if (rows_with_same_id_are_equal && joinsTimeRangesTable(time_ranges_table_id, time_range_to_filter_ids))
         {
-            /// FROM (SELECT id, tags, metric_name, tag_column1, ... FROM tags_table_id WHERE <filter> ORDER BY id LIMIT 1 BY id) AS tags_subquery
+            /// FROM (SELECT ... FROM tags_table_id WHERE <filter> ORDER BY id LIMIT 1 BY id SETTINGS ...) AS tags_subquery,
+            /// see makeTagsSubqueryWithOneRowPerID
             select_query->setExpression(
                 ASTSelectQuery::Expression::TABLES,
                 makeTablesInSelectQuery(makeTagsSubqueryWithOneRowPerID(tags_table_id, column_name_by_tag_name, std::move(where_filter))));

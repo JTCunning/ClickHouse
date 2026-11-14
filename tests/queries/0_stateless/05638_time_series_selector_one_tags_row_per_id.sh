@@ -73,6 +73,17 @@ $CLIENT --send_logs_level debug -q "SELECT 1 FROM timeSeriesSelector(ts_columns,
     | grep -o -E 'LIMIT 1 BY id|Created Set with [0-9]+ entries from [0-9]+ rows' | sort -u
 $CLIENT -q "SELECT timeSeriesIdToTags(id), timestamp, value FROM timeSeriesSelector(ts_columns, 'foo{env=\"prod\"}', 0, 1000, 'timestamp_and_value') ORDER BY timestamp"
 
+echo '-- the text index on the tags drops the parts without the selected time series in the index analysis, not while reading'
+$CLIENT -q "CREATE TABLE ts_parts ENGINE = TimeSeries SETTINGS tags_deduplication_cache_size_bytes = 0"
+stop_merges ts_parts
+for env in a b c; do
+    $CLIENT -q "INSERT INTO ts_parts (metric_name, tags, samples) VALUES ('foo', map('env', '$env'), [(toDateTime64(100, 3), 1)])"
+done
+$CLIENT --send_logs_level debug -q "SELECT 1 FROM timeSeriesSelector(ts_parts, 'foo{env=\"a\"}', 0, 1000, 'timestamp_and_value') FORMAT Null" 2>&1 \
+    | grep -c -E 'has dropped [0-9]+/[0-9]+ granules in part'
+$CLIENT -q "SELECT timeSeriesIdToTags(id), timestamp, value FROM timeSeriesSelector(ts_parts, 'foo{env=\"a\"}', 0, 1000, 'timestamp_and_value')"
+
 $CLIENT -q "DROP TABLE ts"
 $CLIENT -q "DROP TABLE ts_custom_id"
 $CLIENT -q "DROP TABLE ts_columns"
+$CLIENT -q "DROP TABLE ts_parts"
