@@ -304,8 +304,8 @@
     {
       "slug": "selector-ids-fixed-join-order",
       "title": "Do not optimize the join order of the TimeSeries selector's ids query",
-      "summary": "Ids query skips join planning that only loaded statistics for a fixed-order join: cold S3 lookup -9..-13% (4 selectors, emulated), warm/prewarmed +-2%",
-      "status": "ready-to-build",
+      "summary": "your build, verdict fail: cold -6.8..-17% (T3 under the 7% bar, 13 statistics loads left); prewarmed +15..+40%",
+      "status": "results-in",
       "priority": 9,
       "branch": "lilred-perf-selector-ids-fixed-join-order",
       "head": "df2da4e4f1c30481f4669b5d45b3bafe3a83dd3c",

@@ -11,7 +11,6 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 | 1 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rate-type functions: you chose A (exact-only). Still open: rename `time_series_prefer_rollup_tables` to `..._columns`? Answer on #16; it does not block the build. |
 | 2 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 | 3 | **Build and A/B**: `ab rollup-samples` | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h) |
-| 4 | **Build and A/B**: `ab selector-ids-fixed-join-order` | [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | Ids query skips join planning that only loaded statistics for a fixed-order join: cold S3 lookup -9..-13% (4 selectors, emulated), warm/prewarmed +-2% |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 
@@ -22,6 +21,7 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | [#10](https://github.com/JTCunning/ClickHouse/issues/10) | reworking the branch, or dropping it | run 2: gap slowdown gone in every arrival order; no memory growth on sparse or every-2nd-minute series |
 | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | [#15](https://github.com/JTCunning/ClickHouse/issues/15) | judging your results | your build, verdict fail: cold T1 -6.1% (857 -> 805 ms), under the 15% bar; the 13 serial index loads did not occur on that window (6 parts) |
 | [selector-one-tags-row-per-id](../prs/selector-one-tags-row-per-id.md) | [#18](https://github.com/JTCunning/ClickHouse/issues/18) | judging your results | your build, verdict fail: wide selector -13% at 2 threads, -5% at 8; merged wide selector +13% at 2 threads (52 -> 59 ms) |
+| [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | judging your results | your build, verdict fail: cold -6.8..-17% (T3 under the 7% bar, 13 statistics loads left); prewarmed +15..+40% |
 
 ## Submitted
 
