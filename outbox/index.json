@@ -269,8 +269,8 @@
     {
       "slug": "selector-one-tags-row-per-id",
       "title": "Keep one tags row per time series before the time ranges join of the TimeSeries selector",
-      "summary": "30 unmerged tags copies x 60k series: id set from 60k rows instead of 1.8M, lookup 1,881 -> 1,476 ms (-22%, emulated); 2nd commit keeps the text index in the analysis (93 small parts: 186 -> 96 selected parts, = master); merged unchanged",
-      "status": "ready-to-build",
+      "summary": "your build, verdict fail: wide selector -13% at 2 threads, -5% at 8; merged wide selector +13% at 2 threads (52 -> 59 ms)",
+      "status": "results-in",
       "priority": 8,
       "branch": "lilred-perf-selector-one-tags-row-per-id",
       "head": "952df5b41e35ecad32ef1b3d1783fcec9a3ff6ce",
