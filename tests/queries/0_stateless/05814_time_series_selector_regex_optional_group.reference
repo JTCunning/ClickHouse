@@ -1,0 +1,17 @@
+-- optional group in the metric name
+[1,2]
+[1,2]
+-- group between literals
+[5,6]
+-- product of groups
+[2,5]
+-- nested groups
+[2,5]
+-- optional group in a label matcher
+[8,9]
+[1]
+-- syntax outside the supported subset is evaluated as a regular expression
+[1,2]
+-- the primary key is used
+4
+2

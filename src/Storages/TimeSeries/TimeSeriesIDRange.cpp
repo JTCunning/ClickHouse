@@ -23,11 +23,9 @@ namespace DB
 
 namespace
 {
-    /// Returns the metric names selected by the matchers if they contain exactly one equality matcher or one regex matcher
-    /// of literal alternatives on `__name__`, and all the names are non-empty. Otherwise returns nullopt.
-    std::optional<Strings> tryGetMetricNames(const PrometheusQueryTree::MatcherList & matchers)
+    /// Returns the only matcher selecting metrics by name, `__name__="m"` or `__name__=~"..."`, or nullptr if there is none or several.
+    const PrometheusQueryTree::Matcher * findMetricNameMatcher(const PrometheusQueryTree::MatcherList & matchers)
     {
-        /// Find the only matcher selecting metrics by name: `__name__="m"` or `__name__=~"m1|m2"`.
         const PrometheusQueryTree::Matcher * name_matcher = nullptr;
         for (const auto & matcher : matchers)
         {
@@ -35,27 +33,26 @@ namespace
                 && ((matcher.matcher_type == PrometheusQueryTree::MatcherType::EQ) || (matcher.matcher_type == PrometheusQueryTree::MatcherType::RE)))
             {
                 if (name_matcher)
-                    return {};
+                    return nullptr;
                 name_matcher = &matcher;
             }
         }
-        if (!name_matcher)
-            return {};
+        return name_matcher;
+    }
 
-        /// Take the names: the value of the equality, or the terms of the regex if they are plain literals.
+    /// Returns the value of the equality matcher, or the terms of the regex matcher if they are plain literals,
+    /// and all the names are non-empty. Otherwise returns nullopt.
+    std::optional<Strings> tryGetLiteralMetricNames(const PrometheusQueryTree::Matcher & name_matcher)
+    {
         std::optional<Strings> metric_names;
-        if (name_matcher->matcher_type == PrometheusQueryTree::MatcherType::EQ)
-            metric_names = Strings{name_matcher->label_value};
+        if (name_matcher.matcher_type == PrometheusQueryTree::MatcherType::EQ)
+            metric_names = Strings{name_matcher.label_value};
         else
-            metric_names = tryGetLiteralAlternatives(name_matcher->label_value);
+            metric_names = tryGetLiteralAlternatives(name_matcher.label_value);
 
         /// Reject an empty name: a series always has a metric name.
         if (!metric_names || std::ranges::any_of(*metric_names, [](const String & metric_name) { return metric_name.empty(); }))
             return {};
-
-        /// Drop repeated names, as in `__name__=~"m|m"`, so that no range is repeated.
-        std::ranges::sort(*metric_names);
-        metric_names->erase(std::ranges::unique(*metric_names).begin(), metric_names->end());
         return metric_names;
     }
 
@@ -157,10 +154,13 @@ namespace
 
 
 std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
-    const PrometheusQueryTree::MatcherList & matchers, const ASTPtr & id_generator, const DataTypePtr & id_type)
+    const PrometheusQueryTree::MatcherList & matchers,
+    const ASTPtr & id_generator,
+    const DataTypePtr & id_type,
+    const MetricNamesResolver & resolve_metric_names)
 {
-    std::optional<Strings> metric_names = tryGetMetricNames(matchers);
-    if (!metric_names)
+    const auto * name_matcher = findMetricNameMatcher(matchers);
+    if (!name_matcher)
         return {};
 
     /// tuple(<expression of the metric name only>, <anything>)
@@ -177,6 +177,21 @@ std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
     auto min_max_second_component = makeMinMaxLiteralsForIDComponent(*second_component_type);
     if (!min_max_second_component)
         return {};
+
+    std::optional<Strings> metric_names = tryGetLiteralMetricNames(*name_matcher);
+    if (!metric_names && resolve_metric_names && (name_matcher->matcher_type == PrometheusQueryTree::MatcherType::RE))
+    {
+        metric_names = resolve_metric_names(*name_matcher);
+        /// No metric matches. The empty name stands for it: no series has it, so its range selects no rows.
+        if (metric_names && metric_names->empty())
+            metric_names->emplace_back();
+    }
+    if (!metric_names)
+        return {};
+
+    /// Drop repeated names, as in `__name__=~"m|m"`, so that no range is repeated.
+    std::ranges::sort(*metric_names);
+    metric_names->erase(std::ranges::unique(*metric_names).begin(), metric_names->end());
 
     TimeSeriesIDRanges ranges;
     for (String & metric_name : *metric_names)

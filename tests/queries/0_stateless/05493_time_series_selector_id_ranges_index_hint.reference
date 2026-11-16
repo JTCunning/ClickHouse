@@ -7,7 +7,7 @@
 1970-01-01 00:03:20.000	2
 1970-01-01 00:04:10.000	8
 1970-01-01 00:05:00.000	4
--- regular expression, no id ranges
+-- regular expression, resolved to id ranges
 1970-01-01 00:01:40.000	1
 1970-01-01 00:03:20.000	2
 1970-01-01 00:04:10.000	8
@@ -15,8 +15,8 @@
 -- generated query: index hints, filters by the first component of id
 05493_alternatives	1	2
 05493_one_metric	1	2
-05493_regex	0	0
+05493_regex	1	2
 -- the id ranges in indexHint still prune the time ranges table
 3
 3
-1	1
+2	1

@@ -8,8 +8,8 @@
 namespace DB
 {
 
-/// Returns the terms of a regex like `a|b` or `(a|b)|(?:c)` if every term is a plain literal.
-/// A group is allowed only as a whole term, so `(a|b)c` is not a list.
+/// Returns the strings matched by a regex like `a|b`, `(a|b)|(?:c)`, `x(a|b)y` or `x(_total)?` if the regex has no other syntax.
+/// Returns nullopt if the regex is not such a list, nests groups too deeply, or expands to too many strings.
 std::optional<Strings> tryGetLiteralAlternatives(std::string_view regex);
 
 }

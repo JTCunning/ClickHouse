@@ -1024,6 +1024,51 @@ namespace
         return res;
     }
 
+    /// A regex on `__name__` matching more metrics than this is not resolved to id ranges.
+    constexpr size_t MAX_RESOLVED_METRIC_NAMES = 64;
+
+    /// Lists the metrics matched by a regex on `__name__`, or returns nullopt if more than MAX_RESOLVED_METRIC_NAMES match.
+    std::optional<Strings> tryResolveMetricNames(
+        const StorageID & tags_table_id,
+        const PrometheusQueryTree::Matcher & name_matcher,
+        const std::unordered_map<String, String> & column_name_by_tag_name,
+        const ContextPtr & context,
+        const LoggerPtr & log)
+    {
+        auto select_query = make_intrusive<ASTSelectQuery>();
+        select_query->distinct = true;
+
+        auto select_list_exp = make_intrusive<ASTExpressionList>();
+        select_list_exp->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName));
+        select_query->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+        select_query->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(tags_table_id)));
+        select_query->setExpression(ASTSelectQuery::Expression::WHERE, matcherToAST(name_matcher, column_name_by_tag_name));
+        select_query->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, make_intrusive<ASTLiteral>(UInt64{MAX_RESOLVED_METRIC_NAMES + 1}));
+
+        ASTPtr query = wrapIntoSelectWithUnionQuery(std::move(select_query));
+        LOG_DEBUG(log, "Resolving the metrics matched by {}: {}", quoteString(name_matcher.label_value), query->formatForLogging());
+
+        InterpreterSelectQueryAnalyzer interpreter(query, context, SelectQueryOptions{});
+        auto io = interpreter.execute();
+        PullingPipelineExecutor executor(io.pipeline);
+
+        Strings metric_names;
+        Block block;
+        while (executor.pull(block))
+        {
+            const auto & column = *block.getByPosition(0).column;
+            for (size_t i = 0; i != block.rows(); ++i)
+                metric_names.emplace_back(String(column.getDataAt(i)));
+        }
+
+        if (metric_names.size() > MAX_RESOLVED_METRIC_NAMES)
+        {
+            LOG_DEBUG(log, "More than {} metrics match {}: reading the time ranges table without id ranges", MAX_RESOLVED_METRIC_NAMES, quoteString(name_matcher.label_value));
+            return {};
+        }
+        return metric_names;
+    }
+
     /// Checks whether the selector can carry a primary-key range on the samples table's `id` column covering the whole metric,
     /// and makes the range condition if it can:
     /// `indexHint(tuple(hash(metric_name), min_S) <= id AND id <= tuple(hash(metric_name), max_S))`.
@@ -1211,10 +1256,16 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
     else
     {
         auto tags_table_metadata = time_series_storage.getTargetTable(ViewTarget::Tags, context)->getInMemoryMetadataPtr(context, false);
+        const auto column_name_by_tag_name = makeColumnNameByTagNameMap(time_series_settings);
+        const auto log = getLogger("StorageTimeSeriesSelector");
         const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
-            matchers, getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type), table_id_type);
+            matchers,
+            getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type),
+            table_id_type,
+            [&](const PrometheusQueryTree::Matcher & name_matcher)
+            { return tryResolveMetricNames(tags_table_id, name_matcher, column_name_by_tag_name, context, log); });
         select_query = makeSelectQueryFromTagsTable(
-            tags_table_id, matchers, makeColumnNameByTagNameMap(time_series_settings), time_ranges_table_id, time_range_to_filter_ids,
+            tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids,
             metric_id_ranges, table_timestamp_type);
     }
 
@@ -1309,8 +1360,17 @@ void StorageTimeSeriesSelector::readImpl(
     if (bucket_step && !context->getSettingsRef().isChanged("merge_tree_min_rows_for_concurrent_read"))
         modified_context->setSetting("merge_tree_min_rows_for_concurrent_read", UInt64{0});
 
+    bool metric_names_resolved_from_tags = false;
     const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
-        matchers, getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type), config.table_id_type);
+        matchers,
+        getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type),
+        config.table_id_type,
+        [&](const PrometheusQueryTree::Matcher & name_matcher)
+        {
+            auto metric_names = tryResolveMetricNames(tags_table_id, name_matcher, column_name_by_tag_name, context, log);
+            metric_names_resolved_from_tags = metric_names.has_value();
+            return metric_names;
+        });
 
     /// A table storing one sample per row (see `TimeSeriesSettings::hasBucketedSamples`) can read the samples table by a primary-key
     /// range of the whole metric instead of the id set, if a probe of the tags table shows that the selector matches the whole metric
@@ -1318,7 +1378,8 @@ void StorageTimeSeriesSelector::readImpl(
     /// the set is used by the primary-key index analysis too, which is cheap with the few rows of such a table, and the set selects
     /// the granules of the selected series only, while the probe would cost a query per selector.
     ASTPtr whole_metric_id_range_condition;
-    if (!time_series_settings->hasBucketedSamples())
+    /// A metric inserted after the names were resolved is outside the ranges, so the ranges of resolved names are not used to read the samples table.
+    if (!time_series_settings->hasBucketedSamples() && !metric_names_resolved_from_tags)
     {
         whole_metric_id_range_condition = tryMakeWholeMetricIDRangeConditions(
             metric_id_ranges,
