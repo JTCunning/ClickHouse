@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-14T11:38:18Z",
+  "updated": "2026-11-16T00:57:40Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -123,7 +123,6 @@
       "slug": "grid-gap-wraparound",
       "title": "Grow the timeSeries*ToGrid bucket map before inserting a colliding key",
       "summary": "run 2: gap slowdown gone in every arrival order; no memory growth on sparse or every-2nd-minute series",
-      "decision": "Park this branch and treat upstream 124777 (dense array) as the fix for 125759 (A, lil red recommends), or one more iteration (8-cell run check, displaced-key fix), then run 3 (B)? Answer on #10.",
       "status": "needs-work",
       "priority": 4,
       "branch": "lilred-perf-grid-gap-wraparound",
