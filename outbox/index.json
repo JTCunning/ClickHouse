@@ -228,7 +228,7 @@
       "slug": "rollup-samples",
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
       "summary": "instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h)",
-      "decision": "Rate-type functions over rollups: keep exact-only (A, lil red recommends), a richer column type later (B), or approximate behind a setting (C)? And rename `time_series_prefer_rollup_tables` to `..._columns`? Answer on #16; neither blocks the build.",
+      "decision": "Rate-type functions: you chose A (exact-only). Still open: rename `time_series_prefer_rollup_tables` to `..._columns`? Answer on #16; it does not block the build.",
       "status": "ready-to-build",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",
