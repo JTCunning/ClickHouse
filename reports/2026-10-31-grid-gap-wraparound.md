@@ -1,5 +1,7 @@
 # timeSeries*ToGrid is 4–6× slower on series with a mid-range gap
 
+**Status 2026-11-16: parked.** James chose option A on #10: upstream #124777 is the fix for #125759, and this branch will not be submitted. See the last section.
+
 **Verdict:** Worth fixing. It is a 26.10 regression from #124773, and a small fix restores the 26.9 speed while keeping most of #124773's memory saving. Branch `lilred/perf-grid-gap-wraparound` is ready but unbuilt ([compare](https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred/perf-grid-gap-wraparound)). Neither open PR targets this directly.
 **Task:** 2026-10-31-timeseriestogrid-gap-slowdown-125759 · upstream issue https://github.com/ClickHouse/ClickHouse/issues/125759 · **Build:** 26.11.1.974, a7f713612c80 (master, 2026-10-31) · **Date:** 2026-10-31
 
@@ -106,3 +108,9 @@ For the branch column, build `lilred/perf-grid-gap-wraparound` and run the same 
 
 Each fix opens the next case: a local signal on an identity-hashed, linearly probed table is a heuristic stack. The structural fix is #124777 (a plain array for dense states), which removes the #125759 shape outright. Branch tip `84bdb18276cb` is pushed and unbuilt; the outbox item is `needs-work`, waiting for James (issue #10). Model: `bench/grid-gap-wraparound/model/`; A/A: `bench/grid-gap-wraparound/layout-draw/`.
 
+## Update 2026-11-16: parked
+
+James answered option A on #10: park this branch and treat upstream #124777 as the fix for #125759.
+- #124777 is still open (it merged master on 2026-11-12, head `b2cdc09e7cc4`). It moves a state's buckets to a plain array once they fill at least half of the index span they cover and the array takes no more memory than the map, so a series as dense as the #125759 one (61%) never probes the hash table. Sparser gapped series stay on the hash table, as on master.
+- The outbox item is `dropped`. Branch `lilred-perf-grid-gap-wraparound` stays in the fork as it is (measured head `e6d27f5cc1d4`, unbuilt tip `84bdb18276cb`) and gets no more commits.
+- If #124777 closes without merging, the #125759 slowdown is open again. A new attempt should start from the array layout, not from another growth heuristic.

@@ -1,6 +1,6 @@
 # Grow the timeSeries*ToGrid bucket map before inserting a colliding key
 
-**Status 2026-11-10: not ready to submit.** Run 2 failed its pass rule, and review rounds 5–7 found three more shapes where the rule misfires; the round-7 Majors on `84bdb18276cb` are open (see the self-review below). Waiting for James's decision on issue #10: park in favour of #124777, or one more iteration.
+**Status 2026-11-16: parked, not to be submitted.** James chose option A on issue #10: upstream #124777 (a plain array for dense states) is the fix for #125759. Run 2 failed its pass rule, and review rounds 5–7 found three more shapes where the rule misfires; the round-7 Majors on `84bdb18276cb` stay open (see the self-review below). The branch is kept as it is, for reference.
 
 Branch: `lilred-perf-grid-gap-wraparound` @ `84bdb18276cb` (base master `52529f0c7115`; merges cleanly with master `8f3f96290d5b`, 2026-11-10). The numbers below are run 2 (James's build of `e6d27f5cc1d4`). Since then: `8544ce7267c8` (comments, merge order pinned in the tests, early-first merge query) and `84bdb18276cb` (the rule grows only when the doubling separates the two keys; a model puts every run-2 case where it was, and fixes the sparse gap's reverse-order and later-run-first doubling). Run 3 re-measures everything on `84bdb18276cb`, the bucketing guard on byte-identical data · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-grid-gap-wraparound
 
