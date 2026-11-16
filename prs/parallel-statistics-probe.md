@@ -1,5 +1,7 @@
 # [unbuilt] Probe the primary key of parts in parallel when deciding to load statistics
 
+**Status 2026-11-16: dropped, not to be submitted.** Upstream #131667 (merged 2026-11-15) is the same fix: it probes windows of `max_threads` parts in parallel when more than one primary index isn't in memory, and decides as the serial probe. Run 1 of James's A/B: cold T1 −6.1% (857 → 805 ms), under the 15% bar, on a window that held 2 of the 13 serial index loads.
+
 Branch: `lilred-perf-parallel-statistics-probe` · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-parallel-statistics-probe
 
 <!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->

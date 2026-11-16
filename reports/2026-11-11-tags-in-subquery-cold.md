@@ -4,6 +4,8 @@
 **Task:** 2026-11-02-handoff-tags-in-subquery-and-cold-part- · handoff https://github.com/JTCunning/ClickHouse/issues/15 · **Build:** 26.11.1.1642, master `7b5f2bf328f9` · **Date:** 2026-11-11
 **A/B plan:** ab-plans/parallel-statistics-probe.md
 
+**Update 2026-11-16: the fix branch is dropped; upstream has the same fix.** #131667 (merged 2026-11-15, in 26.11.1.2336) makes the statistics probe load the primary indexes of parts in parallel when more than one isn't in memory. It works in windows of `max_threads` parts, consumed in order, so it decides exactly as the serial probe. The branch did the same thing with a work queue. Its ClickBench cold numbers on EBS: 0.64–0.69× on Q37/Q40–Q42 at 4 threads. James's build A/B of the branch (2026-11-13) measured cold T1 at 857 → 805 ms (−6.1%, 9 of 9 pairs faster), under the 15% bar. His run loaded only 2 recent-samples primary indexes, not 13, and selected 6 parts against 59 here, so the window held one serial round trip to save: −52 ms, which is what the mechanism predicts for 2 parts. The window most likely missed most of his dataset: `query.sql.example` had fixed timestamps from this report's dataset. `gen.sh` now writes `query.sql` for the data it generates. Everything else below still stands: the rest of the cold chain (text index, tags data, cache-segment predownload) and the config suggestions.
+
 ## What happens (plain language)
 A selector runs as a single query: read the samples table where `id IN (tags lookup)`. The tags lookup has to finish before ClickHouse can narrow the samples read by primary key, so it runs during planning (`QueryPlan::optimize`). On cold S3 every step of that lookup is a request that waits for the one before it:
 1. Load each tags part's primary index.

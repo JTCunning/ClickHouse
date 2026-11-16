@@ -9,6 +9,10 @@ BATCHES=${BATCHES:-64}
 T_END=${T_END:-$(( ( $(date +%s) / 900 ) * 900 ))}
 T0=$(( T_END - BATCHES * 900 ))
 echo "$T0 $T_END" > "${OUT:-.}/time_range.txt"
+# The target query covers the last 3 h of this dataset, so its window follows the data. A window kept from a dataset
+# generated on another day selects few parts or none, and the cold chain under test doesn't run.
+sed -e "s/\$START/$(( T_END - 10800 ))/" -e "s/\$END/$T_END/" "$(dirname "$0")/query.sql.example" > "${OUT:-.}/query.sql"
+echo "query.sql: $(( T_END - 10800 ))..$T_END ($(date -u -d @$(( T_END - 10800 )) +%FT%TZ) .. $(date -u -d @$T_END +%FT%TZ))"
 $CH -n -q "
 DROP TABLE IF EXISTS ts SYNC;
 CREATE TABLE ts ENGINE = TimeSeries

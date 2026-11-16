@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-16T11:02:18Z",
+  "updated": "2026-11-16T23:07:11Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -190,8 +190,8 @@
     {
       "slug": "parallel-statistics-probe",
       "title": "Probe the primary key of parts in parallel when deciding to load statistics",
-      "summary": "your build, verdict fail: cold T1 -6.1% (857 -> 805 ms), under the 15% bar; the 13 serial index loads did not occur on that window (6 parts)",
-      "status": "results-in",
+      "summary": "dropped: upstream #131667 (merged 2026-11-15) is the same fix; your run 1 was -6.1% on a window with 2 of the 13 serial index loads",
+      "status": "dropped",
       "priority": 6,
       "branch": "lilred-perf-parallel-statistics-probe",
       "head": "41e5fec573dcf017070873ea810beedd974b2035",
@@ -222,7 +222,7 @@
       ],
       "claim": "Cold reads on a remote disk: the statistics probe of #126627 loads the primary indexes of the parts in parallel instead of one after another. Lab (bench/tags-in-subquery-cold, S3 mock at 50 ms per GET, max_threads 16): the cold PromQL range query 3,204 ms -> about 2,600 ms (emulated 2,540 ms + one round trip); the 13 samples-part index loads go from a 617 ms serial span to one wave. Warm (98 ms), post-prewarm and use_primary_key_cache = 1 warm (103 ms) reads unchanged: the serial path.",
       "pass_if": "05620 passes on B (and under TSan if a sanitizer build is at hand); 05407, 02864, 03788, 04266 pass on B. Lab T1 (cold, 50 ms per GET) at least 15% faster than A and significant at 99.5%, with the recentsamples primary-index GET span at most 2 round trips on B; G1 (post-prewarm), G2 (warm), G3 (warm with use_primary_key_cache = 1) and E1 (local-disk cold start) not significantly slower; the guard perf XMLs not significantly slower.",
-      "notes": "The A/B is the S3-mock lab in bench/tags-in-subquery-cold (README there), not an in-tree perf XML: CI perf tests run warm and on local disk, so they can only show 'nothing slower'. Run it on a host with at least 8 vCPU so the Python mock does not queue requests. Generic MergeTree code (MergeTreeDataSelectExecutor, IMergeTreeDataPart), not the TimeSeries engine: category Not for changelog while #126627 (merged 2026-11-07, 26.11.1.1600) is unreleased; if 26.11 is cut with #126627 first, switch to Performance Improvement (suggested entry in prs/). The natural reviewer is the author of #126627. Preflight: 3 rounds; code Approve-ready, the remaining ask is the build numbers."
+      "notes": "Dropped 2026-11-16, not to be submitted. Upstream #131667 (merged 2026-11-15, 26.11.1.2336) probes windows of max_threads parts in parallel when more than one primary index is not in memory, and decides as the serial probe; the branch did the same with a work queue. Run 1 (2026-11-13): cold T1 857 -> 805 ms (-6.1%), recent-samples index span 52 -> 0 ms; the window selected 6 parts (59 in the report) and 2 recent-samples index loads (13), most likely because query.sql kept the example's fixed timestamps. gen.sh now writes query.sql for its own data. 05620's query_log filter also matched the runner's log_comment (moot now). Branch kept, untouched."
     },
     {
       "slug": "rollup-samples",
