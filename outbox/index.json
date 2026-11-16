@@ -190,8 +190,8 @@
     {
       "slug": "parallel-statistics-probe",
       "title": "Probe the primary key of parts in parallel when deciding to load statistics",
-      "summary": "cold query on `s3` (50 ms/GET) 3.2 s → ~2.6 s (emulated): the statistics probe loads the parts' primary indexes in parallel; warm unchanged",
-      "status": "ready-to-build",
+      "summary": "your build, verdict fail: cold T1 -6.1% (857 -> 805 ms), under the 15% bar; the 13 serial index loads did not occur on that window (6 parts)",
+      "status": "results-in",
       "priority": 6,
       "branch": "lilred-perf-parallel-statistics-probe",
       "head": "41e5fec573dcf017070873ea810beedd974b2035",
