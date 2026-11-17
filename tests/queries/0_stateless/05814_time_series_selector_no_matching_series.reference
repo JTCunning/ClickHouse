@@ -1,0 +1,15 @@
+-- a regex on __name__ matching no metric returns no samples
+0
+-- a regex on __name__ matching a metric and a tag matching no series returns no samples
+0
+-- a regex on __name__ matching a metric returns its samples in the time range
+3
+2
+-- an exact name matching no series returns no samples
+0
+-- the time ranges table is joined only when a regex selector matches a series; an exact name reads it by the id range of the metric
+ts_exact_no_series	1
+ts_regex_1500	1
+ts_regex_all	1
+ts_regex_no_metric	0
+ts_regex_no_series	0

@@ -495,6 +495,8 @@ namespace
     /// the time series passing the filter (`timeSeriesStoreTags` registers the tags of the time series it's applied to).
     /// With `metric_id_ranges` the time ranges table is read by its primary key over the ranges of the selected metrics, and the time series
     /// with identifiers outside the ranges (written with another id generator) are kept without filtering by time.
+    /// Without `metric_id_ranges` the join is built only after a probe of the tags table finds a series matching the selector
+    /// (see timeRangesJoinHasNoMatchingSeries).
     void addTimeRangesTableJoin(
         ASTSelectQuery & select_query,
         const StorageID & time_ranges_table_id,
@@ -1170,6 +1172,72 @@ namespace
         ASTPtr qualified_id = make_intrusive<ASTIdentifier>(std::vector<String>{samples_table_id.database_name, samples_table_id.table_name, TimeSeriesColumnNames::ID});
         return makeASTFunction("indexHint", makeIDInRangeCondition(qualified_id, metric_id_range));
     }
+
+    /// Whether the query selecting identifiers from the tags table would join the time ranges table (see applyTimeRangeFilterToSelectIDsQuery)
+    /// over the whole time ranges table while no series of the tags table matches the matchers.
+    ///
+    /// Without `metric_id_ranges` the time ranges side of the merge join is read in the order of `id` from the beginning of the table,
+    /// so a selector matching no series (a regex on `__name__` matching no metric, for example) reads the time ranges table of every
+    /// metric for an empty result. The probe
+    ///
+    ///     SELECT 1 FROM tags_table WHERE <matchers> LIMIT 1
+    ///
+    /// stops at the first matching series, so it costs little when the selector matches something, and when it matches nothing
+    /// it reads the same rows of the tags table the join would read. A series inserted after the probe is missed the same way
+    /// the query without the probe misses a series inserted after its tags subquery is evaluated.
+    bool timeRangesJoinHasNoMatchingSeries(
+        const StorageID & tags_table_id,
+        const PrometheusQueryTree::MatcherList & matchers,
+        const std::unordered_map<String, String> & column_name_by_tag_name,
+        const StorageID & time_ranges_table_id,
+        const TableTimeRange & time_range_to_filter_ids,
+        const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
+        const DataTypePtr & table_timestamp_type,
+        const ContextPtr & context,
+        const LoggerPtr & log)
+    {
+        if (!time_ranges_table_id || time_range_to_filter_ids.containsAllTimestamps() || metric_id_ranges)
+            return false;
+
+        /// SELECT 1 FROM tags_table WHERE <matchers> LIMIT 1
+        auto probe_select = make_intrusive<ASTSelectQuery>();
+        {
+            auto select_list_exp = make_intrusive<ASTExpressionList>();
+            select_list_exp->children.push_back(make_intrusive<ASTLiteral>(UInt64{1}));
+            probe_select->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+            probe_select->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(tags_table_id)));
+            probe_select->setExpression(
+                ASTSelectQuery::Expression::WHERE,
+                makeWhereFilterForTagsTable(matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type));
+            probe_select->setExpression(ASTSelectQuery::Expression::LIMIT_LENGTH, make_intrusive<ASTLiteral>(UInt64{1}));
+        }
+        ASTPtr probe_query = wrapIntoSelectWithUnionQuery(std::move(probe_select));
+
+        LOG_DEBUG(log, "Probing whether any series matches the selector before joining the time ranges table: {}", probe_query->formatForLogging());
+
+        try
+        {
+            InterpreterSelectQueryAnalyzer interpreter(probe_query, context, SelectQueryOptions{});
+            auto io = interpreter.execute();
+            PullingPipelineExecutor executor(io.pipeline);
+            Block block;
+            while (executor.pull(block))
+            {
+                if (block.rows() > 0)
+                    return false;
+            }
+        }
+        catch (...)
+        {
+            /// The probe only skips work the query without it does for an empty result; an error here must not fail
+            /// a query that works without the probe (an error the main query would also hit, e.g. a missing access right
+            /// on the tags table, still surfaces when the main query reads the tags table).
+            LOG_DEBUG(log, "Keeping the time ranges join: the probe of the tags table failed with {}", getCurrentExceptionMessage(false));
+            return false;
+        }
+
+        return true;
+    }
 }
 
 
@@ -1213,9 +1281,19 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
         auto tags_table_metadata = time_series_storage.getTargetTable(ViewTarget::Tags, context)->getInMemoryMetadataPtr(context, false);
         const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
             matchers, getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type), table_id_type);
-        select_query = makeSelectQueryFromTagsTable(
-            tags_table_id, matchers, makeColumnNameByTagNameMap(time_series_settings), time_ranges_table_id, time_range_to_filter_ids,
-            metric_id_ranges, table_timestamp_type);
+        auto column_name_by_tag_name = makeColumnNameByTagNameMap(time_series_settings);
+        if (timeRangesJoinHasNoMatchingSeries(
+                tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
+                table_timestamp_type, context, getLogger("StorageTimeSeriesSelector")))
+        {
+            select_query = makeSelectNoIDsQuery(table_id_type);
+        }
+        else
+        {
+            select_query = makeSelectQueryFromTagsTable(
+                tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids,
+                metric_id_ranges, table_timestamp_type);
+        }
     }
 
     /// Alias the returned expression (`timeSeriesStoreTags(...)`, which returns `id`) so callers can reference the column by a fixed name.
@@ -1311,6 +1389,15 @@ void StorageTimeSeriesSelector::readImpl(
 
     const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
         matchers, getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type), config.table_id_type);
+
+    if (timeRangesJoinHasNoMatchingSeries(
+            tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
+            config.table_timestamp_type, interpreter_context, log))
+    {
+        /// No series matches the selector. Nothing is read - an uninitialized query plan reads from an empty source.
+        LOG_DEBUG(log, "Selector {} matches no series of the tags table: returning no samples", quoteString(config.selector.toString()));
+        return;
+    }
 
     /// A table storing one sample per row (see `TimeSeriesSettings::hasBucketedSamples`) can read the samples table by a primary-key
     /// range of the whole metric instead of the id set, if a probe of the tags table shows that the selector matches the whole metric
