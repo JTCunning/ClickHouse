@@ -1,0 +1,41 @@
+Smoke 2026-11-17 (study run, mode B) on 2 vCPU / 4 GiB, master binary 26.11.1.2253 (f0a9e6bffa71, 2026-11-13; before #131678, so samples granules were 524288 B).
+Data: gen.sh's generator inline (SERIES=300000 WIDE=100000 SAMPLES=40), every inner table OPTIMIZE FINAL to 1 part:
+  samples 300000 rows 19.77 MiB, tags 300000 rows 14.90 MiB (tags_idx text index on tags), timeranges 4.79 MiB, recentsamples 0 rows.
+Raw: run-2026-11-17.jsonl (bench.py, 6 warm runs), ab-2026-11-17.jsonl (ab.py, 9 interleaved rounds; written before ab.py gained plan_ms/postings/walls).
+
+A. bench.py: full selector median ms | extracted tags subquery alone: ms, CPU ms, MiB read, posting lookups
+  instance=~"host-1.*"            22,254 series  full 120.5 | tags 43.0  cpu 29.3  19.31 MiB    0
+  same as IN of 111 values         22,254 series  full 118.0 | tags 24.0  cpu 24.0   7.71 MiB  111
+  instance=~"host-1[0-9]:9100"     2,094 series  full 113.5 | tags 36.0  cpu 24.6  19.31 MiB    0
+  same as IN of 10 values           2,094 series  full 108.0 | tags 21.0  cpu 17.0   7.71 MiB   10
+  job="job3" (reference)            9,848 series  full 131.5 | tags 23.5  cpu 17.6   7.71 MiB    1
+  (2026-11-01 on a7f713612c8: tags 39.5 / 29.5 / 34.5 / 23.0 / 25.5 ms, regex 9.21 MiB.)
+
+B. ab.py, 9 interleaved rounds, median ms (min-max)
+                                  selector          sum(rate(x[5m]))   instant x
+  host-1.* regex                  123 (120-175)     169 (163-190)      160 (153-192)
+  IN of 111 values                125 (123-171)     172 (156-182)      160 (149-197)
+  host-1[0-9]:9100 regex          115 (112-131)     124 (116-169)      131 (117-176)
+  IN of 10 values                 111 (105-131)     121 (118-160)      120 (115-153)
+  (2026-11-01: 126 -> 116, 172 -> 162, 165 -> 158; 121 -> 104, 126 -> 114, 124 -> 111.)
+
+C. Same rounds from system.query_log, medians: plan ms (QueryPlanBuild + QueryPlanOptimize; the in-place id set is built here), user CPU ms, MiB read, posting lookups
+  selector  host-1.* regex   plan 50.4  user  91.9  84.77 MiB    0
+  selector  IN 111           plan 52.8  user 106.6  84.14 MiB  111
+  selector  host-1[0-9] re   plan 45.2  user  88.9  84.31 MiB    0
+  selector  IN 10            plan 41.8  user  87.4  83.67 MiB   10
+  PromQL (sum(rate) and instant pooled, n=18): plan 55.9 / 52.7 / 50.5 / 47.0; user 132 / 132 / 89.8 / 90.6
+  -> Inside the real selector the regex and IN id set builds differ by -3..+2 ms and read the same bytes (+-0.6 MiB),
+     while the extracted subquery shows -19 ms and 19.31 vs 7.71 MiB. On this master the extracted subquery
+     (bench.py, run with join_algorithm='full_sorting_merge', optimize_read_in_order=1) no longer stands for what the
+     selector runs. Not attributed further.
+
+D. Does master's dictionary scan (#121650, merged 2026-11-02) serve a regex on a Map element? Direct query on the tags table,
+   WHERE metric_name = 'metric_0' AND <p>, use_query_condition_cache = 0, use_text_index_like_evaluation_by_dictionary_scan = 0 and 1:
+  match(tags['instance'], '^host-1.*$')    106,496 rows, 11.8 MiB, TextIndexDictionaryDFABuilds 0, posting lookups 0 (both settings)
+  tags['instance'] LIKE 'host-1%'          same
+  startsWith(tags['instance'], 'host-1')   same
+  -> No. The dictionary scan is only for the splitByNonAlpha and array tokenizers
+     (like_optimization_supported_tokenizers, src/Storages/MergeTree/MergeTreeIndexConditionText.cpp at origin/master 74bc5daa929);
+     tags_idx uses keyValuePairs.
+Server stopped and its data removed after the run.

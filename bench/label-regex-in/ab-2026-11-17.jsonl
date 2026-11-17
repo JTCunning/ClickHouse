@@ -1,0 +1,12 @@
+{"sel": "metric_0{instance=~\"host-1.*\"}", "kind": "selector", "n": 9, "med": 123.0, "mn": 120.0, "mx": 175.0, "mem_mib": 21.5, "read_rows": 313344}
+{"sel": "metric_0{instance=~\"host-1.*\"}", "kind": "promql_sum_rate", "n": 9, "med": 169.0, "mn": 163.0, "mx": 190.0, "mem_mib": 43.4, "read_rows": 313344}
+{"sel": "metric_0{instance=~\"host-1.*\"}", "kind": "promql_instant", "n": 9, "med": 160.0, "mn": 153.0, "mx": 192.0, "mem_mib": 34.1, "read_rows": 313344}
+{"sel": "metric_0{instance=~\"host-1:9100|host-10:9100|host-11:9100|host-12:9100", "kind": "selector", "n": 9, "med": 125.0, "mn": 123.0, "mx": 171.0, "mem_mib": 22.5, "read_rows": 313344}
+{"sel": "metric_0{instance=~\"host-1:9100|host-10:9100|host-11:9100|host-12:9100", "kind": "promql_sum_rate", "n": 9, "med": 172.0, "mn": 156.0, "mx": 182.0, "mem_mib": 44.0, "read_rows": 313344}
+{"sel": "metric_0{instance=~\"host-1:9100|host-10:9100|host-11:9100|host-12:9100", "kind": "promql_instant", "n": 9, "med": 160.0, "mn": 149.0, "mx": 197.0, "mem_mib": 34.7, "read_rows": 313344}
+{"sel": "metric_0{instance=~\"host-1[0-9]:9100\"}", "kind": "selector", "n": 9, "med": 115.0, "mn": 112.0, "mx": 131.0, "mem_mib": 9.3, "read_rows": 312576}
+{"sel": "metric_0{instance=~\"host-1[0-9]:9100\"}", "kind": "promql_sum_rate", "n": 9, "med": 124.0, "mn": 116.0, "mx": 169.0, "mem_mib": 9.6, "read_rows": 312576}
+{"sel": "metric_0{instance=~\"host-1[0-9]:9100\"}", "kind": "promql_instant", "n": 9, "med": 131.0, "mn": 117.0, "mx": 176.0, "mem_mib": 9.5, "read_rows": 312576}
+{"sel": "metric_0{instance=~\"host-10:9100|host-11:9100|host-12:9100|host-13:910", "kind": "selector", "n": 9, "med": 111.0, "mn": 105.0, "mx": 131.0, "mem_mib": 9.6, "read_rows": 312576}
+{"sel": "metric_0{instance=~\"host-10:9100|host-11:9100|host-12:9100|host-13:910", "kind": "promql_sum_rate", "n": 9, "med": 121.0, "mn": 118.0, "mx": 160.0, "mem_mib": 9.9, "read_rows": 312576}
+{"sel": "metric_0{instance=~\"host-10:9100|host-11:9100|host-12:9100|host-13:910", "kind": "promql_instant", "n": 9, "med": 120.0, "mn": 115.0, "mx": 153.0, "mem_mib": 9.8, "read_rows": 312576}
