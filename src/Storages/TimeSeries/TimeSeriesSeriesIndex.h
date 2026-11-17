@@ -54,6 +54,11 @@ public:
         VectorWithMemoryTracking<TagNamesAndValuesPtr> tags;
     };
 
+    /// Tells the index that a query is going to look for time series with a time range starting at `min_time`:
+    /// the index starts building if it is not built. Returns whether the index is built and can hold this time range,
+    /// so the query can skip the lookup otherwise.
+    bool prepareLookup(std::optional<Int64> min_time, const ContextPtr & query_context);
+
     /// Finds the time series matching `matchers` with a time range intersecting [`min_time`, `max_time`].
     /// The bounds are optional and have the scale of the timestamps in the table.
     /// The result contains every time series the query `StorageTimeSeriesSelector::makeSelectIDsQuery` would return

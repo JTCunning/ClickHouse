@@ -1998,6 +1998,20 @@ void TimeSeriesSeriesIndex::shutdown()
     impl->shutdown();
 }
 
+bool TimeSeriesSeriesIndex::prepareLookup(std::optional<Int64> min_time, const ContextPtr & query_context)
+{
+    if (impl->shutdown_called)
+        return false;
+
+    /// A query for a time range which the index never holds doesn't make the server build the index.
+    if (auto horizon_start = impl->getHorizonStart(query_context); horizon_start && (!min_time || (*min_time < *horizon_start)))
+        return false;
+
+    impl->last_lookup_seconds = Impl::nowSeconds();
+    impl->ensureTaskStarted();
+    return impl->state == Impl::State::Ready;
+}
+
 std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLookup(
     const PrometheusQueryTree::MatcherList & matchers,
     std::optional<Int64> min_time,

@@ -1530,10 +1530,23 @@ void StorageTimeSeriesSelector::readImpl(
         && canUseSeriesIndex(*context, tags_table_id, time_ranges_table_id))
         series_index = time_series_storage->getSeriesIndex();
 
+    std::optional<Int64> min_time_to_filter_ids;
+    std::optional<Int64> max_time_to_filter_ids;
+    if (time_range_to_filter_ids.min_time)
+        min_time_to_filter_ids = time_range_to_filter_ids.min_time->value;
+    if (time_range_to_filter_ids.max_time)
+        max_time_to_filter_ids = time_range_to_filter_ids.max_time->value;
+
+    /// A query doesn't prepare the lookup if the index is not built or never holds the time range of the query.
+    const bool check_series_index = query_settings[Setting::time_series_check_series_index];
+    if (series_index && !series_index->prepareLookup(min_time_to_filter_ids, context) && !check_series_index)
+    {
+        ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexMisses);
+        series_index = nullptr;
+    }
+
     if (series_index)
     {
-        const bool check_series_index = query_settings[Setting::time_series_check_series_index];
-
         /// The query reads none of these tables with the index, so the access to them is checked here.
         Strings tags_table_columns{TimeSeriesColumnNames::ID, TimeSeriesColumnNames::MetricName, TimeSeriesColumnNames::Tags};
         for (const auto & [tag_name, column_name] : column_name_by_tag_name)
@@ -1570,13 +1583,6 @@ void StorageTimeSeriesSelector::readImpl(
 
         ASTPtr select_query = make_select_query(makeSelectIDsFromTable(selected_ids_table_name), nullptr);
         InterpreterSelectQueryAnalyzer interpreter(select_query, index_context, options, column_names);
-
-        std::optional<Int64> min_time_to_filter_ids;
-        std::optional<Int64> max_time_to_filter_ids;
-        if (time_range_to_filter_ids.min_time)
-            min_time_to_filter_ids = time_range_to_filter_ids.min_time->value;
-        if (time_range_to_filter_ids.max_time)
-            max_time_to_filter_ids = time_range_to_filter_ids.max_time->value;
 
         Stopwatch watch;
         auto found = series_index->tryLookup(matchers, min_time_to_filter_ids, max_time_to_filter_ids, context, /* wait = */ check_series_index);
