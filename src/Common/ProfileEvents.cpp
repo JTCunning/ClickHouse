@@ -133,6 +133,12 @@
     M(TimeSeriesMetricFamiliesDeduplicationCacheMisses, "Number of rows written to the metric families tables of TimeSeries tables after they were not found in the deduplication cache.", ValueType::Number) \
     M(TimeSeriesTagsDeduplicationCacheHits, "Number of rows not written to the tags tables of TimeSeries tables because the deduplication cache already had them or the same insert had already written them.", ValueType::Number) \
     M(TimeSeriesTagsDeduplicationCacheMisses, "Number of rows written to the tags tables of TimeSeries tables after they were not found in the deduplication cache.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexHits, "Number of selectors resolved to time series by the in-memory series index of a TimeSeries table.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexMisses, "Number of selectors resolved to time series by reading the tags table because the in-memory series index of a TimeSeries table could not answer.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexLookupMicroseconds, "Time spent on resolving selectors with the in-memory series index of a TimeSeries table, including the time spent on applying new data parts by the query.", ValueType::Microseconds) \
+    M(TimeSeriesSeriesIndexAppliedParts, "Number of data parts of the tags tables and the time ranges tables applied to the in-memory series indexes of TimeSeries tables.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexAppliedRows, "Number of rows of the tags tables and the time ranges tables applied to the in-memory series indexes of TimeSeries tables.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexRebuilds, "Number of times the in-memory series index of a TimeSeries table started building from scratch.", ValueType::Number) \
     M(IcebergMetadataReadWaitTimeMicroseconds, "Total time data readers spend waiting for iceberg metadata files to be read and parsed, summed across all reader threads.", ValueType::Microseconds) \
     M(ParquetMetadataCacheHits, "Number of times parquet metadata has been found in the cache.", ValueType::Number) \
     M(ParquetMetadataCacheMisses, "Number of times parquet metadata has not been found in the cache and had to be read from disk.", ValueType::Number) \

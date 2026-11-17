@@ -10992,6 +10992,14 @@ Allows creation of tables with the [TimeSeries](/reference/engines/table-engines
 Read from the recent samples table of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table instead of the main samples table when the whole requested time range fits in the TTL window of the recent samples table (see the `recent_samples_ttl_seconds` setting of the TimeSeries table engine).
 )", PRIVATE_PREVIEW, \
         {"26.8", true, true, "New setting to read from the recent samples table of a TimeSeries table when the requested time range fits in its TTL window."}) \
+    DECLARE(Bool, time_series_use_series_index, true, R"(
+Resolve the selectors of PromQL queries to time series with the in-memory series index of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table instead of reading its tags table and its time ranges table. A query reads the tables if the index cannot answer: it is not built yet, it has not applied the newest data parts yet, or the requested time range is older than the time series it holds.
+)", PRIVATE_PREVIEW, \
+        {"26.11", true, true, "New setting to resolve the selectors of PromQL queries with the in-memory series index of a TimeSeries table."}) \
+    DECLARE(Bool, time_series_check_series_index, false, R"(
+Check the in-memory series index of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table against its tags table and its time ranges table: a selector of a PromQL query is resolved to time series both ways, the query waits until the index is built and has applied all the data parts, and throws an exception if the index has not returned a time series which the tables have returned. The setting is intended for tests.
+)", PRIVATE_PREVIEW, \
+        {"26.11", false, false, "New setting to check the in-memory series index of a TimeSeries table against its tables."}) \
     DECLARE(UInt64, unique_key_max_encoded_size, 256, R"(
 Maximum size (in bytes) of the order-preserving binary encoding of a single `UNIQUE KEY` row.
 )", EXPERIMENTAL, \

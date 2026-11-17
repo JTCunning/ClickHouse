@@ -1,0 +1,40 @@
+-- the first time series
+[('__name__','m'),('series','1')]
+-- a new time series right after the insert
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+-- a wider time range of a known time series
+[('__name__','m'),('series','1')]
+-- merged data parts
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+-- a mutation of the tags table
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','3')]
+-- a lightweight delete from the tags table
+[('__name__','m'),('series','1')]
+-- a mutation of the time ranges table
+-- a dropped partition of the tags table
+[('__name__','m'),('series','4')]
+-- a truncated time ranges table
+[('__name__','m'),('series','5')]
+-- an altered tags table
+[('__name__','m'),('series','5')]
+-- a truncated table
+[('__name__','m'),('series','6')]
+-- dropped caches
+[('__name__','m'),('series','6')]
+-- the index was used every time
+1	0
+-- the index is disabled by the setting of the table
+[('__name__','m'),('series','6')]
+0	0
+-- the index is bigger than its size limit
+[('__name__','m'),('series','6')]
+0	1
+-- the index is enabled again
+[('__name__','m'),('series','6')]
+1	0

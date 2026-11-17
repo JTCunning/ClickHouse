@@ -1,3 +1,15 @@
+-- the tags table
+[('__name__','bar'),('job','xb')]
+[('__name__','foo'),('job','a|b')]
+[('__name__','fooo'),('job','a')]
+[('__name__','xbar'),('job','b')]
+[('__name__','bar'),('job','xb')]
+[('__name__','fooo'),('job','a')]
+[('__name__','xbar'),('job','b')]
+[('__name__','foo'),('job','a|b')]
+[('__name__','foo'),('job','a|b')]
+[('__name__','fooo'),('job','a')]
+-- the series index
 [('__name__','bar'),('job','xb')]
 [('__name__','foo'),('job','a|b')]
 [('__name__','fooo'),('job','a')]

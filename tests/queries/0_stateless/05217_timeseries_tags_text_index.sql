@@ -37,9 +37,9 @@ WHERE explain LIKE '%__text_index_tags_idx_equals%';
 SELECT 'PromQL selector uses the index';
 -- The tags subquery is evaluated while building the `IN` set and is absent from `EXPLAIN`.
 SELECT arrayJoin(samples).2 AS value FROM timeSeriesSelector(ts_text, 'test_metric{job="worker"}', 999, 1000, 'samples')
-SETTINGS log_comment = 'timeseries_tags_text_index_selector';
+SETTINGS log_comment = 'timeseries_tags_text_index_selector', time_series_use_series_index = 0;
 SELECT value FROM prometheusQuery(ts_text, 'test_metric{job="worker"}', 1000)
-SETTINGS log_comment = 'timeseries_tags_text_index_promql';
+SETTINGS log_comment = 'timeseries_tags_text_index_promql', time_series_use_series_index = 0;
 SYSTEM FLUSH LOGS query_log;
 SELECT count() = 2 AND min(ProfileEvents['TextIndexUsedEmbeddedPostings'] + ProfileEvents['TextIndexReadPostings'] > 0)
 FROM system.query_log

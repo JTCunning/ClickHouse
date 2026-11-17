@@ -1,0 +1,25 @@
+-- both replicas insert
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+-- a replica fetches new data parts
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+-- a replica fetches a merged data part
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+[('__name__','m'),('series','4')]
+[('__name__','m'),('series','5')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+[('__name__','m'),('series','4')]
+[('__name__','m'),('series','5')]
+-- the index was used every time
+1	0

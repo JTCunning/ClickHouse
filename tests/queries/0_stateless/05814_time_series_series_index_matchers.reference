@@ -1,0 +1,76 @@
+-- equality
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+-- equality with the empty value: the time series without the tag
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- inequality
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- inequality with the empty value: the time series with the tag
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+-- list of literals
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- list of literals with the empty one
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- negated list of literals
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- negated list of literals with the empty one
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+-- prefix
+[('__name__','http_errors_total'),('env','staging'),('job','web')]
+[('__name__','http_requests_total'),('code','200'),('env','prod'),('job','api')]
+[('__name__','http_requests_total'),('code','500'),('env','prod'),('job','api')]
+-- suffix
+[('__name__','cert_expire'),('kind','A')]
+[('__name__','other_cert_expire'),('kind','B')]
+-- regular expression
+[('__name__','http_requests_total'),('code','500'),('env','prod'),('job','api')]
+-- regular expression matching everything
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- regular expression matching any non-empty value
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+-- negated regular expression
+[('__name__','up'),('instance','b:1'),('job','db')]
+-- negated regular expression matching the empty value
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+-- regular expression on a tag with many values
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+[('__name__','many'),('instance','m:10')]
+[('__name__','many'),('instance','m:11')]
+[('__name__','many'),('instance','m:12')]
+-- unknown tag
+0
+0
+4
+4
+4
+-- unknown metric
+0
+0
+-- time range
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+[('__name__','late'),('job','api')]
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]
+[('__name__','late'),('job','api')]
+0
+-- samples
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]	1970-01-01 00:01:40.000	0
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]	1970-01-01 00:01:40.000	1
+[('__name__','up'),('env','prod'),('instance','a:1'),('job','api')]	1970-01-01 00:05:00.000	1
+[('__name__','up'),('instance','b:1'),('job','db')]	1970-01-01 00:03:20.000	1
+-- PromQL
+[('job','api')]	1970-01-01 00:05:00.000	1
+[('job','db')]	1970-01-01 00:05:00.000	1
+-- every selector was resolved by the index
+1	0
+-- without the index
+[('__name__','up'),('env','dev'),('instance','a:2'),('job','api')]
+[('__name__','up'),('instance','b:1'),('job','db')]
+0	0

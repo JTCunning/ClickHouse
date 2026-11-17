@@ -1,5 +1,7 @@
 #include <Storages/StorageTimeSeries.h>
 
+#include <base/getMemoryAmount.h>
+
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeString.h>
 #include <Core/Settings.h>
@@ -23,6 +25,7 @@
 #include <Storages/AlterCommands.h>
 #include <Storages/StorageFactory.h>
 #include <Storages/TimeSeries/TimeSeriesDeduplicationCache.h>
+#include <Storages/TimeSeries/TimeSeriesSeriesIndex.h>
 #include <Storages/TimeSeries/TimeSeriesSink.h>
 #include <Parsers/Prometheus/CreateQueryTimeSeriesSettings.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
@@ -67,7 +70,9 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsUInt64 metric_families_deduplication_cache_expiration_seconds;
     extern const TimeSeriesSettingsUInt64 metric_families_deduplication_cache_size_bytes;
     extern const TimeSeriesSettingsUInt64 tags_deduplication_cache_expiration_seconds;
+    extern const TimeSeriesSettingsUInt64 series_index_max_size_bytes;
     extern const TimeSeriesSettingsUInt64 tags_deduplication_cache_size_bytes;
+    extern const TimeSeriesSettingsBool use_series_index;
     extern const TimeSeriesSettingsUInt64 version;
 }
 
@@ -105,7 +110,9 @@ namespace
             && (setting_name != "metric_families_deduplication_cache_size_bytes")
             && (setting_name != "metric_families_deduplication_cache_expiration_seconds")
             && (setting_name != "tags_deduplication_cache_size_bytes")
-            && (setting_name != "tags_deduplication_cache_expiration_seconds"))
+            && (setting_name != "tags_deduplication_cache_expiration_seconds")
+            && (setting_name != "use_series_index")
+            && (setting_name != "series_index_max_size_bytes"))
             throw Exception(ErrorCodes::NOT_IMPLEMENTED,
                 "Setting '{}' of storage {} cannot be changed after the table is created", setting_name, storage_name);
     }
@@ -269,7 +276,10 @@ UInt64 StorageTimeSeries::getVersion() const
 }
 
 
-StorageTimeSeries::~StorageTimeSeries() = default;
+StorageTimeSeries::~StorageTimeSeries()
+{
+    dropSeriesIndex();
+}
 
 
 const StorageTimeSeries::Target * StorageTimeSeries::tryGetTarget(ViewTarget::Kind target_kind) const
@@ -480,11 +490,56 @@ TimeSeriesDeduplicationCachePtr StorageTimeSeries::getMetricFamiliesDeduplicatio
     return metric_families_deduplication_cache;
 }
 
+TimeSeriesSeriesIndexPtr StorageTimeSeries::getSeriesIndex() const
+{
+    std::lock_guard lock{caches_mutex};
+    if (shutdown_called)
+        return nullptr;
+
+    if (!series_index)
+    {
+        auto settings_ptr = storage_settings.get();
+        const auto & settings = *settings_ptr;
+        if (!settings[TimeSeriesSetting::use_series_index])
+            return nullptr;
+
+        UInt64 max_size_bytes = settings[TimeSeriesSetting::series_index_max_size_bytes];
+        if (!max_size_bytes)
+            max_size_bytes = getMemoryAmount() / 10;
+        series_index = std::make_shared<TimeSeriesSeriesIndex>(*this, getContext(), max_size_bytes);
+    }
+    return series_index;
+}
+
+void StorageTimeSeries::dropSeriesIndex()
+{
+    TimeSeriesSeriesIndexPtr index;
+    {
+        std::lock_guard lock{caches_mutex};
+        index = std::move(series_index);
+        series_index = nullptr;
+    }
+    /// The queries which already use the index read the target tables instead.
+    if (index)
+        index->shutdown();
+}
+
 void StorageTimeSeries::clearCaches()
 {
     checkTimeSeriesVersionIsSupported(*this);
     createOrDropTagsDeduplicationCache();
     createOrDropMetricFamiliesDeduplicationCache();
+    dropSeriesIndex();
+}
+
+
+void StorageTimeSeries::shutdown(bool /* is_drop */)
+{
+    {
+        std::lock_guard lock{caches_mutex};
+        shutdown_called = true;
+    }
+    dropSeriesIndex();
 }
 
 
@@ -753,6 +808,9 @@ void StorageTimeSeries::alter(const AlterCommands & params, ContextPtr local_con
             createOrDropTagsDeduplicationCache();
         if (metric_families_cache_changed)
             createOrDropMetricFamiliesDeduplicationCache();
+
+        /// The index is created anew with the new settings.
+        dropSeriesIndex();
     }
 }
 
@@ -1517,12 +1575,48 @@ can return samples which are already deleted from the samples table.
 
 By default the [tags](#tags-table) table has no `TTL`: a time series stays in it after all its samples are deleted.
 
+## Series index {#series-index}
+
+A PromQL query selects time series by their tags and by time. Without the series index, each selector of a query reads
+the [tags](#tags-table) table, joins it with the [time ranges](#time-ranges-table) table, and builds the set of the identifiers
+of the selected time series. With many time series this takes most of the time of a query with a short time range.
+
+The series index keeps the identifiers, the tags and the time ranges of the time series in the memory of the server.
+For each pair of a tag name and a tag value it keeps the list of the time series having this pair, so a selector is resolved
+by a few operations on these lists. A regular expression is checked against the distinct values of a tag, not against the time series.
+
+The server builds the index of a table at the first PromQL query to it, from the [tags](#tags-table) table and
+the [time ranges](#time-ranges-table) table, and then follows the data written to these tables in the background.
+The index gives the same time series as the tables:
+
+- Both tables only grow, so the index remembers which data parts it has read. A query uses the index only if the index has read
+  every data part the query would read from these tables. A query reads a few new rows itself, and reads the tables as before
+  if there are more of them. Merges don't change the index.
+- A change which can remove rows from these tables (a mutation, a dropped partition, `TRUNCATE`, an `ALTER` of one of them)
+  makes the server build the index anew, and the queries read the tables meanwhile.
+- Every server has its own index. No state is shared between the replicas.
+
+The index holds the time series with samples newer than [recent_samples_ttl_seconds](#settings) only (if the table has
+the [recent samples](#recent-samples-table) table), so a query for an older time range reads the tables.
+If the index grows bigger than [series_index_max_size_bytes](#settings), the server drops it and builds it again an hour later.
+The server also drops the index of a table which received no PromQL queries for an hour.
+
+The index is used only if the [tags](#tags-table) and [time ranges](#time-ranges-table) tables are inner tables
+with the default engines and without `TTL`, and the table has [version](#schema-versioning) 11 or later.
+The setting [use_series_index](#settings) disables the index of a table, and the query-level setting
+`time_series_use_series_index` disables it for a query.
+`SYSTEM DROP TIME SERIES CACHES` drops the index, so the next query builds it anew.
+
+The metrics `TimeSeriesSeriesIndexSeries` and `TimeSeriesSeriesIndexBytes` show the size of the indexes of all the tables,
+and the profile events `TimeSeriesSeriesIndexHits` and `TimeSeriesSeriesIndexMisses` count the selectors resolved with and without the index.
+
 ## Altering settings {#altering-settings}
 
 The following settings can be changed after `CREATE`:
 
 - `metric_families_deduplication_cache_size_bytes`, `metric_families_deduplication_cache_expiration_seconds`
 - `tags_deduplication_cache_size_bytes`, `tags_deduplication_cache_expiration_seconds`
+- `use_series_index`, `series_index_max_size_bytes`
 
 ```sql
 ALTER TABLE my_table MODIFY SETTING metric_families_deduplication_cache_expiration_seconds = 600;
@@ -1531,6 +1625,7 @@ ALTER TABLE my_table RESET SETTING metric_families_deduplication_cache_expiratio
 
 Changing a setting of a deduplication cache replaces the cache with an empty one, so the next insert writes all its rows again.
 Setting the size or the expiration to 0 disables the cache.
+Changing any of these settings drops the [series index](#series-index), so the next PromQL query builds it anew.
 
 <Note>
 Tables of earlier [versions](#schema-versioning) can also change the settings of those versions which don't affect the stored data:
@@ -1558,6 +1653,8 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 | `metric_families_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [metric families](#metric-families-table) table expires, counted from the moment the metric family was written. The actual lifetime of an entry is uniformly random in the range `[0.8 * expiration_seconds, expiration_seconds]`, so the metric families written together aren't all written again at the same moment. So every metric family is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. Set to 0 to disable the cache |
 | `tags_deduplication_cache_size_bytes` | UInt64 | 104857600 | Maximum size in bytes of the deduplication cache of the [tags](#tags-table) table. The cache remembers the time series written recently, so their tags aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). The cache is used only when the [tags](#tags-table) table doesn't store `min_time` and `max_time` (tables of [version](#schema-versioning) 7 or earlier store them unless `store_min_time_and_max_time` is disabled), because otherwise every insert changes these columns: the default value is ignored then, and an explicit non-zero value is rejected. Set to 0 to disable the cache, see also `tags_deduplication_cache_expiration_seconds` |
 | `tags_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [tags](#tags-table) table expires, counted from the moment the time series was written. The actual lifetime of an entry is uniformly random in the range `[0.8 * expiration_seconds, expiration_seconds]`, so the time series written together aren't all written again at the same moment. So every time series is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. Used only when the [tags](#tags-table) table doesn't store `min_time` and `max_time`, see `tags_deduplication_cache_size_bytes`. Set to 0 to disable the cache |
+| `use_series_index` | Bool | true | If set to true then the server keeps the [series index](#series-index) of the table in memory and uses it to resolve the selectors of PromQL queries instead of reading the [tags](#tags-table) and [time ranges](#time-ranges-table) tables |
+| `series_index_max_size_bytes` | UInt64 | 0 | Maximum size in bytes of the [series index](#series-index) of the table. When the index gets bigger, the server drops it and builds it again an hour later, and the queries read the [tags](#tags-table) and [time ranges](#time-ranges-table) tables meanwhile. Zero means one tenth of the memory available to the server |
 | `samples_index_granularity` | UInt64 | 256 | Sets `index_granularity` of the inner [samples](#samples-table) table. When set explicitly, it overrides `index_granularity` from the engine declaration. Ignored for a non-MergeTree engine. The default is 32768 for tables of [version](#schema-versioning) 10 or earlier, which store one sample per row |
 | `samples_index_granularity_bytes` | UInt64 | 262144 | Sets `index_granularity_bytes` of the inner [samples](#samples-table) table. When set explicitly, it overrides `index_granularity_bytes` from the engine declaration. Ignored for a non-MergeTree engine |
 | `recent_samples_ttl_seconds` | UInt64 | 345600 | Retention of the additional [recent samples](#recent-samples-table) target table, which every inserted sample is written to as well. An inner recent samples table always gets `TTL toDateTime(bucket) + toIntervalSecond(recent_samples_ttl_seconds + recent_samples_bucket_step_seconds)` derived from this setting (overriding any TTL from the engine declaration): a row expires when all its samples are older than the TTL. Queries whose time range fits in the TTL window prefer the recent samples table to the main samples table (see the query-level setting `time_series_prefer_recent_samples_table`). The default is 4 days; the effective value is pinned into the table definition at CREATE time. Set to 0 to disable the recent samples table |

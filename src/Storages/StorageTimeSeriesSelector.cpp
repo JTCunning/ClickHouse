@@ -1,7 +1,14 @@
 #include <Storages/StorageTimeSeriesSelector.h>
 
+#include <Access/Common/AccessFlags.h>
+#include <Access/EnabledRowPolicies.h>
 #include <Common/DateLUTImpl.h>
 #include <Common/Exception.h>
+#include <Common/FieldVisitorToString.h>
+#include <Common/HashTable/HashSet.h>
+#include <Common/ProfileEvents.h>
+#include <Common/SipHash.h>
+#include <Common/Stopwatch.h>
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
 #include <Columns/IColumn.h>
@@ -13,8 +20,10 @@
 #include <Core/DecimalFunctions.h>
 #include <Core/Joins.h>
 #include <Core/Settings.h>
+#include <Core/UUID.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/ContextTimeSeriesTagsCollector.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -30,12 +39,15 @@
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
 #include <Parsers/makeASTForLogicalFunction.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Sources/SourceFromSingleChunk.h>
+#include <QueryPipeline/Pipe.h>
 #include <Storages/ColumnsDescription.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <Storages/TimeSeries/TimeSeriesIDGenerator.h>
 #include <Storages/TimeSeries/TimeSeriesIDRange.h>
+#include <Storages/TimeSeries/TimeSeriesSeriesIndex.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <Storages/TimeSeries/tryGetLiteralAlternatives.h>
@@ -49,6 +61,14 @@
 
 #include <algorithm>
 #include <limits>
+
+
+namespace ProfileEvents
+{
+    extern const Event TimeSeriesSeriesIndexHits;
+    extern const Event TimeSeriesSeriesIndexLookupMicroseconds;
+    extern const Event TimeSeriesSeriesIndexMisses;
+}
 
 
 namespace DB
@@ -73,7 +93,10 @@ namespace TimeSeriesSetting
 
 namespace Setting
 {
+    extern const SettingsMap additional_table_filters;
+    extern const SettingsBool time_series_check_series_index;
     extern const SettingsBool time_series_prefer_recent_samples_table;
+    extern const SettingsBool time_series_use_series_index;
 }
 
 namespace
@@ -1167,6 +1190,141 @@ namespace
         ASTPtr qualified_id = make_intrusive<ASTIdentifier>(std::vector<String>{samples_table_id.database_name, samples_table_id.table_name, TimeSeriesColumnNames::ID});
         return makeASTFunction("indexHint", makeIDInRangeCondition(qualified_id, metric_id_range));
     }
+
+    /// The identifiers which the series index has found for a selector.
+    /// They are set after the query reading the samples is analyzed and before it is planned (see readImpl).
+    struct SelectedIDs
+    {
+        ColumnPtr column;
+    };
+
+    /// A table with the identifiers which the series index has found for a selector:
+    /// the query reading the samples has this table in the subquery of its condition `id IN (...)`.
+    class StorageSelectedIDs final : public IStorage
+    {
+    public:
+        StorageSelectedIDs(const StorageID & table_id_, const DataTypePtr & id_type, std::shared_ptr<const SelectedIDs> selected_ids_)
+            : IStorage(table_id_)
+            , selected_ids(std::move(selected_ids_))
+        {
+            StorageInMemoryMetadata storage_metadata;
+            storage_metadata.setColumns(ColumnsDescription{NamesAndTypesList{{TimeSeriesColumnNames::ID, id_type}}});
+            setInMemoryMetadata(storage_metadata);
+        }
+
+        std::string getName() const override { return "TimeSeriesSelectedIDs"; }
+
+        Pipe read(
+            const Names & column_names,
+            const StorageSnapshotPtr & storage_snapshot,
+            SelectQueryInfo & /* query_info */,
+            ContextPtr /* context */,
+            QueryProcessingStage::Enum /* processed_stage */,
+            size_t /* max_block_size */,
+            size_t /* num_streams */) override
+        {
+            storage_snapshot->check(column_names);
+            if (!selected_ids->column)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "The identifiers found by the series index are read before they are set");
+
+            Block header = storage_snapshot->getSampleBlockForColumns(column_names);
+            Columns columns;
+            if (header.columns())
+                columns.push_back(selected_ids->column);
+            Chunk chunk(std::move(columns), selected_ids->column->size());
+            return Pipe(std::make_shared<SourceFromSingleChunk>(std::make_shared<const Block>(std::move(header)), std::move(chunk)));
+        }
+
+    private:
+        const std::shared_ptr<const SelectedIDs> selected_ids;
+    };
+
+    /// Makes the query `SELECT id FROM table_name`.
+    ASTPtr makeSelectIDsFromTable(const String & table_name)
+    {
+        auto select_query = make_intrusive<ASTSelectQuery>();
+        auto select_list_exp = make_intrusive<ASTExpressionList>();
+        select_list_exp->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+        select_query->setExpression(ASTSelectQuery::Expression::SELECT, std::move(select_list_exp));
+        select_query->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(table_name)));
+        return wrapIntoSelectWithUnionQuery(std::move(select_query));
+    }
+
+    /// Whether a query can use the series index instead of reading the tags table and the time ranges table.
+    /// A query which reads these tables in a special way reads them itself.
+    bool canUseSeriesIndex(const Context & context, const StorageID & tags_table_id, const StorageID & time_ranges_table_id)
+    {
+        if (!context.hasQueryContext() || context.getCurrentTransaction() || context.isParallelReplicasEnabled())
+            return false;
+        if (!context.getSettingsRef()[Setting::additional_table_filters].value.empty())
+            return false;
+        for (const auto & table_id : {tags_table_id, time_ranges_table_id})
+        {
+            auto row_policy_filter = context.getRowPolicyFilter(table_id.getDatabaseName(), table_id.getTableName(), RowPolicyFilterType::SELECT_FILTER);
+            if (row_policy_filter && !row_policy_filter->isAlwaysTrue())
+                return false;
+        }
+        return true;
+    }
+
+    /// Executes a query returning identifiers of time series and returns them in one column without `LowCardinality`.
+    ColumnPtr executeSelectIDsQuery(const ASTPtr & select_ids_query, const ContextPtr & context)
+    {
+        InterpreterSelectQueryAnalyzer interpreter(select_ids_query, context, SelectQueryOptions{});
+        auto io = interpreter.execute();
+        PullingPipelineExecutor executor(io.pipeline);
+        MutableColumnPtr res;
+        Block block;
+        while (executor.pull(block))
+        {
+            if (!block.rows())
+                continue;
+            auto column = recursiveRemoveLowCardinality(block.getByPosition(0).column->convertToFullColumnIfConst());
+            if (!res)
+                res = column->cloneEmpty();
+            res->insertRangeFrom(*column, 0, column->size());
+        }
+        return res;
+    }
+
+    UInt128 hashOfID(const IColumn & id_column, size_t row)
+    {
+        SipHash hash;
+        id_column.updateHashWithValue(row, hash);
+        return hash.get128();
+    }
+
+    /// Checks that the series index has found every time series which the tags table and the time ranges table have returned.
+    void checkSeriesIndexResult(
+        const TimeSeriesSeriesIndex & series_index,
+        const ColumnPtr & ids_from_tables,
+        const ColumnPtr & ids_from_index,
+        const TableTimeRange & time_range_to_filter_ids,
+        const PrometheusQueryTree & selector)
+    {
+        if (!ids_from_tables)
+            return;
+
+        HashSet<UInt128, UInt128TrivialHash> found;
+        for (size_t row = 0; row != ids_from_index->size(); ++row)
+            found.insert(hashOfID(*ids_from_index, row));
+
+        std::optional<Int64> min_time;
+        std::optional<Int64> max_time;
+        if (time_range_to_filter_ids.min_time)
+            min_time = time_range_to_filter_ids.min_time->value;
+        if (time_range_to_filter_ids.max_time)
+            max_time = time_range_to_filter_ids.max_time->value;
+
+        for (size_t row = 0; row != ids_from_tables->size(); ++row)
+        {
+            if (found.has(hashOfID(*ids_from_tables, row)) || series_index.isMissExplained(ids_from_tables, row, min_time, max_time))
+                continue;
+            throw Exception(ErrorCodes::LOGICAL_ERROR,
+                "The series index did not return the time series {} which the tags table returned for selector {}",
+                applyVisitor(FieldVisitorToString(), (*ids_from_tables)[row]), quoteString(selector.toString()));
+        }
+    }
 }
 
 
@@ -1332,6 +1490,115 @@ void StorageTimeSeriesSelector::readImpl(
             log);
     }
 
+    auto options = SelectQueryOptions(QueryProcessingStage::Complete, 0, false, query_info.settings_limit_offset_done);
+
+    /// Makes the query reading the samples of the time series whose identifiers are returned by `select_ids_query`.
+    auto make_select_query = [&](ASTPtr select_ids_query, ASTPtr id_range_condition)
+    {
+        ASTPtr select_query_from_samples_table = makeSelectQueryFromSamplesTable(
+            samples_table_id,
+            std::move(select_ids_query),
+            time_range_to_filter_samples,
+            config.table_timestamp_type,
+            bucket_step,
+            std::move(id_range_condition));
+
+        ASTPtr select_query = makeSelectQuery(
+            std::move(select_query_from_samples_table),
+            time_range_to_filter_samples,
+            config.table_id_type,
+            config.table_timestamp_type,
+            config.table_value_type,
+            bucket_step);
+
+        return convertToReturnColumns(
+            std::move(select_query), config.table_timestamp_type, config.table_value_type, bucket_step, config.return_columns);
+    };
+
+    /// The series index returns the identifiers and the tags of the selected time series without reading the tags table
+    /// and the time ranges table. If it cannot answer, these tables are read as usual.
+    const auto & query_settings = context->getSettingsRef();
+    TimeSeriesSeriesIndexPtr series_index;
+    if (query_settings[Setting::time_series_use_series_index] && time_series_settings->hasBucketedSamples() && time_ranges_table_id
+        && canUseSeriesIndex(*context, tags_table_id, time_ranges_table_id))
+        series_index = time_series_storage->getSeriesIndex();
+
+    if (series_index)
+    {
+        Stopwatch watch;
+        const bool check_series_index = query_settings[Setting::time_series_check_series_index];
+
+        /// The query reads none of these tables with the index, so the access to them is checked here.
+        Strings tags_table_columns{TimeSeriesColumnNames::ID, TimeSeriesColumnNames::MetricName, TimeSeriesColumnNames::Tags};
+        for (const auto & [tag_name, column_name] : column_name_by_tag_name)
+            tags_table_columns.push_back(column_name);
+        context->checkAccess(AccessType::SELECT, tags_table_id, tags_table_columns);
+        context->checkAccess(AccessType::SELECT, time_ranges_table_id,
+            Strings{TimeSeriesColumnNames::ID, TimeSeriesColumnNames::MinTime, TimeSeriesColumnNames::MaxTime});
+
+        /// The tables are read before the index is asked, so the index has everything they have returned.
+        /// The time ranges table is read without the ranges of identifiers: with them the query keeps the time series
+        /// written with another id generator whatever their time ranges are.
+        ColumnPtr ids_from_tables;
+        if (check_series_index)
+        {
+            ids_from_tables = executeSelectIDsQuery(
+                makeSelectQueryFromTagsTable(
+                    tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids,
+                    /* metric_id_ranges = */ {}, config.table_timestamp_type),
+                interpreter_context);
+        }
+
+        /// The query is analyzed before the index is asked: the index must have the time series of every sample the query will read,
+        /// and the analysis fixes the set of data parts of the samples table.
+        auto selected_ids = std::make_shared<SelectedIDs>();
+        const DataTypePtr selected_ids_type
+            = recursiveRemoveLowCardinality(tags_table_metadata->getColumns().get(TimeSeriesColumnNames::ID).type);
+        const String selected_ids_table_name = "_time_series_selected_ids_" + toString(UUIDHelpers::generateV4());
+        auto index_context = Context::createCopy(modified_context);
+        index_context->addExternalTable(
+            selected_ids_table_name,
+            TemporaryTableHolder(
+                context,
+                [&](const StorageID & table_id) { return std::make_shared<StorageSelectedIDs>(table_id, selected_ids_type, selected_ids); }));
+
+        ASTPtr select_query = make_select_query(makeSelectIDsFromTable(selected_ids_table_name), nullptr);
+        InterpreterSelectQueryAnalyzer interpreter(select_query, index_context, options, column_names);
+
+        std::optional<Int64> min_time_to_filter_ids;
+        std::optional<Int64> max_time_to_filter_ids;
+        if (time_range_to_filter_ids.min_time)
+            min_time_to_filter_ids = time_range_to_filter_ids.min_time->value;
+        if (time_range_to_filter_ids.max_time)
+            max_time_to_filter_ids = time_range_to_filter_ids.max_time->value;
+
+        auto found = series_index->tryLookup(matchers, min_time_to_filter_ids, max_time_to_filter_ids, context, /* wait = */ check_series_index);
+        ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexLookupMicroseconds, watch.elapsedMicroseconds());
+
+        if (found)
+        {
+            ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexHits);
+            LOG_DEBUG(log, "Selector {}: the series index has found {} time series in {} ms",
+                quoteString(config.selector.toString()), found->ids->size(), watch.elapsedMilliseconds());
+
+            if (check_series_index)
+                checkSeriesIndexResult(*series_index, ids_from_tables, found->ids, time_range_to_filter_ids, config.selector);
+
+            /// No time series, so there is nothing to read - an uninitialized query plan reads from an empty source.
+            if (found->ids->empty())
+                return;
+
+            context->getQueryContext()->getTimeSeriesTagsCollector()->storeTags(found->ids, found->tags);
+            selected_ids->column = found->ids;
+
+            interpreter.addStorageLimits(*query_info.storage_limits);
+            query_plan = std::move(interpreter).extractQueryPlan();
+            return;
+        }
+
+        ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexMisses);
+    }
+
     ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
         tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
         config.table_timestamp_type);
@@ -1346,29 +1613,10 @@ void StorageTimeSeriesSelector::readImpl(
                   quoteString(config.selector.toString()));
     }
 
-    ASTPtr select_query_from_samples_table = makeSelectQueryFromSamplesTable(
-        samples_table_id,
-        select_query_from_tags_table,
-        time_range_to_filter_samples,
-        config.table_timestamp_type,
-        bucket_step,
-        std::move(whole_metric_id_range_condition));
-
-    ASTPtr select_query = makeSelectQuery(
-        std::move(select_query_from_samples_table),
-        time_range_to_filter_samples,
-        config.table_id_type,
-        config.table_timestamp_type,
-        config.table_value_type,
-        bucket_step);
-
-    select_query = convertToReturnColumns(
-        std::move(select_query), config.table_timestamp_type, config.table_value_type, bucket_step, config.return_columns);
+    ASTPtr select_query = make_select_query(std::move(select_query_from_tags_table), std::move(whole_metric_id_range_condition));
 
     LOG_DEBUG(log, "Building SQL for selector: {}", config.selector.toString());
     LOG_DEBUG(log, "Will execute query:\n{}", select_query->formatForLogging());
-
-    auto options = SelectQueryOptions(QueryProcessingStage::Complete, 0, false, query_info.settings_limit_offset_done);
 
     InterpreterSelectQueryAnalyzer interpreter(select_query, interpreter_context, options, column_names);
     interpreter.addStorageLimits(*query_info.storage_limits);

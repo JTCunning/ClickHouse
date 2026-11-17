@@ -451,6 +451,8 @@
     M(TimeSeriesMetricFamiliesDeduplicationCacheBytes, "Approximate size in bytes of the deduplication caches of the metric families tables of TimeSeries tables") \
     M(TimeSeriesTagsDeduplicationCacheEntries, "Number of entries in the deduplication caches of the tags tables of TimeSeries tables") \
     M(TimeSeriesTagsDeduplicationCacheBytes, "Approximate size in bytes of the deduplication caches of the tags tables of TimeSeries tables") \
+    M(TimeSeriesSeriesIndexSeries, "Number of time series in the in-memory series indexes of TimeSeries tables") \
+    M(TimeSeriesSeriesIndexBytes, "Approximate size in bytes of the in-memory series indexes of TimeSeries tables") \
     M(CompiledExpressionCacheBytes, "Reserved page-block capacity (rounded up to whole pages with a 2x over-provisioning factor) held by `JITModuleMemoryManager` for executable/data sections of cached JIT-compiled functions. NOT the actual bytes of machine code in use (that's smaller). Allocated via `posix_memalign`, which is intercepted into jemalloc, so this is accounted within the dedicated JIT arena and is a subset of `jemalloc.jit_arena.active_bytes`.") \
     M(CompiledExpressionCacheCount, "Total entries in the cache of JIT-compiled machine code.") \
     M(GPUExpressionKernelCacheBytes, "Bytes of the PTX of the kernels that the GPU engine compiled for expressions and keeps loaded on the device.") \

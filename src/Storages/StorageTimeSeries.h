@@ -13,6 +13,8 @@ namespace DB
 {
 class TimeSeriesDeduplicationCache;
 using TimeSeriesDeduplicationCachePtr = std::shared_ptr<TimeSeriesDeduplicationCache>;
+class TimeSeriesSeriesIndex;
+using TimeSeriesSeriesIndexPtr = std::shared_ptr<TimeSeriesSeriesIndex>;
 struct TimeSeriesSettings;
 using TimeSeriesSettingsPtr = std::shared_ptr<const TimeSeriesSettings>;
 
@@ -75,7 +77,13 @@ public:
     TimeSeriesDeduplicationCachePtr getTagsDeduplicationCache() const;
     TimeSeriesDeduplicationCachePtr getMetricFamiliesDeduplicationCache() const;
 
-    /// Clears the caches used by inserts, so that the next insert writes all its rows to the target tables.
+    /// Returns the in-memory index of the time series of this table used to resolve the selectors of PromQL queries,
+    /// or null if the index is disabled by the setting `use_series_index` or the table is shut down.
+    /// The index is created at the first call.
+    TimeSeriesSeriesIndexPtr getSeriesIndex() const;
+
+    /// Clears the caches used by inserts, so that the next insert writes all its rows to the target tables,
+    /// and drops the in-memory index of time series.
     /// It's called by `TRUNCATE TABLE` and by `SYSTEM DROP TIME SERIES CACHES`.
     void clearCaches();
 
@@ -106,6 +114,8 @@ public:
         const Names & deduplicate_by_columns,
         bool cleanup,
         ContextPtr local_context) override;
+
+    void shutdown(bool is_drop) override;
 
     void drop() override;
     void dropInnerTableIfAny(bool sync, ContextPtr local_context) override;
@@ -164,6 +174,9 @@ private:
     void createOrDropTagsDeduplicationCache();
     void createOrDropMetricFamiliesDeduplicationCache();
 
+    /// Drops the in-memory index of time series: the next query which can use it builds it anew.
+    void dropSeriesIndex();
+
     MultiVersion<TimeSeriesSettings> storage_settings;
 
     std::vector<Target> targets;
@@ -172,6 +185,8 @@ private:
     mutable std::mutex caches_mutex;
     TimeSeriesDeduplicationCachePtr tags_deduplication_cache TSA_GUARDED_BY(caches_mutex);
     TimeSeriesDeduplicationCachePtr metric_families_deduplication_cache TSA_GUARDED_BY(caches_mutex);
+    mutable TimeSeriesSeriesIndexPtr series_index TSA_GUARDED_BY(caches_mutex);
+    bool shutdown_called TSA_GUARDED_BY(caches_mutex) = false;
 };
 
 std::shared_ptr<StorageTimeSeries> storagePtrToTimeSeries(StoragePtr storage);

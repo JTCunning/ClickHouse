@@ -1,0 +1,24 @@
+-- a recent time range: the index
+[('__name__','m'),('series','both')]
+[('__name__','m'),('series','recent')]
+1	0
+-- an old time range: the tables
+[('__name__','m'),('series','both')]
+[('__name__','m'),('series','old')]
+0	1
+-- a time range which starts before the retention: the tables
+[('__name__','m'),('series','both')]
+[('__name__','m'),('series','old')]
+[('__name__','m'),('series','recent')]
+0	1
+-- an old time series gets a new sample and its tags are written again: the index
+[('__name__','m'),('series','both')]
+[('__name__','m'),('series','old')]
+[('__name__','m'),('series','recent')]
+1	0
+-- an old time series gets a new sample and its tags are not written again: the tables
+[('__name__','m'),('series','recent')]
+1	0
+[('__name__','m'),('series','old')]
+[('__name__','m'),('series','recent')]
+0	1
