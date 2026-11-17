@@ -246,7 +246,7 @@ public:
     }
 
     /// Returns the first ordinal which `find` would check, to prefetch its data.
-    Ordinal findCandidate(UInt64 hash) const
+    [[nodiscard]] Ordinal findCandidate(UInt64 hash) const
     {
         const size_t mask = cells.size() - 1;
         const UInt64 tag = hash >> 32;
