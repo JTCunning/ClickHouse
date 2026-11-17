@@ -140,6 +140,8 @@ constexpr auto MAX_IDLE_TIME = std::chrono::seconds(3600);
 /// The size of the lists of time series is calculated by a pass over all of them, which is slow. Between two passes
 /// the size is estimated: a time series added to a list takes about this number of bytes.
 constexpr size_t ESTIMATED_BYTES_PER_POSTING_ADD = 4;
+/// A list of time series with more than one of them is a bitmap, which keeps its data in several allocated pieces.
+constexpr size_t ESTIMATED_OVERHEAD_OF_BITMAP = 96;
 /// The size of the lists of time series is calculated again after this time, or earlier if the index has grown by 1/8.
 constexpr auto POSTINGS_BYTES_CALCULATION_INTERVAL = std::chrono::seconds(600);
 
@@ -331,7 +333,11 @@ struct Posting
             dest.add(single);
     }
 
-    [[nodiscard]] size_t allocatedBytes() const { return bitmap ? (sizeof(roaring::Roaring) + bitmap->getSizeInBytes(false)) : 0; }
+    /// The size of the bitmap is the size of its serialized form plus an estimate for the separate allocations it consists of.
+    [[nodiscard]] size_t allocatedBytes() const
+    {
+        return bitmap ? (sizeof(roaring::Roaring) + bitmap->getSizeInBytes(false) + ESTIMATED_OVERHEAD_OF_BITMAP) : 0;
+    }
 };
 
 
@@ -832,13 +838,17 @@ public:
         return res;
     }
 
-    /// The size of the data in bytes. The size of the lists of time series is the one set by `setPostingsBytes`
+    /// The size of the allocated memory in bytes. The size of the lists of time series is the one set by `setPostingsBytes`
     /// plus an estimate for the time series added after that.
     [[nodiscard]] size_t bytes() const
     {
-        return id_bytes.size() + table.allocatedBytes() + times.size() * sizeof(Int64) + label_offsets.size() * sizeof(UInt64)
-            + label_bytes.size() + flags.size() + arena.allocatedBytes() + skipped_tags.allocatedBytes()
-            + pair_name.size() * BYTES_PER_PAIR + postings_bytes + posting_adds_since_calculation * ESTIMATED_BYTES_PER_POSTING_ADD;
+        size_t res = id_bytes.allocated_bytes() + table.allocatedBytes() + times.allocated_bytes() + label_offsets.allocated_bytes()
+            + label_bytes.allocated_bytes() + flags.allocated_bytes() + arena.allocatedBytes() + skipped_tags.allocatedBytes()
+            + pair_name.capacity() * sizeof(UInt32) + pair_value.capacity() * sizeof(std::string_view) + postings.capacity() * sizeof(Posting)
+            + name_ids.getBufferSizeInBytes() + postings_bytes + posting_adds_since_calculation * ESTIMATED_BYTES_PER_POSTING_ADD;
+        for (const auto & label : names)
+            res += sizeof(LabelName) + label->pair_by_value.getBufferSizeInBytes() + label->pairs.capacity() * sizeof(UInt32);
+        return res;
     }
 
     /// Calculates the size of the lists of time series by a pass over all of them.
@@ -878,10 +888,6 @@ private:
         /// All the time series with the tag.
         Posting series;
     };
-
-    /// The approximate size of a pair of a tag name and a tag value besides the value itself and its list of time series:
-    /// the cell of the hash table of the values, the name, the reference to the value, the list of the name, and the list of time series.
-    static constexpr size_t BYTES_PER_PAIR = 48 + sizeof(UInt32) + sizeof(std::string_view) + sizeof(UInt32) + sizeof(Posting);
 
     [[nodiscard]] const char * getID(Ordinal ordinal) const { return id_bytes.data() + static_cast<size_t>(ordinal) * id_size; }
 
