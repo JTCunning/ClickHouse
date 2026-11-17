@@ -66,6 +66,7 @@
 namespace ProfileEvents
 {
     extern const Event TimeSeriesSeriesIndexHits;
+    extern const Event TimeSeriesSeriesIndexHitsAfterWait;
     extern const Event TimeSeriesSeriesIndexLookupMicroseconds;
     extern const Event TimeSeriesSeriesIndexMisses;
 }
@@ -1591,6 +1592,8 @@ void StorageTimeSeriesSelector::readImpl(
         if (found)
         {
             ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexHits);
+            if (found->waited)
+                ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexHitsAfterWait);
             LOG_DEBUG(log, "Selector {}: the series index has found {} time series in {} ms",
                 quoteString(config.selector.toString()), found->ids->size(), watch.elapsedMilliseconds());
 

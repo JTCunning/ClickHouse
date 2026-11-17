@@ -11000,6 +11000,10 @@ Resolve the selectors of PromQL queries to time series with the in-memory series
 Check the in-memory series index of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table against its tags table and its time ranges table: a selector of a PromQL query is resolved to time series both ways, the query waits until the index is built and has applied all the data parts, and throws an exception if the index has not returned a time series which the tables have returned. The setting is intended for tests.
 )", PRIVATE_PREVIEW, \
         {"26.11", false, false, "New setting to check the in-memory series index of a TimeSeries table against its tables."}) \
+    DECLARE(UInt64, time_series_series_index_max_wait_ms, 100, R"(
+The time in milliseconds a selector of a PromQL query waits for the in-memory series index of a [TimeSeries](/reference/engines/table-engines/integrations/time-series) table if the index has not applied the newest data parts yet. The query applies the data parts with few rows itself. After this time the query reads the tags table and the time ranges table. With 0 the query doesn't wait and doesn't apply data parts.
+)", PRIVATE_PREVIEW, \
+        {"26.11", 100, 100, "New setting to limit the time a PromQL query waits for the in-memory series index of a TimeSeries table."}) \
     DECLARE(UInt64, unique_key_max_encoded_size, 256, R"(
 Maximum size (in bytes) of the order-preserving binary encoding of a single `UNIQUE KEY` row.
 )", EXPERIMENTAL, \

@@ -32,6 +32,7 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
+#include <Interpreters/QueryMetadataCache.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Parsers/ParserSelectWithUnionQuery.h>
 #include <Parsers/parseQuery.h>
@@ -50,6 +51,7 @@
 #include <roaring/roaring.hh>
 
 #include <chrono>
+#include <condition_variable>
 #include <ctime>
 #include <map>
 #include <mutex>
@@ -64,6 +66,7 @@ namespace ProfileEvents
     extern const Event TimeSeriesSeriesIndexAppliedRows;
     extern const Event TimeSeriesSeriesIndexApplyMicroseconds;
     extern const Event TimeSeriesSeriesIndexRebuilds;
+    extern const Event TimeSeriesSeriesIndexWaitMicroseconds;
 }
 
 namespace CurrentMetrics
@@ -82,6 +85,11 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
+}
+
+namespace Setting
+{
+    extern const SettingsUInt64 time_series_series_index_max_wait_ms;
 }
 
 namespace TimeSeriesSetting
@@ -108,12 +116,8 @@ constexpr UInt8 FLAG_UNRESOLVED = 1;
 /// and with the shorter one right after it has applied some: more of them are probably there already.
 constexpr size_t POLL_INTERVAL_MS = 500;
 constexpr size_t POLL_INTERVAL_AFTER_APPLY_MS = 20;
-/// A query applies new data parts itself if they have no more rows than this in total, otherwise it reads the tables.
+/// A query applies no more rows than this of the data parts it needs. The background task applies the other ones.
 constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 1'000'000;
-/// A query waits this long for the background task which applies data parts at the moment.
-constexpr auto MAX_WAIT_IN_QUERY = std::chrono::milliseconds(50);
-/// The number of lookups a query makes: it applies new data parts between them.
-constexpr size_t MAX_LOOKUPS_IN_QUERY = 2;
 /// After a query has waited for the index in vain, the next queries don't wait for the index and don't apply
 /// data parts for this time: they use the index only if it has applied everything.
 constexpr Int64 TIME_WITHOUT_WAIT_AFTER_MISS_MS = 1000;
@@ -128,6 +132,7 @@ constexpr size_t MAX_THREADS_TO_MAKE_TAGS = 16;
 constexpr size_t MAX_THREADS_TO_MAKE_TAGS_IN_LOOKUP = 8;
 constexpr size_t MIN_SERIES_PER_THREAD_TO_MAKE_TAGS = 4096;
 /// One query to a target table reads no more rows than this, if it reads more than one data part.
+/// It is also the number of rows the background task applies before it lists the data parts again.
 constexpr size_t MAX_ROWS_IN_BATCH = 20'000'000;
 /// The index is rebuilt if a time series stays without tags this long while they could have been skipped.
 constexpr auto MAX_UNRESOLVED_TIME = std::chrono::seconds(60);
@@ -1100,75 +1105,127 @@ private:
 /// The ranges of block numbers of one target table which the index has applied.
 class AppliedRanges
 {
+    struct Range
+    {
+        Int64 max_block = 0;
+        Int64 mutation = 0;
+        /// The number of rows the index has applied from these blocks.
+        size_t rows = 0;
+    };
+
+    using Ranges = std::map<Int64, Range>;
+
+    /// Returns the first range which has blocks of the data part, or the first range after its blocks.
+    template <typename RangesType>
+    static auto firstIntersecting(RangesType & ranges, const MergeTreePartInfo & info)
+    {
+        auto it = ranges.upper_bound(info.min_block);
+        if (it != ranges.begin())
+        {
+            auto previous = std::prev(it);
+            if (previous->second.max_block >= info.min_block)
+                it = previous;
+        }
+        return it;
+    }
+
 public:
     enum class Status
     {
         Applied,
         NotApplied,
-        /// The index has applied the same blocks before a mutation changed them.
+        /// The index has applied rows of these blocks, and the data part does not have them as they were:
+        /// a mutation changed them, or the data part is an empty one put over removed data parts.
         Changed,
     };
 
-    [[nodiscard]] Status check(const MergeTreePartInfo & info) const
+    /// `rows` is the number of rows of the data part.
+    [[nodiscard]] Status check(const MergeTreePartInfo & info, size_t rows) const
     {
         auto partition_it = partitions.find(info.getPartitionId());
         if (partition_it == partitions.end())
             return Status::NotApplied;
         const auto & ranges = partition_it->second;
 
-        auto next = ranges.upper_bound(info.min_block);
-        if (next != ranges.begin())
+        Status res = Status::NotApplied;
+        for (auto it = firstIntersecting(ranges, info); (it != ranges.end()) && (it->first <= info.max_block); ++it)
         {
-            auto previous = std::prev(next);
-            if (previous->second.max_block >= info.min_block)
-            {
-                if (!sameData(previous->first, previous->second.mutation, info.mutation))
-                    return Status::Changed;
-                if (previous->second.max_block >= info.max_block)
-                    return Status::Applied;
-            }
-        }
-        for (auto it = next; (it != ranges.end()) && (it->first <= info.max_block); ++it)
-        {
-            if (!sameData(it->first, it->second.mutation, info.mutation))
+            const auto & range = it->second;
+            if (!sameData(it->first, range.mutation, info.mutation))
                 return Status::Changed;
+            /// `TRUNCATE` and `DROP PARTITION` of a `MergeTree` table put empty data parts with the same blocks over the removed ones.
+            if (!rows && range.rows)
+                return Status::Changed;
+            if ((it->first <= info.min_block) && (range.max_block >= info.max_block))
+                res = Status::Applied;
         }
-        return Status::NotApplied;
+        return res;
     }
 
-    /// Adds the blocks of a data part which was applied as a whole.
-    void add(const MergeTreePartInfo & info)
+    /// Whether the index has applied rows of some blocks of the data part.
+    [[nodiscard]] bool hasRowsOf(const MergeTreePartInfo & info) const
+    {
+        auto partition_it = partitions.find(info.getPartitionId());
+        if (partition_it == partitions.end())
+            return false;
+        const auto & ranges = partition_it->second;
+        for (auto it = firstIntersecting(ranges, info); (it != ranges.end()) && (it->first <= info.max_block); ++it)
+        {
+            if (it->second.rows)
+                return true;
+        }
+        return false;
+    }
+
+    /// Adds the blocks of a data part which was applied as a whole. `rows` is the number of the applied rows.
+    void add(const MergeTreePartInfo & info, size_t rows)
     {
         auto & ranges = partitions[info.getPartitionId()];
         Int64 min_block = info.min_block;
         Int64 max_block = info.max_block;
+        size_t total_rows = rows;
 
-        /// The data part replaces the ranges it covers, and extends the adjacent ranges with the same mutation.
-        auto it = ranges.upper_bound(min_block);
-        if (it != ranges.begin())
+        /// The data part replaces what it covers. A range which is covered only in part was joined from adjacent data parts:
+        /// the rest of it stays.
+        std::vector<std::pair<Int64, Range>> rest;
+        for (auto it = firstIntersecting(ranges, info); (it != ranges.end()) && (it->first <= max_block);)
         {
-            auto previous = std::prev(it);
-            if ((previous->second.max_block >= min_block) || ((previous->second.max_block + 1 == min_block) && (previous->second.mutation == info.mutation)))
-                it = previous;
-        }
-        while ((it != ranges.end()) && ((it->first <= max_block) || ((it->first == max_block + 1) && (it->second.mutation == info.mutation))))
-        {
-            min_block = std::min(min_block, it->first);
-            max_block = std::max(max_block, it->second.max_block);
+            const Int64 first = it->first;
+            const Range range = it->second;
             it = ranges.erase(it);
+            if (first < min_block)
+                rest.emplace_back(first, Range{.max_block = min_block - 1, .mutation = range.mutation, .rows = range.rows});
+            if (range.max_block > max_block)
+                rest.emplace_back(max_block + 1, Range{.max_block = range.max_block, .mutation = range.mutation, .rows = range.rows});
         }
-        ranges[min_block] = Range{.max_block = max_block, .mutation = info.mutation};
+        for (const auto & [first, range] : rest)
+            ranges[first] = range;
+
+        /// The data part is joined with an adjacent range with the same mutation. A range without rows and a range with rows
+        /// stay separate: see `check`.
+        auto can_join = [&](const Range & range) { return (range.mutation == info.mutation) && (!range.rows == !rows); };
+        if (auto next = ranges.find(max_block + 1); (next != ranges.end()) && can_join(next->second))
+        {
+            max_block = next->second.max_block;
+            total_rows += next->second.rows;
+            ranges.erase(next);
+        }
+        if (auto next = ranges.lower_bound(min_block); next != ranges.begin())
+        {
+            auto previous = std::prev(next);
+            if ((previous->second.max_block + 1 == min_block) && can_join(previous->second))
+            {
+                min_block = previous->first;
+                total_rows += previous->second.rows;
+                ranges.erase(previous);
+            }
+        }
+        ranges[min_block] = Range{.max_block = max_block, .mutation = info.mutation, .rows = total_rows};
     }
 
     void clear() { partitions.clear(); }
 
 private:
-    struct Range
-    {
-        Int64 max_block = 0;
-        Int64 mutation = 0;
-    };
-
     /// A mutation doesn't change the blocks written after it, so two mutation versions older than a block give the same data.
     static bool sameData(Int64 min_block, Int64 applied_mutation, Int64 mutation)
     {
@@ -1176,7 +1233,7 @@ private:
     }
 
     /// Partition identifier -> the first block of a range -> the range.
-    std::unordered_map<String, std::map<Int64, Range>> partitions;
+    std::unordered_map<String, Ranges> partitions;
 };
 
 
@@ -1190,7 +1247,7 @@ struct TableState
         MergeTreePartInfo info;
         size_t rows = 0;
     };
-    /// The active data parts at the last synchronization, all of them applied.
+    /// The active data parts at the last synchronization which have blocks with applied rows.
     std::unordered_map<String, KnownPart> known_parts;
     /// The metadata of the table the index was built with.
     StorageMetadataPtr metadata;
@@ -1224,17 +1281,33 @@ struct TargetTables
 
 using DataPartsVector = MergeTreeData::DataPartsVector;
 
-DataPartsVector getVisibleDataParts(const StoragePtr & storage, const StorageMetadataPtr & metadata, const ContextPtr & context)
+/// The active data parts of a table at some moment. The snapshot holds them, so they can be read after a merge has replaced them.
+struct PartsList
 {
-    auto snapshot = storage->getStorageSnapshot(metadata, context);
-    const auto & snapshot_data = assert_cast<const MergeTreeData::SnapshotData &>(*snapshot->data);
-    DataPartsVector res;
-    if (!snapshot_data.parts)
-        return res;
-    res.reserve(snapshot_data.parts->size());
-    for (const auto & part : *snapshot_data.parts)
-        res.push_back(part.data_part);
+    StorageSnapshotPtr snapshot;
+    DataPartsVector parts;
+};
+
+/// `context` must have the setting `enable_shared_storage_snapshot_in_query` disabled or must not be a query context:
+/// each call must see the current data parts.
+PartsList listDataParts(const StoragePtr & storage, const StorageMetadataPtr & metadata, const ContextPtr & context)
+{
+    PartsList res;
+    res.snapshot = storage->getStorageSnapshot(metadata, context);
+    const auto & snapshot_data = assert_cast<const MergeTreeData::SnapshotData &>(*res.snapshot->data);
+    if (snapshot_data.parts)
+    {
+        res.parts.reserve(snapshot_data.parts->size());
+        for (const auto & part : *snapshot_data.parts)
+            res.parts.push_back(part.data_part);
+    }
     return res;
+}
+
+void sortByRows(DataPartsVector & parts)
+{
+    std::stable_sort(parts.begin(), parts.end(),
+        [](const MergeTreeData::DataPartPtr & left, const MergeTreeData::DataPartPtr & right) { return left->rows_count < right->rows_count; });
 }
 
 bool isSuitableTargetTable(const MergeTreeData & table, const StorageInMemoryMetadata & metadata)
@@ -1288,6 +1361,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     void shutdown()
     {
         shutdown_called = true;
+        notifyChange();
         if (task)
             task->deactivate();
     }
@@ -1322,32 +1396,43 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         CurrentMetrics::TimeSeriesSeriesIndexThreadsScheduled,
         MAX_THREADS_TO_MAKE_TAGS, /* max_free_threads = */ 0, /* queue_size = */ 0};
 
-    /// Held while data parts are applied or the index is rebuilt, so only one thread does that at a time.
-    std::timed_mutex sync_mutex;
+    /// Held by the thread which brings the whole index up to date: the background task, or a query which checks the index.
+    /// Only this thread builds the index and drops it. Other queries apply the data parts they need without this mutex.
+    std::mutex follower_mutex;
 
-    /// It is changed with both mutexes held, so a thread which holds one of them reads the current value.
-    /// A thread which holds none of them can read a value which is not current.
+    /// Held in the shared mode while data parts are applied, and in the exclusive mode while the index is dropped.
+    SharedMutex maintenance_mutex;
+
+    /// These two are changed with `mutex` held in the exclusive mode.
     std::atomic<State> state = State::NotBuilt;
+    std::atomic<UInt64> epoch = 0;
 
     /// Protects everything below.
     mutable SharedMutex mutex;
-    UInt64 epoch = 0;
     std::unique_ptr<SeriesIndexData> data;
     TableState tags_state;
     TableState time_ranges_state;
     DataTypePtr id_type;
     std::optional<Int64> horizon_start;
-
-    /// These are used only with `sync_mutex` held.
     /// The identifiers of the time series which were older than the horizon when the index was built.
     std::unique_ptr<GrowingBloomFilter> out_of_horizon;
+
+    /// These are used only with `follower_mutex` held.
     std::optional<Clock::time_point> unresolved_since;
     Clock::time_point no_rebuild_before;
     Clock::time_point size_limit_retry_time;
     Clock::time_point last_postings_bytes_calculation;
     Stopwatch build_watch;
-    /// Whether the last call of `synchronize` in the background task has applied data parts.
-    bool applied_data_parts = false;
+    /// Whether the last call of `synchronize` has left data parts which are not applied.
+    bool has_more_to_apply = false;
+
+    /// The data parts which some thread applies now: a data part is never read by two threads at the same time.
+    /// The first set is for the "time ranges" table, the second one is for the "tags" table.
+    std::mutex apply_mutex;
+    std::condition_variable apply_cv;
+    std::unordered_set<String> parts_in_flight[2];
+    /// It grows when data parts become applied and when the state of the index changes.
+    UInt64 change_version = 0;
 
     std::mutex metrics_mutex;
     Int64 reported_series = 0;
@@ -1360,6 +1445,61 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         CurrentMetrics::add(CurrentMetrics::TimeSeriesSeriesIndexBytes, bytes - reported_bytes);
         reported_series = series;
         reported_bytes = bytes;
+    }
+
+    UInt64 getChangeVersion()
+    {
+        std::lock_guard lock{apply_mutex};
+        return change_version;
+    }
+
+    void notifyChange()
+    {
+        {
+            std::lock_guard lock{apply_mutex};
+            ++change_version;
+        }
+        apply_cv.notify_all();
+    }
+
+    /// Waits until something changes after `version` was read. Returns false if nothing has changed before the deadline.
+    bool waitForChange(UInt64 version, Clock::time_point deadline)
+    {
+        std::unique_lock lock{apply_mutex};
+        return apply_cv.wait_until(lock, deadline, [&] { return (change_version != version) || shutdown_called; });
+    }
+
+    /// Registers the data parts which no thread applies now as being applied by the caller, and returns them.
+    /// `parts` are in the order of preference. With `max_rows` the function takes no more rows than that,
+    /// but it takes the first data part anyway if `at_least_one` is set.
+    DataPartsVector claimDataParts(bool is_tags_table, const DataPartsVector & parts, std::optional<size_t> max_rows, bool at_least_one)
+    {
+        DataPartsVector res;
+        size_t rows = 0;
+        std::lock_guard lock{apply_mutex};
+        auto & in_flight = parts_in_flight[is_tags_table];
+        for (const auto & part : parts)
+        {
+            if (in_flight.contains(part->name))
+                continue;
+            if (max_rows && (rows + part->rows_count > *max_rows) && !(at_least_one && res.empty()))
+                break;
+            rows += part->rows_count;
+            in_flight.insert(part->name);
+            res.push_back(part);
+        }
+        return res;
+    }
+
+    void releaseDataParts(bool is_tags_table, const DataPartsVector & parts)
+    {
+        {
+            std::lock_guard lock{apply_mutex};
+            for (const auto & part : parts)
+                parts_in_flight[is_tags_table].erase(part->name);
+            ++change_version;
+        }
+        apply_cv.notify_all();
     }
 
     /// Returns the target tables if the index can be built from them.
@@ -1427,7 +1567,24 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return tables;
     }
 
-    ContextMutablePtr makeContextForReading(size_t num_threads) const
+    /// A context to list the data parts of the target tables: each listing sees the current ones.
+    ContextMutablePtr makeContextForListing(const ContextPtr & base_context) const
+    {
+        auto local_context = Context::createCopy(base_context);
+        local_context->setSetting("enable_shared_storage_snapshot_in_query", false);
+        return local_context;
+    }
+
+    /// Reads the specified data parts of a target table and passes their rows to `apply_block` until it returns false.
+    /// `snapshot` is the snapshot of the table which the data parts were taken from: the query reads the data parts
+    /// held by this snapshot, so it reads them even if a merge has replaced them.
+    /// With `with_deleted_rows` the query reads the rows deleted by lightweight deletes too,
+    /// and the last column of a block tells which rows exist.
+    /// The blocks come in any order if `num_threads` is more than one. Returns the number of rows read.
+    template <typename ApplyBlock>
+    size_t readDataParts(
+        const StoragePtr & storage, const StorageSnapshotPtr & snapshot, const String & select_list, const DataPartsVector & parts,
+        size_t num_threads, bool with_deleted_rows, ApplyBlock && apply_block) const
     {
         auto local_context = Context::createCopy(getContext());
         local_context->makeQueryContext();
@@ -1440,18 +1597,17 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         local_context->setSetting("max_result_rows", UInt64{0});
         local_context->setSetting("max_result_bytes", UInt64{0});
         local_context->setSetting("use_query_condition_cache", false);
-        /// Each listing of the data parts must see the current ones.
-        local_context->setSetting("enable_shared_storage_snapshot_in_query", false);
-        return local_context;
-    }
+        local_context->setSetting("apply_deleted_mask", !with_deleted_rows);
 
-    /// Reads the specified data parts of a target table and passes their rows to `apply_block` until it returns false.
-    /// The blocks come in any order if `num_threads` is more than one. Returns the number of rows read.
-    template <typename ApplyBlock>
-    size_t readDataParts(
-        const StorageID & table_id, const String & select_list, const DataPartsVector & parts, const ContextPtr & local_context,
-        size_t num_threads, ApplyBlock && apply_block) const
-    {
+        /// The query takes the snapshot of the table from this cache.
+        local_context->setSetting("enable_shared_storage_snapshot_in_query", true);
+        auto metadata_cache = std::make_shared<QueryMetadataCache>();
+        local_context->setQueryMetadataCache(metadata_cache);
+        {
+            auto [snapshots, lock] = metadata_cache->getStorageSnapshotCache();
+            snapshots->emplace(storage.get(), snapshot);
+        }
+
         String part_names;
         for (const auto & part : parts)
         {
@@ -1459,7 +1615,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 part_names += ", ";
             part_names += quoteString(part->name);
         }
-        String query = fmt::format("SELECT {} FROM {} WHERE _part IN ({})", select_list, table_id.getFullTableName(), part_names);
+        String query = fmt::format("SELECT {}{} FROM {} WHERE _part IN ({})",
+            select_list, with_deleted_rows ? ", _row_exists" : "", storage->getStorageID().getFullTableName(), part_names);
 
         ParserSelectWithUnionQuery parser;
         ASTPtr ast = parseQuery(parser, query, /* max_query_size = */ 0, DBMS_DEFAULT_MAX_PARSER_DEPTH, DBMS_DEFAULT_MAX_PARSER_BACKTRACKS);
@@ -1497,25 +1654,27 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return num_rows;
     }
 
-    /// Applies the specified data parts of a target table, and marks as applied the ones which were read for sure.
-    /// Returns false if the index has reached its size limit or is shut down.
+    /// Applies data parts of a target table which the caller has claimed (see `claimDataParts`),
+    /// and marks as applied the ones which were read as a whole. `snapshot` is the snapshot of the table which holds these data parts.
+    /// Returns false if the index was dropped meanwhile, has reached its size limit, or is shut down.
     bool applyDataParts(
-        const TargetTables & tables, bool is_tags_table, const DataPartsVector & parts_, const ContextPtr & local_context, size_t num_threads)
+        const TargetTables & tables, bool is_tags_table, const StorageSnapshotPtr & snapshot, const DataPartsVector & parts,
+        UInt64 expected_epoch, size_t num_threads)
     {
+        SCOPE_EXIT({ releaseDataParts(is_tags_table, parts); });
+
         Stopwatch watch;
         SCOPE_EXIT({ ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexApplyMicroseconds, watch.elapsedMicroseconds()); });
 
+        /// The thread which drops the index or calculates its size holds this mutex for a short time. A query doesn't wait for it.
+        std::shared_lock maintenance_lock{maintenance_mutex, std::try_to_lock};
+        if (!maintenance_lock.owns_lock() || (epoch != expected_epoch) || (state == State::NotBuilt))
+            return false;
+
         const auto & storage = is_tags_table ? tables.tags_storage : tables.time_ranges_storage;
-        const auto & metadata = is_tags_table ? tables.tags_metadata : tables.time_ranges_metadata;
-        const auto table_id = storage->getStorageID();
         const String select_list = is_tags_table
             ? tables.tags_select_list
             : fmt::format("{}, {}, {}", backQuote(TimeSeriesColumnNames::ID), backQuote(TimeSeriesColumnNames::MinTime), backQuote(TimeSeriesColumnNames::MaxTime));
-
-        /// The new data parts are small, and the queries wait for them. A big data part is the result of a merge.
-        DataPartsVector parts = parts_;
-        std::stable_sort(parts.begin(), parts.end(),
-            [](const DataPartPtr & left, const DataPartPtr & right) { return left->rows_count < right->rows_count; });
 
         size_t begin = 0;
         while (begin != parts.size())
@@ -1523,10 +1682,14 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             if (shutdown_called)
                 return false;
 
+            /// A data part with a mask of deleted rows is read alone: the number of its rows which exist is not known in advance.
+            const bool with_deleted_rows = parts[begin]->hasLightweightDelete();
             size_t end = begin;
             size_t rows_in_batch = 0;
             DataPartsVector batch;
-            while ((end != parts.size()) && (batch.empty() || (rows_in_batch + parts[end]->rows_count <= MAX_ROWS_IN_BATCH)))
+            while ((end != parts.size())
+                && ((end == begin)
+                    || (!with_deleted_rows && !parts[end]->hasLightweightDelete() && (rows_in_batch + parts[end]->rows_count <= MAX_ROWS_IN_BATCH))))
             {
                 rows_in_batch += parts[end]->rows_count;
                 if (parts[end]->rows_count)
@@ -1534,12 +1697,28 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 ++end;
             }
 
-            size_t num_rows = 0;
+            size_t num_rows_read = 0;
+            size_t num_rows_applied = 0;
             bool size_limit_reached = false;
             if (!batch.empty())
             {
-                num_rows = readDataParts(table_id, select_list, batch, local_context, num_threads, [&](const Block & block)
+                num_rows_read = readDataParts(storage, snapshot, select_list, batch, num_threads, with_deleted_rows, [&](Block & block)
                 {
+                    if (with_deleted_rows)
+                    {
+                        auto exists_column = block.getByPosition(block.columns() - 1).column->convertToFullColumnIfConst();
+                        const auto & filter = assert_cast<const ColumnUInt8 &>(*exists_column).getData();
+                        block.erase(block.columns() - 1);
+                        for (size_t i = 0; i != block.columns(); ++i)
+                        {
+                            auto & column = block.getByPosition(i).column;
+                            column = column->convertToFullColumnIfConst()->filter(filter, -1);
+                        }
+                        if (!block.rows())
+                            return true;
+                    }
+                    num_rows_applied += block.rows();
+
                     auto id_column = recursiveRemoveLowCardinality(block.getByPosition(0).column->convertToFullColumnIfConst());
                     std::lock_guard lock{mutex};
                     if (is_tags_table)
@@ -1560,10 +1739,15 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             if (size_limit_reached || shutdown_called)
                 return false;
 
-            /// A data part which was active before the query and is active after it was read by the query as a whole.
-            std::unordered_set<String> active_names;
-            for (const auto & part : getVisibleDataParts(storage, metadata, local_context))
-                active_names.insert(part->name);
+            /// The query reads the data parts held by the snapshot, so it reads all their rows.
+            /// The data parts are not marked as applied if it did not: they are read again then.
+            if (num_rows_read != rows_in_batch)
+            {
+                LOG_DEBUG(log, "Read {} rows instead of {} from {} data parts of {}, will read them again",
+                    num_rows_read, rows_in_batch, batch.size(), storage->getStorageID().getNameForLogs());
+                begin = end;
+                continue;
+            }
 
             {
                 std::lock_guard lock{mutex};
@@ -1571,16 +1755,16 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 for (size_t i = begin; i != end; ++i)
                 {
                     const auto & part = parts[i];
-                    if (!active_names.contains(part->name))
-                        continue;
-                    table_state.applied.add(part->info);
-                    table_state.known_parts[part->name] = TableState::KnownPart{.info = part->info, .rows = part->rows_count};
+                    const size_t rows = with_deleted_rows ? num_rows_applied : part->rows_count;
+                    table_state.applied.add(part->info, rows);
+                    if (rows)
+                        table_state.known_parts[part->name] = TableState::KnownPart{.info = part->info, .rows = part->rows_count};
                 }
             }
 
             ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexAppliedParts, end - begin);
-            ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexAppliedRows, num_rows);
-            applied_data_parts = true;
+            ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexAppliedRows, num_rows_read);
+            notifyChange();
             begin = end;
         }
         return true;
@@ -1588,29 +1772,25 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
 
     struct TableCheck
     {
+        /// The data parts which are not applied, the ones with fewer rows first.
         DataPartsVector not_applied;
         size_t not_applied_rows = 0;
         /// The table has lost rows the index has applied, or a mutation has changed them.
         bool changed = false;
     };
 
-    /// Compares the active data parts of a target table with what the index has applied.
-    static TableCheck checkTable(const TableState & table_state, const DataPartsVector & parts, const StorageMetadataPtr & metadata)
+    /// Finds which of the data parts are not applied.
+    static TableCheck checkCoverage(const TableState & table_state, const DataPartsVector & parts)
     {
         TableCheck res;
-        if (table_state.metadata && (table_state.metadata.get() != metadata.get()))
-            res.changed = true;
-
-        std::unordered_set<std::string_view> active_names;
         for (const auto & part : parts)
         {
-            active_names.insert(part->name);
             if (part->info.isPatch())
             {
                 res.changed = true;
                 continue;
             }
-            switch (table_state.applied.check(part->info))
+            switch (table_state.applied.check(part->info, part->rows_count))
             {
                 case AppliedRanges::Status::Applied:
                     break;
@@ -1623,8 +1803,26 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                     break;
             }
         }
+        sortByRows(res.not_applied);
+        return res;
+    }
 
-        /// A data part the index has applied must be active or merged into an active data part with rows.
+    /// Compares the active data parts of a target table with what the index has applied.
+    /// `parts` must be listed after the last change of the known data parts.
+    static TableCheck checkTable(const TableState & table_state, const DataPartsVector & parts, const StorageMetadataPtr & metadata)
+    {
+        TableCheck res = checkCoverage(table_state, parts);
+        if (table_state.metadata && (table_state.metadata.get() != metadata.get()))
+            res.changed = true;
+        if (res.changed)
+            return res;
+
+        std::unordered_set<std::string_view> active_names;
+        for (const auto & part : parts)
+            active_names.insert(part->name);
+
+        /// A data part with applied rows must be active or merged into an active data part with rows:
+        /// `DROP PART` and `DROP PARTITION` leave nothing or an empty data part instead of it.
         for (const auto & [name, known_part] : table_state.known_parts)
         {
             if (active_names.contains(name))
@@ -1647,32 +1845,37 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return res;
     }
 
-    /// Remembers the active data parts which are applied, to notice when one of them disappears.
+    /// Remembers the active data parts which have blocks with applied rows, to notice when one of them disappears.
+    /// A data part which is not applied as a whole is remembered too: it can be a merge of applied data parts.
     static void updateKnownParts(TableState & table_state, const DataPartsVector & parts)
     {
         table_state.known_parts.clear();
         for (const auto & part : parts)
         {
-            if (table_state.applied.check(part->info) == AppliedRanges::Status::Applied)
+            if (table_state.applied.hasRowsOf(part->info))
                 table_state.known_parts[part->name] = TableState::KnownPart{.info = part->info, .rows = part->rows_count};
         }
     }
 
-    /// Drops the data of the index. Requires `sync_mutex`.
+    /// Drops the data of the index. Requires `follower_mutex`.
     void reset(State new_state)
     {
-        std::lock_guard lock{mutex};
-        data = nullptr;
-        tags_state.clear();
-        time_ranges_state.clear();
-        out_of_horizon = nullptr;
-        unresolved_since.reset();
-        state = new_state;
-        ++epoch;
-        resetMetrics(0, 0);
+        {
+            std::lock_guard maintenance_lock{maintenance_mutex};
+            std::lock_guard lock{mutex};
+            data = nullptr;
+            tags_state.clear();
+            time_ranges_state.clear();
+            out_of_horizon = nullptr;
+            unresolved_since.reset();
+            state = new_state;
+            ++epoch;
+            resetMetrics(0, 0);
+        }
+        notifyChange();
     }
 
-    /// Starts building the index from the current state of the tables. Requires `sync_mutex`.
+    /// Starts building the index from the current state of the tables. Requires `follower_mutex`.
     void startBuilding(const TargetTables & tables)
     {
         reset(State::Building);
@@ -1689,18 +1892,22 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         LOG_DEBUG(log, "Building the series index");
     }
 
-    /// Calculates the size of the lists of time series if it is time to do that. Requires `sync_mutex`:
-    /// no other thread changes the data, so the calculation doesn't stop the lookups.
+    /// Calculates the size of the lists of time series if it is time to do that. Requires `follower_mutex`.
+    /// The lookups go on meanwhile, and the threads which apply data parts wait.
     void updatePostingsBytes(bool force)
     {
         const auto now = Clock::now();
-        size_t postings_bytes = 0;
         {
             std::shared_lock lock{mutex};
             if (!data->hasEstimatedPostingsBytes())
                 return;
             if (!force && !data->needsPostingsBytes() && (now - last_postings_bytes_calculation < POSTINGS_BYTES_CALCULATION_INTERVAL))
                 return;
+        }
+        std::lock_guard maintenance_lock{maintenance_mutex};
+        size_t postings_bytes = 0;
+        {
+            std::shared_lock lock{mutex};
             postings_bytes = data->calculatePostingsBytes();
         }
         std::lock_guard lock{mutex};
@@ -1708,12 +1915,12 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         last_postings_bytes_calculation = now;
     }
 
-    /// Brings the index up to date with the tables. Requires `sync_mutex`.
-    /// With `max_rows` the function doesn't build the index and doesn't apply more rows than that: a query uses it.
-    /// With `immediately` the function doesn't wait for the time when the next rebuild is allowed.
+    /// Brings the index up to date with the tables: builds it if it is not built, and applies the new data parts.
+    /// Requires `follower_mutex`. With `immediately` the function doesn't wait for the time when the next rebuild is allowed.
     /// Returns whether the index is ready and all the data parts found by the function are applied.
-    bool synchronize(std::optional<size_t> max_rows, bool immediately)
+    bool synchronize(bool immediately)
     {
+        has_more_to_apply = false;
         if (shutdown_called)
             return false;
 
@@ -1728,9 +1935,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             return false;
         }
 
-        /// A query applies a few rows, so it reads them itself.
-        const size_t num_threads = max_rows ? 1 : NUM_THREADS_TO_READ;
-        auto local_context = makeContextForReading(num_threads);
+        auto listing_context = makeContextForListing(getContext());
         size_t num_builds = 0;
         size_t num_time_ranges_passes = 0;
         size_t num_passes_when_ready = 0;
@@ -1742,23 +1947,33 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             {
                 const auto now = Clock::now();
                 /// The tables can change again and again while the index is built, the next call builds it then.
-                if (max_rows || (now < size_limit_retry_time) || (!immediately && (now < no_rebuild_before)) || (num_builds == 3))
+                if ((now < size_limit_retry_time) || (!immediately && (now < no_rebuild_before)) || (num_builds == 3))
                     return false;
                 no_rebuild_before = now + MIN_TIME_BETWEEN_REBUILDS;
                 startBuilding(*tables);
                 ++num_builds;
                 num_time_ranges_passes = 0;
             }
+            const UInt64 current_epoch = epoch;
 
-            auto time_ranges_parts = getVisibleDataParts(tables->time_ranges_storage, tables->time_ranges_metadata, local_context);
-            auto tags_parts = getVisibleDataParts(tables->tags_storage, tables->tags_metadata, local_context);
-
+            PartsList time_ranges_list;
+            PartsList tags_list;
             TableCheck time_ranges_check;
             TableCheck tags_check;
             {
-                std::shared_lock lock{mutex};
-                time_ranges_check = checkTable(time_ranges_state, time_ranges_parts, tables->time_ranges_metadata);
-                tags_check = checkTable(tags_state, tags_parts, tables->tags_metadata);
+                /// The data parts are listed with the lock held: a query can apply a data part and make it known at any other moment.
+                std::lock_guard lock{mutex};
+                /// The row with the tags of a time series is written before the row with its time range. The "time ranges" table
+                /// is listed first, so the list of the "tags" table has the tags of every time series of the first list.
+                time_ranges_list = listDataParts(tables->time_ranges_storage, tables->time_ranges_metadata, listing_context);
+                tags_list = listDataParts(tables->tags_storage, tables->tags_metadata, listing_context);
+                time_ranges_check = checkTable(time_ranges_state, time_ranges_list.parts, tables->time_ranges_metadata);
+                tags_check = checkTable(tags_state, tags_list.parts, tables->tags_metadata);
+                if (!time_ranges_check.changed && !tags_check.changed)
+                {
+                    updateKnownParts(time_ranges_state, time_ranges_list.parts);
+                    updateKnownParts(tags_state, tags_list.parts);
+                }
             }
 
             if (time_ranges_check.changed || tags_check.changed)
@@ -1768,27 +1983,20 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 continue;
             }
 
-            {
-                std::lock_guard lock{mutex};
-                updateKnownParts(time_ranges_state, time_ranges_parts);
-                updateKnownParts(tags_state, tags_parts);
-            }
-
             if (state == State::Building)
             {
-                if (max_rows)
-                    return false;
-
                 /// The time ranges are applied before the tags, so the tags of the time series older than the horizon are skipped.
                 /// New data parts appear all the time: the ones left after a few passes are applied after the tags.
                 if (!time_ranges_check.not_applied.empty() && (num_time_ranges_passes < 3))
                 {
-                    if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_check.not_applied, local_context, num_threads))
+                    auto parts = claimDataParts(/* is_tags_table = */ false, time_ranges_check.not_applied, {}, false);
+                    if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_list.snapshot, parts, current_epoch, NUM_THREADS_TO_READ))
                         break;
                     ++num_time_ranges_passes;
                     continue;
                 }
-                if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_check.not_applied, local_context, num_threads))
+                auto parts = claimDataParts(/* is_tags_table = */ true, tags_check.not_applied, {}, false);
+                if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_list.snapshot, parts, current_epoch, NUM_THREADS_TO_READ))
                     break;
                 updatePostingsBytes(/* force = */ true);
                 {
@@ -1796,6 +2004,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                     out_of_horizon = nullptr;
                     state = State::Ready;
                 }
+                notifyChange();
                 LOG_INFO(log, "Built the series index in {} seconds: {} time series, {} bytes",
                     build_watch.elapsedSeconds(), data->numSeries(), data->bytes());
                 continue;
@@ -1807,27 +2016,32 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 break;
             }
 
-            if (max_rows && (time_ranges_check.not_applied_rows + tags_check.not_applied_rows > *max_rows))
-                return false;
-
             /// New data parts appear all the time: the next call applies the next ones.
+            has_more_to_apply = true;
             if (num_passes_when_ready == 3)
                 break;
             ++num_passes_when_ready;
 
-            /// The "time ranges" table is listed first and applied last: the row with the tags of a time series is written before
-            /// the row with its time range, so the time series with a time range already have their tags.
-            if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_check.not_applied, local_context, num_threads)
-                || !applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_check.not_applied, local_context, num_threads))
+            /// The data parts with fewer rows are applied first: they are the new ones, and the queries wait for them.
+            /// A big data part is the result of a merge. One pass applies a limited number of rows, then the data parts are listed again.
+            /// The tags are applied before the time ranges, so the time series with a time range already have their tags.
+            auto tags_parts = claimDataParts(/* is_tags_table = */ true, tags_check.not_applied, MAX_ROWS_IN_BATCH, /* at_least_one = */ true);
+            if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_list.snapshot, tags_parts, current_epoch, NUM_THREADS_TO_READ))
+                break;
+            auto time_ranges_parts
+                = claimDataParts(/* is_tags_table = */ false, time_ranges_check.not_applied, MAX_ROWS_IN_BATCH, /* at_least_one = */ true);
+            if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_list.snapshot, time_ranges_parts, current_epoch, NUM_THREADS_TO_READ))
+                break;
+
+            /// Other threads apply the rest of the data parts.
+            if (tags_parts.empty() && time_ranges_parts.empty())
                 break;
         }
 
         if (shutdown_called)
             return false;
 
-        /// The background task calculates the size, a query uses the estimate.
-        if (!max_rows)
-            updatePostingsBytes(/* force = */ false);
+        updatePostingsBytes(/* force = */ false);
 
         size_t num_series = 0;
         size_t bytes = 0;
@@ -1848,6 +2062,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 num_series, bytes, max_size_bytes, std::chrono::duration_cast<std::chrono::seconds>(TIME_TO_RETRY_AFTER_SIZE_LIMIT).count());
             reset(State::NotBuilt);
             size_limit_retry_time = now + TIME_TO_RETRY_AFTER_SIZE_LIMIT;
+            has_more_to_apply = false;
             return false;
         }
 
@@ -1875,10 +2090,10 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             return;
 
         bool idle = false;
-        bool applied_now = false;
+        bool more_to_apply = false;
         try
         {
-            std::unique_lock sync_lock{sync_mutex};
+            std::lock_guard follower_lock{follower_mutex};
             idle = (nowSeconds() - last_lookup_seconds > std::chrono::duration_cast<std::chrono::seconds>(MAX_IDLE_TIME).count());
             if (idle)
             {
@@ -1888,9 +2103,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             }
             else
             {
-                applied_data_parts = false;
-                synchronize({}, /* immediately = */ false);
-                applied_now = applied_data_parts;
+                synchronize(/* immediately = */ false);
+                more_to_apply = has_more_to_apply;
             }
         }
         catch (...)
@@ -1899,7 +2113,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         }
 
         if (!idle && !shutdown_called)
-            task->scheduleAfter(applied_now ? POLL_INTERVAL_AFTER_APPLY_MS : POLL_INTERVAL_MS);
+            task->scheduleAfter(more_to_apply ? POLL_INTERVAL_AFTER_APPLY_MS : POLL_INTERVAL_MS);
     }
 
     void ensureTaskStarted()
@@ -1938,17 +2152,27 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return horizon_seconds * DecimalUtils::scaleMultiplier<Int64>(scale);
     }
 
-    /// Finds the time series if the index is built and has applied all the data parts visible to the query.
+    /// The data parts of the target tables which a query must find in the index: the active ones at the first lookup of the query.
+    /// A data part written after that has no samples which the query reads, so the query doesn't wait for it.
+    struct QueryParts
+    {
+        bool listed = false;
+        PartsList time_ranges;
+        PartsList tags;
+        /// The epoch of the index at the last lookup.
+        UInt64 epoch = 0;
+    };
+
+    /// Finds the time series if the index is built and has applied all the data parts of the query.
     /// `parts_context` is the context of the query with the setting `enable_shared_storage_snapshot_in_query` disabled.
     LookupStatus tryLookupImpl(
         const PrometheusQueryTree::MatcherList & matchers,
         std::optional<Int64> min_time,
         std::optional<Int64> max_time,
         const ContextPtr & parts_context,
-        LookupResult & res,
-        size_t & not_applied_rows)
+        QueryParts & query_parts,
+        LookupResult & res)
     {
-        not_applied_rows = 0;
         auto tables = tryGetTables(parts_context, /* for_building = */ false);
         if (!tables)
             return LookupStatus::CannotAnswer;
@@ -1960,6 +2184,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         std::shared_lock lock{mutex};
         if (state != State::Ready)
             return LookupStatus::NotBuilt;
+        query_parts.epoch = epoch;
 
         /// The index holds only the time series with a time range after the horizon.
         if (horizon_start && (!min_time || (*min_time < *horizon_start)))
@@ -1967,17 +2192,29 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
 
         /// The data parts are listed with the lock held, so the data parts the index knows were active before that:
         /// a known data part which is not in the list has been merged or removed.
-        auto time_ranges_parts = getVisibleDataParts(tables->time_ranges_storage, tables->time_ranges_metadata, parts_context);
-        auto tags_parts = getVisibleDataParts(tables->tags_storage, tables->tags_metadata, parts_context);
-        auto time_ranges_check = checkTable(time_ranges_state, time_ranges_parts, tables->time_ranges_metadata);
-        auto tags_check = checkTable(tags_state, tags_parts, tables->tags_metadata);
+        auto time_ranges_list = listDataParts(tables->time_ranges_storage, tables->time_ranges_metadata, parts_context);
+        auto tags_list = listDataParts(tables->tags_storage, tables->tags_metadata, parts_context);
+        auto time_ranges_check = checkTable(time_ranges_state, time_ranges_list.parts, tables->time_ranges_metadata);
+        auto tags_check = checkTable(tags_state, tags_list.parts, tables->tags_metadata);
         if (time_ranges_check.changed || tags_check.changed)
             return LookupStatus::Stale;
-        if (!time_ranges_check.not_applied.empty() || !tags_check.not_applied.empty())
+
+        if (!query_parts.listed)
         {
-            not_applied_rows = time_ranges_check.not_applied_rows + tags_check.not_applied_rows;
-            return LookupStatus::NotApplied;
+            query_parts.time_ranges = std::move(time_ranges_list);
+            query_parts.tags = std::move(tags_list);
+            query_parts.listed = true;
         }
+        else
+        {
+            /// The data parts written after the first lookup don't matter.
+            time_ranges_check = checkCoverage(time_ranges_state, query_parts.time_ranges.parts);
+            tags_check = checkCoverage(tags_state, query_parts.tags.parts);
+            if (time_ranges_check.changed || tags_check.changed)
+                return LookupStatus::Stale;
+        }
+        if (!time_ranges_check.not_applied.empty() || !tags_check.not_applied.empty())
+            return LookupStatus::NotApplied;
         if (data->numUnresolved())
             return LookupStatus::Stale;
 
@@ -1988,6 +2225,38 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         res.ids = data->makeIDColumn(id_type, ordinals);
         res.tags = data->makeTags(ordinals, lookup_pool);
         return LookupStatus::Found;
+    }
+
+    /// Applies the data parts of a query which are not applied and which no other thread applies, if they have few rows.
+    /// The background task applies the other ones.
+    void applyInQuery(const QueryParts & query_parts)
+    {
+        /// The memory of the index doesn't belong to the query which applies data parts to it.
+        MemoryTrackerSwitcher memory_tracker_switcher{&total_memory_tracker};
+
+        auto tables = tryGetTables(getContext(), /* for_building = */ true);
+        if (!tables)
+            return;
+
+        size_t rows_left = MAX_ROWS_TO_APPLY_IN_QUERY;
+        for (bool is_tags_table : {true, false})
+        {
+            const auto & list = is_tags_table ? query_parts.tags : query_parts.time_ranges;
+            DataPartsVector not_applied;
+            {
+                std::shared_lock lock{mutex};
+                if ((epoch != query_parts.epoch) || (state != State::Ready))
+                    return;
+                not_applied = checkCoverage(is_tags_table ? tags_state : time_ranges_state, list.parts).not_applied;
+            }
+            auto parts = claimDataParts(is_tags_table, not_applied, rows_left, /* at_least_one = */ false);
+            if (parts.empty())
+                continue;
+            for (const auto & part : parts)
+                rows_left -= part->rows_count;
+            if (!applyDataParts(*tables, is_tags_table, list.snapshot, parts, query_parts.epoch, /* num_threads = */ 1))
+                return;
+        }
     }
 };
 
@@ -2035,44 +2304,65 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
     impl->last_lookup_seconds = Impl::nowSeconds();
     impl->ensureTaskStarted();
 
-    /// The data parts must be listed anew at every attempt.
-    auto parts_context = Context::createCopy(query_context);
-    parts_context->setSetting("enable_shared_storage_snapshot_in_query", false);
+    auto parts_context = impl->makeContextForListing(query_context);
+    const UInt64 max_wait_ms = query_context->getSettingsRef()[Setting::time_series_series_index_max_wait_ms];
 
-    /// The background task builds the index and applies the data parts. A query which doesn't wait applies only a few rows itself,
-    /// and it reads the tables if the index is not built or is far behind them.
-    const size_t max_lookups = wait ? 100 : MAX_LOOKUPS_IN_QUERY;
-    for (size_t num_lookups = 1;; ++num_lookups)
+    Impl::QueryParts query_parts;
+    Stopwatch wait_watch;
+    bool waited = false;
+    Impl::Clock::time_point deadline;
+    SCOPE_EXIT({
+        if (waited)
+            ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexWaitMicroseconds, wait_watch.elapsedMicroseconds());
+    });
+
+    /// A query which checks the index builds it and applies all the data parts itself.
+    size_t lookups_left = wait ? 100 : std::numeric_limits<size_t>::max();
+    while (true)
     {
+        /// A change after this moment ends the wait below.
+        const UInt64 change_version = impl->getChangeVersion();
+
         LookupResult res;
-        size_t not_applied_rows = 0;
-        auto status = impl->tryLookupImpl(matchers, min_time, max_time, parts_context, res, not_applied_rows);
+        auto status = impl->tryLookupImpl(matchers, min_time, max_time, parts_context, query_parts, res);
         if (status == Impl::LookupStatus::Found)
+        {
+            res.waited = waited;
             return res;
-        if ((status == Impl::LookupStatus::CannotAnswer) || impl->shutdown_called || (num_lookups == max_lookups))
+        }
+        if ((status == Impl::LookupStatus::CannotAnswer) || impl->shutdown_called || !--lookups_left)
             return {};
 
         if (wait)
         {
-            std::unique_lock sync_lock{impl->sync_mutex};
-            impl->synchronize({}, /* immediately = */ true);
+            std::lock_guard follower_lock{impl->follower_mutex};
+            impl->synchronize(/* immediately = */ true);
             continue;
         }
 
+        /// The index is built by the background task, and a query doesn't wait for that.
         if (status != Impl::LookupStatus::NotApplied)
             return {};
 
-        /// The index is behind the tables. The query brings it up to date if the new rows are few.
-        /// If that takes time and doesn't help, the next queries don't try for a while.
-        if (not_applied_rows > MAX_ROWS_TO_APPLY_IN_QUERY)
-            return {};
-        const Int64 now_ms = Impl::nowMilliseconds();
-        if (now_ms < impl->no_wait_before_ms)
-            return {};
-        std::unique_lock sync_lock{impl->sync_mutex, std::defer_lock};
-        if (!sync_lock.try_lock_for(MAX_WAIT_IN_QUERY) || !impl->synchronize(MAX_ROWS_TO_APPLY_IN_QUERY, /* immediately = */ false))
+        /// The index has not applied some data parts of the query. The query applies the ones with few rows itself,
+        /// and waits for the threads which apply the other ones. After the time limit the query reads the tables.
+        if (!waited)
         {
-            impl->no_wait_before_ms = now_ms + TIME_WITHOUT_WAIT_AFTER_MISS_MS;
+            const Int64 now_ms = Impl::nowMilliseconds();
+            if (!max_wait_ms || (now_ms < impl->no_wait_before_ms))
+                return {};
+            waited = true;
+            wait_watch.restart();
+            deadline = Impl::Clock::now() + std::chrono::milliseconds(max_wait_ms);
+            impl->task->schedule();
+            impl->applyInQuery(query_parts);
+            continue;
+        }
+
+        if ((Impl::Clock::now() >= deadline) || !impl->waitForChange(change_version, deadline))
+        {
+            /// The index is far behind the tables: the next queries don't wait for it for a while.
+            impl->no_wait_before_ms = Impl::nowMilliseconds() + TIME_WITHOUT_WAIT_AFTER_MISS_MS;
             return {};
         }
     }
@@ -2100,7 +2390,6 @@ bool TimeSeriesSeriesIndex::contains(const ColumnPtr & id_column, PaddedPODArray
 
 UInt64 TimeSeriesSeriesIndex::getEpoch() const
 {
-    std::shared_lock lock{impl->mutex};
     return impl->epoch;
 }
 

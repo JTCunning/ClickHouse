@@ -21,5 +21,34 @@
 [('__name__','m'),('series','3')]
 [('__name__','m'),('series','4')]
 [('__name__','m'),('series','5')]
+-- a dropped data part
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+[('__name__','m'),('series','4')]
+[('__name__','m'),('series','5')]
+[('__name__','m'),('series','6')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+[('__name__','m'),('series','4')]
+[('__name__','m'),('series','5')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','3')]
+[('__name__','m'),('series','4')]
+[('__name__','m'),('series','5')]
+-- a truncated tags table
+[('__name__','m'),('series','7')]
+[('__name__','m'),('series','7')]
+-- a dropped partition of the time ranges table
+[('__name__','m'),('series','8')]
+-- a detached and attached partition of the tags table
+[('__name__','m'),('series','8')]
+-- a replaced partition of the tags table
+[('__name__','m'),('series','9')]
+-- a moved partition of the time ranges table
+[('__name__','m'),('series','10')]
+[('__name__','m'),('series','10')]
 -- the index was used every time
 1	0

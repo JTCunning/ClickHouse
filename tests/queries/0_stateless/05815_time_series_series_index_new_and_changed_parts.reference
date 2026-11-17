@@ -25,16 +25,42 @@
 [('__name__','m'),('series','5')]
 -- a truncated table
 [('__name__','m'),('series','6')]
--- dropped caches
+-- a dropped data part of the tags table
 [('__name__','m'),('series','6')]
+[('__name__','m'),('series','7')]
+[('__name__','m'),('series','6')]
+-- a dropped data part of the time ranges table
+[('__name__','m'),('series','6')]
+[('__name__','m'),('series','8')]
+[('__name__','m'),('series','6')]
+-- a truncated tags table
+[('__name__','m'),('series','9')]
+-- a detached and attached partition of the tags table
+[('__name__','m'),('series','9')]
+-- a detached and attached partition of the time ranges table
+[('__name__','m'),('series','9')]
+-- a replaced partition of the tags table
+[('__name__','m'),('series','10')]
+[('__name__','m'),('series','9')]
+[('__name__','m'),('series','10')]
+-- a replaced partition of the time ranges table
+[('__name__','m'),('series','10')]
+[('__name__','m'),('series','11')]
+[('__name__','m'),('series','10')]
+-- a moved partition of the tags table
+[('__name__','m'),('series','12')]
+-- a moved partition of the time ranges table
+[('__name__','m'),('series','13')]
+-- dropped caches
+[('__name__','m'),('series','13')]
 -- the index was used every time
 1	0
 -- the index is disabled by the setting of the table
-[('__name__','m'),('series','6')]
+[('__name__','m'),('series','13')]
 0	0
 -- the index is bigger than its size limit
-[('__name__','m'),('series','6')]
+[('__name__','m'),('series','13')]
 0	1
 -- the index is enabled again
-[('__name__','m'),('series','6')]
+[('__name__','m'),('series','13')]
 1	0

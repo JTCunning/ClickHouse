@@ -75,6 +75,85 @@ sync_replica r2
 select_series r2 05817_used
 select_series r1 05817_used
 
+# make_copy <replica> <kind> <name of the copy>: an empty table with the same structure.
+make_copy()
+{
+    local table
+    table=$(inner_table "$1" "$2")
+    local engine_and_keys
+    engine_and_keys=$($CLIENT -q "
+        SELECT engine || '(''/clickhouse/tables/$CLICKHOUSE_TEST_ZOOKEEPER_PREFIX/05817/$3'', ''$1'') ORDER BY (' || sorting_key || ')'
+            || if(primary_key != '', ' PRIMARY KEY (' || primary_key || ')', '')
+        FROM system.tables WHERE database = currentDatabase() AND name = '$table' FORMAT TSVRaw")
+    $CLIENT -q "CREATE TABLE $3 AS \`$table\` ENGINE = $engine_and_keys"
+}
+
+# newest_part <replica> <kind>
+newest_part()
+{
+    $CLIENT -q "
+        SELECT name FROM system.parts
+        WHERE database = currentDatabase() AND table = '$(inner_table "$1" "$2")' AND active ORDER BY max_block_number DESC LIMIT 1"
+}
+
+echo '-- a dropped data part'
+$CLIENT -q "INSERT INTO ts_r1 (metric_name, tags, samples) VALUES ('m', map('series', '6'), [(toDateTime64(100, 3), 6.)])"
+sync_replica r2
+select_series r2 05817_used
+$CLIENT -q "ALTER TABLE \`$(inner_table r1 tags)\` DROP PART '$(newest_part r1 tags)'"
+sync_replica r2
+select_series r2 05817_used
+select_series r1 05817_used
+
+echo '-- a truncated tags table'
+$CLIENT -q "TRUNCATE TABLE \`$(inner_table r1 tags)\`"
+sync_replica r2
+select_series r2 05817_used
+$CLIENT -q "INSERT INTO ts_r2 (metric_name, tags, samples) VALUES ('m', map('series', '7'), [(toDateTime64(100, 3), 7.)])"
+sync_replica r1
+select_series r1 05817_used
+select_series r2 05817_used
+
+echo '-- a dropped partition of the time ranges table'
+$CLIENT -q "ALTER TABLE \`$(inner_table r2 timeranges)\` DROP PARTITION ID 'all'"
+sync_replica r1
+select_series r1 05817_used
+$CLIENT -q "INSERT INTO ts_r1 (metric_name, tags, samples) VALUES ('m', map('series', '8'), [(toDateTime64(100, 3), 8.)])"
+sync_replica r2
+select_series r2 05817_used
+
+echo '-- a detached and attached partition of the tags table'
+$CLIENT -q "ALTER TABLE \`$(inner_table r1 tags)\` DETACH PARTITION ID 'all'"
+sync_replica r2
+select_series r2 05817_used
+$CLIENT -q "ALTER TABLE \`$(inner_table r1 tags)\` ATTACH PARTITION ID 'all'"
+sync_replica r2
+select_series r2 05817_used
+
+echo '-- a replaced partition of the tags table'
+make_copy r1 tags tags_copy
+$CLIENT -q "INSERT INTO tags_copy SELECT * FROM \`$(inner_table r1 tags)\` WHERE tags['series'] = '7'"
+$CLIENT -q "ALTER TABLE \`$(inner_table r1 tags)\` REPLACE PARTITION ID 'all' FROM tags_copy"
+sync_replica r2
+select_series r2 05817_used
+select_series r1 05817_used
+$CLIENT -q "INSERT INTO ts_r1 (metric_name, tags, samples) VALUES ('m', map('series', '9'), [(toDateTime64(100, 3), 9.)])"
+sync_replica r2
+select_series r2 05817_used
+
+echo '-- a moved partition of the time ranges table'
+make_copy r1 timeranges time_ranges_moved
+$CLIENT -q "ALTER TABLE \`$(inner_table r1 timeranges)\` MOVE PARTITION ID 'all' TO TABLE time_ranges_moved"
+sync_replica r2
+select_series r2 05817_used
+$CLIENT -q "INSERT INTO ts_r2 (metric_name, tags, samples) VALUES ('m', map('series', '10'), [(toDateTime64(100, 3), 10.)])"
+sync_replica r1
+select_series r1 05817_used
+select_series r2 05817_used
+
+$CLIENT -q "DROP TABLE tags_copy"
+$CLIENT -q "DROP TABLE time_ranges_moved"
+
 echo '-- the index was used every time'
 $CLIENT -q "SYSTEM FLUSH LOGS query_log"
 $CLIENT -q "

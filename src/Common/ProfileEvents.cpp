@@ -135,7 +135,9 @@
     M(TimeSeriesTagsDeduplicationCacheMisses, "Number of rows written to the tags tables of TimeSeries tables after they were not found in the deduplication cache.", ValueType::Number) \
     M(TimeSeriesSeriesIndexHits, "Number of selectors resolved to time series by the in-memory series index of a TimeSeries table.", ValueType::Number) \
     M(TimeSeriesSeriesIndexMisses, "Number of selectors resolved to time series by reading the tags table because the in-memory series index of a TimeSeries table could not answer.", ValueType::Number) \
-    M(TimeSeriesSeriesIndexLookupMicroseconds, "Time spent on resolving selectors with the in-memory series index of a TimeSeries table, including the time spent on applying new data parts by the query.", ValueType::Microseconds) \
+    M(TimeSeriesSeriesIndexHitsAfterWait, "Number of selectors resolved to time series by the in-memory series index of a TimeSeries table after the query waited for the index to apply the data parts the query needs. These selectors are also counted in TimeSeriesSeriesIndexHits.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexLookupMicroseconds, "Time spent on resolving selectors with the in-memory series index of a TimeSeries table, including the time of TimeSeriesSeriesIndexWaitMicroseconds.", ValueType::Microseconds) \
+    M(TimeSeriesSeriesIndexWaitMicroseconds, "Time the queries waited for the in-memory series index of a TimeSeries table to apply the data parts they need, including the time they applied such data parts themselves.", ValueType::Microseconds) \
     M(TimeSeriesSeriesIndexAppliedParts, "Number of data parts of the tags tables and the time ranges tables applied to the in-memory series indexes of TimeSeries tables.", ValueType::Number) \
     M(TimeSeriesSeriesIndexAppliedRows, "Number of rows of the tags tables and the time ranges tables applied to the in-memory series indexes of TimeSeries tables.", ValueType::Number) \
     M(TimeSeriesSeriesIndexApplyMicroseconds, "Time spent on reading data parts of the tags tables and the time ranges tables and applying them to the in-memory series indexes of TimeSeries tables.", ValueType::Microseconds) \

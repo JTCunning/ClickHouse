@@ -1590,8 +1590,9 @@ the [time ranges](#time-ranges-table) table, and then follows the data written t
 The index gives the same time series as the tables:
 
 - Both tables only grow, so the index remembers which data parts it has read. A query uses the index only if the index has read
-  every data part the query would read from these tables. A query reads a few new rows itself, and reads the tables as before
-  if there are more of them. Merges don't change the index.
+  every data part which was in these tables when the query started to resolve the selector. A query reads the new data parts
+  with few rows itself and waits for the other ones up to `time_series_series_index_max_wait_ms` milliseconds.
+  After that the query reads the tables as before. Merges don't change the index.
 - A change which can remove rows from these tables (a mutation, a dropped partition, `TRUNCATE`, an `ALTER` of one of them)
   makes the server build the index anew, and the queries read the tables meanwhile.
 - Every server has its own index. No state is shared between the replicas.
@@ -1609,6 +1610,8 @@ The setting [use_series_index](#settings) disables the index of a table, and the
 
 The metrics `TimeSeriesSeriesIndexSeries` and `TimeSeriesSeriesIndexBytes` show the size of the indexes of all the tables,
 and the profile events `TimeSeriesSeriesIndexHits` and `TimeSeriesSeriesIndexMisses` count the selectors resolved with and without the index.
+`TimeSeriesSeriesIndexHitsAfterWait` counts the selectors resolved with the index after a wait for new data parts,
+and `TimeSeriesSeriesIndexWaitMicroseconds` is the time of these waits.
 The profile events `TimeSeriesSeriesIndexAppliedRows` and `TimeSeriesSeriesIndexApplyMicroseconds` show the rows the server has read
 to build the indexes and to follow the tables, and the time it took.
 

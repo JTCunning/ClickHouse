@@ -1,0 +1,5 @@
+-- the index is built
+[('__name__','m'),('series','0')]
+queries without the new time series: 0
+-- each selector is counted once, and a hit after a wait is a hit
+30	1	1

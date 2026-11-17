@@ -28,7 +28,8 @@ class StorageTimeSeries;
 /// Both tables only grow: a time series never changes its tags, and its time range only widens. So the rows of a data part
 /// can be applied in any order and any number of times, and a merge of data parts already applied changes nothing.
 /// The index remembers which ranges of block numbers it has applied. It answers a query only if every data part
-/// the query would read from these tables is inside the applied ranges; otherwise the query reads the tables as usual.
+/// the query would read from these tables is inside the applied ranges. A query applies the data parts with few rows itself
+/// and waits a limited time for the other ones; after that the query reads the tables as usual.
 /// A change that can remove rows (a mutation, a removed data part, an `ALTER` of a table) makes the index build itself anew.
 ///
 /// The index contains only the time series with samples newer than the retention of the "recent samples" table (if there is one),
@@ -52,6 +53,8 @@ public:
         ColumnPtr ids;
         /// The tags of each of these time series, including the metric name.
         VectorWithMemoryTracking<TagNamesAndValuesPtr> tags;
+        /// Whether the query has waited for the index to apply the data parts the query needs.
+        bool waited = false;
     };
 
     /// Tells the index that a query is going to look for time series with a time range starting at `min_time`:
@@ -63,9 +66,9 @@ public:
     /// The bounds are optional and have the scale of the timestamps in the table.
     /// The result contains every time series the query `StorageTimeSeriesSelector::makeSelectIDsQuery` would return
     /// for the data parts visible to `query_context` at the moment of the call.
-    /// Returns nothing if the index cannot answer: it is not built yet, new data parts are not applied yet,
-    /// or the time range is older than what the index holds.
-    /// With `wait` the function builds the index and applies new data parts itself instead of returning nothing.
+    /// Returns nothing if the index cannot answer: it is not built yet, or the time range is older than what the index holds,
+    /// or the index has not applied the data parts of the query in the time set by `time_series_series_index_max_wait_ms`.
+    /// With `wait` the function builds the index and applies all the data parts itself instead of returning nothing.
     std::optional<LookupResult> tryLookup(
         const PrometheusQueryTree::MatcherList & matchers,
         std::optional<Int64> min_time,
