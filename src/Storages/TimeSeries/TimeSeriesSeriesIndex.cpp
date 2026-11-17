@@ -113,11 +113,12 @@ constexpr Int64 NO_MAX_TIME = std::numeric_limits<Int64>::min();
 constexpr UInt8 FLAG_UNRESOLVED = 1;
 
 /// The background task looks for new data parts with this period,
-/// and with the shorter one right after it has applied some: more of them are probably there already.
+/// and with the shorter one for some time after it has applied some: the table gets inserts, so more of them come soon.
 constexpr size_t POLL_INTERVAL_MS = 500;
 constexpr size_t POLL_INTERVAL_AFTER_APPLY_MS = 20;
+constexpr auto TIME_OF_SHORT_POLL_INTERVAL_AFTER_APPLY = std::chrono::seconds(2);
 /// A query applies no more rows than this of the data parts it needs. The background task applies the other ones.
-constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 1'000'000;
+constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 500'000;
 /// After a query has waited for the index in vain, the next queries don't wait for the index and don't apply
 /// data parts for this time: they use the index only if it has applied everything.
 constexpr Int64 TIME_WITHOUT_WAIT_AFTER_MISS_MS = 1000;
@@ -1288,8 +1289,8 @@ struct PartsList
     DataPartsVector parts;
 };
 
-/// `context` must have the setting `enable_shared_storage_snapshot_in_query` disabled or must not be a query context:
-/// each call must see the current data parts.
+/// With the context of a query and the setting `enable_shared_storage_snapshot_in_query` the function returns
+/// the snapshot of the query. With this setting disabled each call sees the current data parts.
 PartsList listDataParts(const StoragePtr & storage, const StorageMetadataPtr & metadata, const ContextPtr & context)
 {
     PartsList res;
@@ -1425,6 +1426,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     Stopwatch build_watch;
     /// Whether the last call of `synchronize` has left data parts which are not applied.
     bool has_more_to_apply = false;
+    /// The last time when `synchronize` applied data parts.
+    Clock::time_point last_apply_time;
 
     /// The data parts which some thread applies now: a data part is never read by two threads at the same time.
     /// The first set is for the "time ranges" table, the second one is for the "tags" table.
@@ -2036,6 +2039,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             /// Other threads apply the rest of the data parts.
             if (tags_parts.empty() && time_ranges_parts.empty())
                 break;
+            last_apply_time = Clock::now();
         }
 
         if (shutdown_called)
@@ -2090,7 +2094,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             return;
 
         bool idle = false;
-        bool more_to_apply = false;
+        bool poll_soon = false;
         try
         {
             std::lock_guard follower_lock{follower_mutex};
@@ -2104,7 +2108,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             else
             {
                 synchronize(/* immediately = */ false);
-                more_to_apply = has_more_to_apply;
+                poll_soon = has_more_to_apply || (Clock::now() - last_apply_time < TIME_OF_SHORT_POLL_INTERVAL_AFTER_APPLY);
             }
         }
         catch (...)
@@ -2113,7 +2117,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         }
 
         if (!idle && !shutdown_called)
-            task->scheduleAfter(more_to_apply ? POLL_INTERVAL_AFTER_APPLY_MS : POLL_INTERVAL_MS);
+            task->scheduleAfter(poll_soon ? POLL_INTERVAL_AFTER_APPLY_MS : POLL_INTERVAL_MS);
     }
 
     void ensureTaskStarted()
@@ -2152,8 +2156,10 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return horizon_seconds * DecimalUtils::scaleMultiplier<Int64>(scale);
     }
 
-    /// The data parts of the target tables which a query must find in the index: the active ones at the first lookup of the query.
-    /// A data part written after that has no samples which the query reads, so the query doesn't wait for it.
+    /// The data parts of the target tables which a query must find in the index: the ones in the snapshots of these tables
+    /// which the query would read them with. A data part written after that has no samples which the query reads,
+    /// so the query doesn't wait for it. With the setting `enable_shared_storage_snapshot_in_query` all the selectors
+    /// of a query have the same snapshots, as they have the same snapshot of the "samples" table.
     struct QueryParts
     {
         bool listed = false;
@@ -2164,11 +2170,12 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     };
 
     /// Finds the time series if the index is built and has applied all the data parts of the query.
-    /// `parts_context` is the context of the query with the setting `enable_shared_storage_snapshot_in_query` disabled.
+    /// `parts_context` is `query_context` with the setting `enable_shared_storage_snapshot_in_query` disabled.
     LookupStatus tryLookupImpl(
         const PrometheusQueryTree::MatcherList & matchers,
         std::optional<Int64> min_time,
         std::optional<Int64> max_time,
+        const ContextPtr & query_context,
         const ContextPtr & parts_context,
         QueryParts & query_parts,
         LookupResult & res)
@@ -2201,18 +2208,16 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
 
         if (!query_parts.listed)
         {
-            query_parts.time_ranges = std::move(time_ranges_list);
-            query_parts.tags = std::move(tags_list);
+            query_parts.time_ranges = listDataParts(tables->time_ranges_storage, tables->time_ranges_metadata, query_context);
+            query_parts.tags = listDataParts(tables->tags_storage, tables->tags_metadata, query_context);
             query_parts.listed = true;
         }
-        else
-        {
-            /// The data parts written after the first lookup don't matter.
-            time_ranges_check = checkCoverage(time_ranges_state, query_parts.time_ranges.parts);
-            tags_check = checkCoverage(tags_state, query_parts.tags.parts);
-            if (time_ranges_check.changed || tags_check.changed)
-                return LookupStatus::Stale;
-        }
+
+        /// The data parts written after the snapshots of the query don't matter.
+        time_ranges_check = checkCoverage(time_ranges_state, query_parts.time_ranges.parts);
+        tags_check = checkCoverage(tags_state, query_parts.tags.parts);
+        if (time_ranges_check.changed || tags_check.changed)
+            return LookupStatus::Stale;
         if (!time_ranges_check.not_applied.empty() || !tags_check.not_applied.empty())
             return LookupStatus::NotApplied;
         if (data->numUnresolved())
@@ -2324,7 +2329,7 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
         const UInt64 change_version = impl->getChangeVersion();
 
         LookupResult res;
-        auto status = impl->tryLookupImpl(matchers, min_time, max_time, parts_context, query_parts, res);
+        auto status = impl->tryLookupImpl(matchers, min_time, max_time, query_context, parts_context, query_parts, res);
         if (status == Impl::LookupStatus::Found)
         {
             res.waited = waited;
