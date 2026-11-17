@@ -5,6 +5,7 @@
 #include <Parsers/IAST_fwd.h>
 #include <Parsers/Prometheus/PrometheusQueryTree.h>
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -26,13 +27,21 @@ struct TimeSeriesIDRange
 
 using TimeSeriesIDRanges = std::vector<TimeSeriesIDRange>;
 
+/// Returns the names of the metrics matched by a regex matcher on `__name__`, or nullopt if there are too many to list.
+using MetricNamesResolver = std::function<std::optional<Strings>(const PrometheusQueryTree::Matcher & name_matcher)>;
+
 /// Makes the ranges of the identifiers of the metrics selected by the matchers, one range per metric (see TimeSeriesIDRange):
-/// the matchers must contain exactly one equality matcher or one regex matcher of literal alternatives on `__name__`,
-/// with non-empty metric names, the id generator must be `tuple(<expression of the metric name only>, <anything>)`,
+/// the matchers must contain exactly one equality matcher or one regex matcher on `__name__`,
+/// the id generator must be `tuple(<expression of the metric name only>, <anything>)`,
 /// and the id type must be a two-component tuple whose second component has a type with known bounds.
+/// The names come from the equality, from the regex if it is a list of plain literals (all names non-empty),
+/// or from `resolve_metric_names` for another regex.
 /// Returns nullopt if any of these conditions doesn't hold, otherwise at least one range.
 std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
-    const PrometheusQueryTree::MatcherList & matchers, const ASTPtr & id_generator, const DataTypePtr & id_type);
+    const PrometheusQueryTree::MatcherList & matchers,
+    const ASTPtr & id_generator,
+    const DataTypePtr & id_type,
+    const MetricNamesResolver & resolve_metric_names = {});
 
 /// `<id> >= tuple(<first_component>, <min_S>) AND <id> <= tuple(<first_component>, <max_S>)`
 ASTPtr makeIDInRangeCondition(const ASTPtr & id, const TimeSeriesIDRange & range);

@@ -4,8 +4,9 @@
 -- When the metric name of a selector is a literal or a list of alternatives, the time ranges table is read by
 -- the id ranges of the selected metrics. The comparisons with the bounds of the ranges are wrapped in `indexHint`,
 -- so the primary key uses them without evaluating them for every row, and the rows are filtered by the first
--- component of `id` instead. The selected samples must be the same as with a regular expression on the metric name,
--- which has no id ranges, including for time series with identifiers outside the ranges (written with another id generator).
+-- component of `id` instead. A regular expression that is not a list of literals is resolved against the tags table
+-- into the metric names it matches, and selects the same ranges. The selected samples must be the same for all three,
+-- including for time series with identifiers outside the ranges (written with another id generator).
 
 SET allow_experimental_time_series_table = 1;
 SET session_timezone = 'UTC';
@@ -45,7 +46,7 @@ SELECT '-- list of alternatives';
 SELECT timestamp, value FROM timeSeriesSelector(ts, '{__name__=~"foo|bar"}', 100, 300, 'timestamp_and_value') ORDER BY timestamp, value
 SETTINGS log_comment = '05493_alternatives';
 
-SELECT '-- regular expression, no id ranges';
+SELECT '-- regular expression, resolved to id ranges';
 SELECT timestamp, value FROM timeSeriesSelector(ts, '{__name__=~"fo.|ba[r]"}', 100, 300, 'timestamp_and_value') ORDER BY timestamp, value
 SETTINGS log_comment = '05493_regex';
 
@@ -68,7 +69,8 @@ SETTINGS max_rows_to_read = 0; -- system.text_log can be really big
 SELECT '-- the id ranges in indexHint still prune the time ranges table';
 
 -- `max_bytes_to_merge_at_max_space_in_pool = 1` keeps the time range of `qux` in a part of its own; every other inner table has one part.
--- The filter by the first component of `id` alone does not prune that part, so without the index hint the list reads as many rows as the regex.
+-- The filter by the first component of `id` alone does not prune that part, so only the index hint keeps the list and the regex from reading it.
+-- The regex reads the same time ranges as the list; the rows and the part it reads in addition belong to the query that resolves the metric names on the tags table.
 DROP TABLE IF EXISTS ts_prune;
 CREATE TABLE ts_prune ENGINE = TimeSeries
 TIME RANGES INNER ENGINE = AggregatingMergeTree ORDER BY id SETTINGS max_bytes_to_merge_at_max_space_in_pool = 1;
@@ -88,8 +90,8 @@ SETTINGS log_comment = 'pruning_regex', enable_parallel_replicas = 0;
 
 SYSTEM FLUSH LOGS query_log;
 SELECT
-    sumIf(read_rows, log_comment = 'pruning_regex') - sumIf(read_rows, log_comment = 'pruning_list') AS rows_pruned,
-    sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_regex') - sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_list') AS parts_pruned
+    sumIf(read_rows, log_comment = 'pruning_regex') - sumIf(read_rows, log_comment = 'pruning_list') AS resolve_rows,
+    sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_regex') - sumIf(ProfileEvents['SelectedParts'], log_comment = 'pruning_list') AS resolve_parts
 FROM system.query_log
 WHERE event_date >= yesterday() AND current_database = currentDatabase() AND type = 'QueryFinish' AND log_comment IN ('pruning_list', 'pruning_regex')
 SETTINGS max_rows_to_read = 0; -- system.query_log can be really big

@@ -1,0 +1,30 @@
+-- regular expression matching two metrics
+1970-01-01 00:01:40.000	1
+1970-01-01 00:03:20.000	2
+1970-01-01 00:04:10.000	8
+1970-01-01 00:05:00.000	4
+-- the same two metrics as a list of alternatives
+1970-01-01 00:01:40.000	1
+1970-01-01 00:03:20.000	2
+1970-01-01 00:04:10.000	8
+1970-01-01 00:05:00.000	4
+-- regular expression with a label matcher
+1970-01-01 00:01:40.000	1
+1970-01-01 00:02:30.000	6
+1970-01-01 00:03:20.000	2
+1970-01-01 00:05:00.000	4
+-- regular expression that matches no metric
+0
+-- regular expression that matches more than 64 metrics
+70	2415
+66	2391
+-- the selected series equal the union of the selectors of the metrics
+1
+-- PromQL evaluation
+[]	1970-01-01 00:05:00.000	14
+[]	1970-01-01 00:05:00.000	12
+[]	1970-01-01 00:05:00.000	70
+-- generated query: index hints appear only when the names are resolved
+05813_list	1
+05813_many	0
+05813_regex	1
