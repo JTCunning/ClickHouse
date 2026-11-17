@@ -160,6 +160,10 @@ constexpr Int64 TIME_WITHOUT_WAIT_AFTER_MISS_MS = 1000;
 constexpr size_t MAX_CANDIDATES_PER_LIST_TO_CHECK = 128;
 /// The background task reads data parts with this number of threads. A query reads them with one thread.
 constexpr size_t NUM_THREADS_TO_READ = 8;
+/// The background task applies the data parts of the "time ranges" table with this number of threads if they have many rows:
+/// each insert writes a row for every time series it has samples of, so this table gets most of the rows.
+constexpr size_t NUM_THREADS_TO_APPLY = 4;
+constexpr size_t MIN_ROWS_PER_THREAD_TO_APPLY = 100'000;
 /// The tags of the time series found by a lookup are made by a few threads if there are many time series.
 /// The lookups of one table share this number of threads.
 constexpr size_t MAX_THREADS_TO_MAKE_TAGS = 16;
@@ -277,6 +281,27 @@ private:
     const IDLayout layout;
     const char * first = nullptr;
     const char * second = nullptr;
+};
+
+
+/// Reads times from a column of the "time ranges" table.
+class TimeReader
+{
+public:
+    explicit TimeReader(const IColumn & column_) : column(column_)
+    {
+        if (column.isFixedAndContiguous() && (column.sizeOfValueIfFixed() == sizeof(Int64)))
+            data = column.getRawData().data();
+    }
+
+    [[nodiscard]] Int64 get(size_t row) const
+    {
+        return data ? unalignedLoad<Int64>(data + row * sizeof(Int64)) : column.getInt(row);
+    }
+
+private:
+    const IColumn & column;
+    const char * data = nullptr;
 };
 
 
@@ -651,14 +676,14 @@ public:
     /// of this shard. A time series with the maximum time before `horizon_start` is not admitted.
     /// A time series with the maximum time before `idle_start` is idle for the idle limit already.
     void applyWholeTimeRanges(
-        const IDReader & reader, const IColumn & min_time_column, const IColumn & max_time_column, const PaddedPODArray<UInt32> & rows,
+        const IDReader & reader, const TimeReader & min_times, const TimeReader & max_times, const PaddedPODArray<UInt32> & rows,
         std::optional<Int64> horizon_start, Int64 idle_start)
     {
         char id[MAX_ID_SIZE];
         for (UInt32 row : rows)
         {
-            const Int64 min_time = min_time_column.getInt(row);
-            const Int64 max_time = max_time_column.getInt(row);
+            const Int64 min_time = min_times.get(row);
+            const Int64 max_time = max_times.get(row);
             if (horizon_start && (max_time < *horizon_start))
             {
                 watermark = std::max(watermark, max_time);
@@ -682,11 +707,11 @@ public:
     /// from the pending ones, or it is unresolved until a row with its tags comes. While the index is built (`building`),
     /// the tags are applied after all the time ranges, so a new time series just has no tags.
     void applyTimeRanges(
-        const IDReader & reader, const IColumn & min_time_column, const IColumn & max_time_column, const PaddedPODArray<UInt32> & rows,
+        const IDReader & reader, const TimeReader & min_times, const TimeReader & max_times, const PaddedPODArray<UInt32> & rows,
         bool building, Int64 now_ms)
     {
-        /// The cell of the hash table, the identifier and the time range of a time series are far from each other in the memory,
-        /// so they are prefetched for a batch of rows.
+        /// The cell of the hash table, the identifier, the time range and the flags of a time series are far from each other
+        /// in the memory, so they are prefetched for a batch of rows.
         constexpr size_t batch_size = 32;
         char ids[batch_size][MAX_ID_SIZE];
         UInt64 hashes[batch_size];
@@ -708,13 +733,14 @@ public:
                 {
                     __builtin_prefetch(getID(candidate));
                     __builtin_prefetch(&times[2 * static_cast<size_t>(candidate)]);
+                    __builtin_prefetch(&flags[candidate]);
                 }
             }
             for (size_t i = 0; i != count; ++i)
             {
                 const size_t row = rows[begin + i];
-                const Int64 min_time = min_time_column.getInt(row);
-                const Int64 max_time = max_time_column.getInt(row);
+                const Int64 min_time = min_times.get(row);
+                const Int64 max_time = max_times.get(row);
                 const bool covered_by_watermark = (watermark != NO_WATERMARK) && (max_time <= watermark);
                 Ordinal ordinal = find(ids[i], hashes[i]);
                 bool is_new = false;
@@ -746,7 +772,8 @@ public:
                 if (max_time > series_times[1])
                 {
                     series_times[1] = max_time;
-                    flags[ordinal] &= ~AGE_MASK;
+                    if (flags[ordinal] & AGE_MASK)
+                        flags[ordinal] &= ~AGE_MASK;
                 }
             }
         }
@@ -2017,6 +2044,12 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         CurrentMetrics::TimeSeriesSeriesIndexThreadsScheduled,
         MAX_THREADS_TO_MAKE_TAGS, /* max_free_threads = */ 0, /* queue_size = */ 0};
 
+    /// Applies the data parts of the "time ranges" table for the background task.
+    ThreadPool apply_pool{
+        CurrentMetrics::TimeSeriesSeriesIndexThreads, CurrentMetrics::TimeSeriesSeriesIndexThreadsActive,
+        CurrentMetrics::TimeSeriesSeriesIndexThreadsScheduled,
+        NUM_THREADS_TO_APPLY, /* max_free_threads = */ 0, /* queue_size = */ 0};
+
     /// Held by the thread which brings the whole index up to date: the background task, or a query which checks the index.
     /// Only this thread builds the index, drops it, drops time series and rebuilds shards.
     /// Other queries apply the data parts they need without this mutex.
@@ -2402,6 +2435,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         auto min_time_column = block.getByPosition(1).column->convertToFullColumnIfConst();
         auto max_time_column = block.getByPosition(2).column->convertToFullColumnIfConst();
         IDReader reader{*id_column, index_data.layout};
+        TimeReader min_times{*min_time_column};
+        TimeReader max_times{*max_time_column};
 
         index_data.splitRows(reader, id_column->size(), rows_by_shard);
         const Int64 now_ms = nowMilliseconds();
@@ -2411,7 +2446,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 continue;
             auto & shard = index_data.shards[i];
             std::lock_guard lock{shard.mutex};
-            shard.series->applyTimeRanges(reader, *min_time_column, *max_time_column, rows_by_shard[i], building, now_ms);
+            shard.series->applyTimeRanges(reader, min_times, max_times, rows_by_shard[i], building, now_ms);
             shard.updateNumbers();
         }
     }
@@ -2552,6 +2587,46 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return true;
     }
 
+    /// Applies data parts of a target table which the caller has claimed with a few threads if they have many rows:
+    /// each thread applies a share of the data parts. A shard is locked for the rows of one block only,
+    /// so the threads apply rows to different shards at the same time. Requires `follower_mutex`.
+    bool applyDataPartsInParallel(
+        const TargetTables & tables, bool is_tags_table, const StorageSnapshotPtr & snapshot, const DataPartsVector & parts, UInt64 expected_epoch)
+    {
+        size_t num_rows = 0;
+        for (const auto & part : parts)
+            num_rows += part->rows_count;
+        const size_t num_jobs = std::min({NUM_THREADS_TO_APPLY, parts.size(), num_rows / MIN_ROWS_PER_THREAD_TO_APPLY});
+        if (num_jobs <= 1)
+            return applyDataParts(tables, is_tags_table, snapshot, parts, expected_epoch, NUM_THREADS_TO_READ);
+
+        /// The data parts are in the order of their sizes, and they go to the jobs in turn.
+        std::vector<DataPartsVector> parts_of_jobs(num_jobs);
+        for (size_t i = 0; i != parts.size(); ++i)
+            parts_of_jobs[i % num_jobs].push_back(parts[i]);
+        const size_t num_threads_to_read = std::max<size_t>(1, NUM_THREADS_TO_READ / num_jobs);
+        std::atomic<bool> all_applied = true;
+
+        /// The jobs use only what is declared before the runner, which waits for them.
+        const auto * tables_ptr = &tables;
+        const auto * parts_of_jobs_ptr = &parts_of_jobs;
+        auto * all_applied_ptr = &all_applied;
+        ThreadPoolCallbackRunnerLocal<void> runner(apply_pool, ThreadName::DEFAULT_THREAD_POOL);
+        for (size_t job = 0; job != num_jobs; ++job)
+        {
+            runner.enqueueAndKeepTrack(
+                [this, tables_ptr, parts_of_jobs_ptr, all_applied_ptr, is_tags_table, snapshot, expected_epoch, num_threads_to_read, job]
+                {
+                    /// The memory of the index doesn't belong to the query which applies data parts to it.
+                    MemoryTrackerSwitcher memory_tracker_switcher{&total_memory_tracker};
+                    if (!applyDataParts(*tables_ptr, is_tags_table, snapshot, (*parts_of_jobs_ptr)[job], expected_epoch, num_threads_to_read))
+                        *all_applied_ptr = false;
+                });
+        }
+        runner.waitForAllToFinishAndRethrowFirstError();
+        return all_applied;
+    }
+
     /// Applies the data parts of the "time ranges" table which the caller has claimed, when the index starts building.
     /// One query aggregates the rows of each time series in the order of the identifiers, so the index knows
     /// the whole time range of a time series when it decides whether to admit it, and it keeps no data for the other ones.
@@ -2609,6 +2684,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                     num_rows_read += count;
 
                 IDReader reader{*id_column, index_data->layout};
+                TimeReader min_times{*min_time_column};
+                TimeReader max_times{*max_time_column};
                 index_data->splitRows(reader, id_column->size(), rows_by_shard);
                 for (size_t i = 0; i != NUM_SHARDS; ++i)
                 {
@@ -2616,7 +2693,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                         continue;
                     auto & shard = index_data->shards[i];
                     std::lock_guard lock{shard.mutex};
-                    shard.series->applyWholeTimeRanges(reader, *min_time_column, *max_time_column, rows_by_shard[i], horizon_start, idle_start);
+                    shard.series->applyWholeTimeRanges(reader, min_times, max_times, rows_by_shard[i], horizon_start, idle_start);
                     shard.updateNumbers();
                 }
                 size_limit_reached = (index_data->bytes() > max_size_bytes);
@@ -3075,7 +3152,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 if (!time_ranges_check.not_applied.empty() && (num_time_ranges_passes < 3))
                 {
                     auto parts = claimDataParts(/* is_tags_table = */ false, time_ranges_check.not_applied, {}, false);
-                    if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_list.snapshot, parts, current_epoch, NUM_THREADS_TO_READ))
+                    if (!applyDataPartsInParallel(*tables, /* is_tags_table = */ false, time_ranges_list.snapshot, parts, current_epoch))
                         break;
                     ++num_time_ranges_passes;
                     continue;
@@ -3105,7 +3182,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             /// the table ever had, and the index takes the tags of the time series with a time range only.
             auto time_ranges_parts
                 = claimDataParts(/* is_tags_table = */ false, time_ranges_check.not_applied, MAX_ROWS_IN_BATCH, /* at_least_one = */ true);
-            if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_list.snapshot, time_ranges_parts, current_epoch, NUM_THREADS_TO_READ))
+            if (!applyDataPartsInParallel(*tables, /* is_tags_table = */ false, time_ranges_list.snapshot, time_ranges_parts, current_epoch))
                 break;
             auto tags_parts = claimDataParts(/* is_tags_table = */ true, tags_check.not_applied, MAX_ROWS_IN_BATCH, /* at_least_one = */ true);
             if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_list.snapshot, tags_parts, current_epoch, NUM_THREADS_TO_READ))
