@@ -1609,6 +1609,8 @@ The setting [use_series_index](#settings) disables the index of a table, and the
 
 The metrics `TimeSeriesSeriesIndexSeries` and `TimeSeriesSeriesIndexBytes` show the size of the indexes of all the tables,
 and the profile events `TimeSeriesSeriesIndexHits` and `TimeSeriesSeriesIndexMisses` count the selectors resolved with and without the index.
+The profile events `TimeSeriesSeriesIndexAppliedRows` and `TimeSeriesSeriesIndexApplyMicroseconds` show the rows the server has read
+to build the indexes and to follow the tables, and the time it took.
 
 ## Altering settings {#altering-settings}
 

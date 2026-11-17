@@ -12,6 +12,7 @@
 #include <Common/MemoryTrackerSwitcher.h>
 #include <Common/OptimizedRegularExpression.h>
 #include <Common/PODArray.h>
+#include <Common/RadixSort.h>
 #include <Common/ProfileEvents.h>
 #include <Common/SharedMutex.h>
 #include <Common/Stopwatch.h>
@@ -31,6 +32,7 @@
 #include <Interpreters/SelectQueryOptions.h>
 #include <Parsers/ParserSelectWithUnionQuery.h>
 #include <Parsers/parseQuery.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageTimeSeries.h>
@@ -40,6 +42,7 @@
 #include <Storages/TimeSeries/splitTimeSeriesType.h>
 #include <Storages/TimeSeries/tryGetLiteralAlternatives.h>
 
+#include <base/scope_guard.h>
 #include <city.h>
 #include <roaring/roaring.hh>
 
@@ -56,6 +59,7 @@ namespace ProfileEvents
 {
     extern const Event TimeSeriesSeriesIndexAppliedParts;
     extern const Event TimeSeriesSeriesIndexAppliedRows;
+    extern const Event TimeSeriesSeriesIndexApplyMicroseconds;
     extern const Event TimeSeriesSeriesIndexRebuilds;
 }
 
@@ -99,9 +103,13 @@ constexpr UInt8 FLAG_UNRESOLVED = 1;
 constexpr size_t POLL_INTERVAL_MS = 500;
 constexpr size_t POLL_INTERVAL_AFTER_APPLY_MS = 20;
 /// A query applies new data parts itself if they have no more rows than this in total, otherwise it reads the tables.
-constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 2'000'000;
+constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 1'000'000;
 /// A query waits this long for the background task which applies data parts at the moment.
-constexpr auto MAX_WAIT_IN_QUERY = std::chrono::milliseconds(1000);
+constexpr auto MAX_WAIT_IN_QUERY = std::chrono::milliseconds(100);
+/// The number of lookups a query makes: it applies new data parts between them.
+constexpr size_t MAX_LOOKUPS_IN_QUERY = 3;
+/// The background task reads data parts with this number of threads. A query reads them with one thread.
+constexpr size_t NUM_THREADS_TO_READ = 8;
 /// One query to a target table reads no more rows than this, if it reads more than one data part.
 constexpr size_t MAX_ROWS_IN_BATCH = 20'000'000;
 /// The index is rebuilt if a time series stays without tags this long while they could have been skipped.
@@ -112,8 +120,11 @@ constexpr auto MIN_TIME_BETWEEN_REBUILDS = std::chrono::seconds(10);
 constexpr auto TIME_TO_RETRY_AFTER_SIZE_LIMIT = std::chrono::seconds(3600);
 /// The index frees its memory if no query used it this long.
 constexpr auto MAX_IDLE_TIME = std::chrono::seconds(3600);
-/// The size of the lists of time series is calculated again after this number of applied rows.
-constexpr size_t ROWS_TO_UPDATE_POSTINGS_BYTES = 10'000'000;
+/// The size of the lists of time series is calculated by a pass over all of them, which is slow. Between two passes
+/// the size is estimated: a time series added to a list takes about this number of bytes.
+constexpr size_t ESTIMATED_BYTES_PER_POSTING_ADD = 4;
+/// The size of the lists of time series is calculated again after this time, or earlier if the index has grown by 1/8.
+constexpr auto POSTINGS_BYTES_CALCULATION_INTERVAL = std::chrono::seconds(600);
 
 
 /// The identifiers are kept as their native binary representation. The supported types are the ones with a typed map
@@ -261,22 +272,23 @@ struct Posting
     Ordinal single = NO_ORDINAL;
     std::unique_ptr<roaring::Roaring> bitmap;
 
-    void add(Ordinal ordinal)
+    /// Adds sorted ordinals.
+    void addMany(size_t count, const Ordinal * ordinals)
     {
-        if (bitmap)
+        if (!count)
+            return;
+        if (!bitmap)
         {
-            bitmap->add(ordinal);
-        }
-        else if (single == NO_ORDINAL)
-        {
-            single = ordinal;
-        }
-        else if (single != ordinal)
-        {
+            if ((count == 1) && ((single == NO_ORDINAL) || (single == ordinals[0])))
+            {
+                single = ordinals[0];
+                return;
+            }
             bitmap = std::make_unique<roaring::Roaring>();
-            bitmap->add(single);
-            bitmap->add(ordinal);
+            if (single != NO_ORDINAL)
+                bitmap->add(single);
         }
+        bitmap->addMany(count, ordinals);
     }
 
     void unionInto(roaring::Roaring & dest) const
@@ -507,6 +519,12 @@ public:
         const auto & names_column = assert_cast<const ColumnString &>(tuple.getColumn(0));
         const auto & values_column = assert_cast<const ColumnString &>(tuple.getColumn(1));
 
+        /// The lists of time series are many and they are far from each other in the memory. The additions to them are collected
+        /// for the whole block and sorted, so each list is updated once per block.
+        pair_adds.clear();
+        name_adds.clear();
+        tagged_adds.clear();
+
         char id[MAX_ID_SIZE];
         for (size_t row = 0; row != num_rows; ++row)
         {
@@ -540,10 +558,10 @@ public:
             {
                 writeVarUIntTo(label_bytes, pair - previous);
                 previous = pair;
-                postings[pair].add(ordinal);
-                names[pair_name[pair]]->series.add(ordinal);
+                pair_adds.push_back((static_cast<UInt64>(pair) << 32) | ordinal);
+                name_adds.push_back((static_cast<UInt64>(pair_name[pair]) << 32) | ordinal);
             }
-            tagged.add(ordinal);
+            tagged_adds.push_back(ordinal);
 
             if (flags[ordinal] & FLAG_UNRESOLVED)
             {
@@ -551,6 +569,12 @@ public:
                 --num_unresolved;
             }
         }
+
+        addToPostings(pair_adds, [&](UInt32 pair) -> Posting & { return postings[pair]; });
+        addToPostings(name_adds, [&](UInt32 name) -> Posting & { return names[name]->series; });
+        std::sort(tagged_adds.begin(), tagged_adds.end());
+        tagged.addMany(tagged_adds.size(), tagged_adds.data());
+        posting_adds_since_calculation += pair_adds.size() + name_adds.size();
     }
 
     /// Returns false if no time series can match: a matcher requires a tag which no time series has.
@@ -767,23 +791,39 @@ public:
         return res;
     }
 
-    /// The size of the data in bytes. The size of the lists of time series is the one calculated by `updatePostingsBytes`.
+    /// The size of the data in bytes. The size of the lists of time series is the one set by `setPostingsBytes`
+    /// plus an estimate for the time series added after that.
     [[nodiscard]] size_t bytes() const
     {
         return id_bytes.size() + table.allocatedBytes() + times.size() * sizeof(Int64) + label_offsets.size() * sizeof(UInt64)
             + label_bytes.size() + flags.size() + arena.allocatedBytes() + skipped_tags.allocatedBytes()
-            + pair_name.size() * BYTES_PER_PAIR + postings_bytes;
+            + pair_name.size() * BYTES_PER_PAIR + postings_bytes + posting_adds_since_calculation * ESTIMATED_BYTES_PER_POSTING_ADD;
     }
 
-    void updatePostingsBytes()
+    /// Calculates the size of the lists of time series by a pass over all of them.
+    [[nodiscard]] size_t calculatePostingsBytes() const
     {
         size_t res = sizeof(roaring::Roaring) + tagged.getSizeInBytes(false);
         for (const auto & posting : postings)
             res += posting.allocatedBytes();
         for (const auto & label : names)
             res += label->series.allocatedBytes();
-        postings_bytes = res;
+        return res;
     }
+
+    void setPostingsBytes(size_t postings_bytes_)
+    {
+        postings_bytes = postings_bytes_;
+        posting_adds_since_calculation = 0;
+    }
+
+    /// Whether the estimated part of the size is big enough to calculate the size again.
+    [[nodiscard]] bool needsPostingsBytes() const
+    {
+        return posting_adds_since_calculation * ESTIMATED_BYTES_PER_POSTING_ADD * 8 > bytes();
+    }
+
+    [[nodiscard]] bool hasEstimatedPostingsBytes() const { return posting_adds_since_calculation != 0; }
 
 private:
     struct LabelName
@@ -816,6 +856,25 @@ private:
         flags.push_back(UInt8{0});
         table.insert(hash, ordinal, [&](Ordinal other) { return hashID(getID(other), id_size); });
         return ordinal;
+    }
+
+    /// Adds time series to lists: an element of `adds` is the number of a list in the upper 32 bits and the ordinal in the lower ones.
+    template <typename GetPosting>
+    void addToPostings(PODArray<UInt64> & adds, GetPosting && get_posting)
+    {
+        if (adds.empty())
+            return;
+        RadixSort<RadixSortUIntTraits<UInt64>>::executeLSD(adds.data(), adds.size());
+        ordinals_buffer.clear();
+        for (size_t i = 0; i != adds.size(); ++i)
+        {
+            ordinals_buffer.push_back(static_cast<Ordinal>(adds[i]));
+            if ((i + 1 == adds.size()) || ((adds[i + 1] >> 32) != (adds[i] >> 32)))
+            {
+                get_posting(static_cast<UInt32>(adds[i] >> 32)).addMany(ordinals_buffer.size(), ordinals_buffer.data());
+                ordinals_buffer.clear();
+            }
+        }
     }
 
     UInt32 internPair(std::string_view name, std::string_view value)
@@ -938,9 +997,14 @@ private:
     std::vector<std::string_view> pair_value;
     std::vector<Posting> postings;
     size_t postings_bytes = 0;
+    size_t posting_adds_since_calculation = 0;
 
     /// Used by `applyTags` only.
     std::vector<UInt32> pairs_buffer;
+    PODArray<UInt64> pair_adds;
+    PODArray<UInt64> name_adds;
+    PODArray<Ordinal> tagged_adds;
+    PODArray<Ordinal> ordinals_buffer;
 };
 
 
@@ -1159,9 +1223,12 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     /// Held while data parts are applied or the index is rebuilt, so only one thread does that at a time.
     std::timed_mutex sync_mutex;
 
+    /// It is changed with both mutexes held, so a thread which holds one of them reads the current value.
+    /// A thread which holds none of them can read a value which is not current.
+    std::atomic<State> state = State::NotBuilt;
+
     /// Protects everything below.
     mutable SharedMutex mutex;
-    State state = State::NotBuilt;
     UInt64 epoch = 0;
     std::unique_ptr<SeriesIndexData> data;
     TableState tags_state;
@@ -1175,7 +1242,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     std::optional<Clock::time_point> unresolved_since;
     Clock::time_point no_rebuild_before;
     Clock::time_point size_limit_retry_time;
-    size_t rows_since_postings_bytes_update = 0;
+    Clock::time_point last_postings_bytes_calculation;
+    Stopwatch build_watch;
     /// Whether the last call of `synchronize` in the background task has applied data parts.
     bool applied_data_parts = false;
 
@@ -1257,11 +1325,12 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return tables;
     }
 
-    ContextMutablePtr makeContextForReading() const
+    ContextMutablePtr makeContextForReading(size_t num_threads) const
     {
         auto local_context = Context::createCopy(getContext());
         local_context->makeQueryContext();
         local_context->setCurrentQueryId("");
+        local_context->setSetting("max_threads", UInt64{num_threads});
         /// The index is not built by a query, so the limits of a query don't apply.
         local_context->setSetting("max_execution_time", UInt64{0});
         local_context->setSetting("max_rows_to_read", UInt64{0});
@@ -1275,9 +1344,11 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     }
 
     /// Reads the specified data parts of a target table and passes their rows to `apply_block` until it returns false.
-    /// Returns the number of rows read.
+    /// The blocks come in any order if `num_threads` is more than one. Returns the number of rows read.
     template <typename ApplyBlock>
-    size_t readDataParts(const StorageID & table_id, const String & select_list, const DataPartsVector & parts, const ContextPtr & local_context, ApplyBlock && apply_block) const
+    size_t readDataParts(
+        const StorageID & table_id, const String & select_list, const DataPartsVector & parts, const ContextPtr & local_context,
+        size_t num_threads, ApplyBlock && apply_block) const
     {
         String part_names;
         for (const auto & part : parts)
@@ -1293,28 +1364,45 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
 
         InterpreterSelectQueryAnalyzer interpreter(ast, local_context, SelectQueryOptions{});
         auto io = interpreter.execute();
-        PullingPipelineExecutor executor(io.pipeline);
 
         size_t num_rows = 0;
-        Block block;
-        while (executor.pull(block))
+        auto pull_all = [&](auto & executor)
         {
-            if (!block.rows())
-                continue;
-            num_rows += block.rows();
-            if (shutdown_called || !apply_block(block))
+            Block block;
+            while (executor.pull(block))
             {
-                executor.cancel();
-                break;
+                if (!block.rows())
+                    continue;
+                num_rows += block.rows();
+                if (shutdown_called || !apply_block(block))
+                {
+                    executor.cancel();
+                    break;
+                }
             }
+        };
+
+        if (num_threads > 1)
+        {
+            PullingAsyncPipelineExecutor executor(io.pipeline);
+            pull_all(executor);
+        }
+        else
+        {
+            PullingPipelineExecutor executor(io.pipeline);
+            pull_all(executor);
         }
         return num_rows;
     }
 
     /// Applies the specified data parts of a target table, and marks as applied the ones which were read for sure.
     /// Returns false if the index has reached its size limit or is shut down.
-    bool applyDataParts(const TargetTables & tables, bool is_tags_table, const DataPartsVector & parts, const ContextPtr & local_context)
+    bool applyDataParts(
+        const TargetTables & tables, bool is_tags_table, const DataPartsVector & parts, const ContextPtr & local_context, size_t num_threads)
     {
+        Stopwatch watch;
+        SCOPE_EXIT({ ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexApplyMicroseconds, watch.elapsedMicroseconds()); });
+
         const auto & storage = is_tags_table ? tables.tags_storage : tables.time_ranges_storage;
         const auto & metadata = is_tags_table ? tables.tags_metadata : tables.time_ranges_metadata;
         const auto table_id = storage->getStorageID();
@@ -1343,7 +1431,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             bool size_limit_reached = false;
             if (!batch.empty())
             {
-                num_rows = readDataParts(table_id, select_list, batch, local_context, [&](const Block & block)
+                num_rows = readDataParts(table_id, select_list, batch, local_context, num_threads, [&](const Block & block)
                 {
                     auto id_column = recursiveRemoveLowCardinality(block.getByPosition(0).column->convertToFullColumnIfConst());
                     std::lock_guard lock{mutex};
@@ -1357,14 +1445,6 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                         auto min_time_column = block.getByPosition(1).column->convertToFullColumnIfConst();
                         auto max_time_column = block.getByPosition(2).column->convertToFullColumnIfConst();
                         data->applyTimeRanges(*id_column, *min_time_column, *max_time_column, horizon_start, out_of_horizon.get());
-                    }
-
-                    /// The lists of time series are many, so their size is not calculated for every block.
-                    rows_since_postings_bytes_update += block.rows();
-                    if (rows_since_postings_bytes_update >= ROWS_TO_UPDATE_POSTINGS_BYTES)
-                    {
-                        data->updatePostingsBytes();
-                        rows_since_postings_bytes_update = 0;
                     }
                     size_limit_reached = (data->bytes() > max_size_bytes);
                     return !size_limit_reached;
@@ -1498,7 +1578,27 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         if (horizon_start)
             out_of_horizon = std::make_unique<GrowingBloomFilter>();
         ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexRebuilds);
+        build_watch.restart();
         LOG_DEBUG(log, "Building the series index");
+    }
+
+    /// Calculates the size of the lists of time series if it is time to do that. Requires `sync_mutex`:
+    /// no other thread changes the data, so the calculation doesn't stop the lookups.
+    void updatePostingsBytes(bool force)
+    {
+        const auto now = Clock::now();
+        size_t postings_bytes = 0;
+        {
+            std::shared_lock lock{mutex};
+            if (!data->hasEstimatedPostingsBytes())
+                return;
+            if (!force && !data->needsPostingsBytes() && (now - last_postings_bytes_calculation < POSTINGS_BYTES_CALCULATION_INTERVAL))
+                return;
+            postings_bytes = data->calculatePostingsBytes();
+        }
+        std::lock_guard lock{mutex};
+        data->setPostingsBytes(postings_bytes);
+        last_postings_bytes_calculation = now;
     }
 
     /// Brings the index up to date with the tables. Requires `sync_mutex`.
@@ -1521,7 +1621,9 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             return false;
         }
 
-        auto local_context = makeContextForReading();
+        /// A query applies a few rows, so it reads them itself.
+        const size_t num_threads = max_rows ? 1 : NUM_THREADS_TO_READ;
+        auto local_context = makeContextForReading(num_threads);
         size_t num_builds = 0;
         size_t num_time_ranges_passes = 0;
         size_t num_passes_when_ready = 0;
@@ -1574,19 +1676,21 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 /// New data parts appear all the time: the ones left after a few passes are applied after the tags.
                 if (!time_ranges_check.not_applied.empty() && (num_time_ranges_passes < 3))
                 {
-                    if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_check.not_applied, local_context))
+                    if (!applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_check.not_applied, local_context, num_threads))
                         break;
                     ++num_time_ranges_passes;
                     continue;
                 }
-                if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_check.not_applied, local_context))
+                if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_check.not_applied, local_context, num_threads))
                     break;
+                updatePostingsBytes(/* force = */ true);
                 {
                     std::lock_guard lock{mutex};
                     out_of_horizon = nullptr;
                     state = State::Ready;
                 }
-                LOG_DEBUG(log, "Built the series index: {} time series", data->numSeries());
+                LOG_INFO(log, "Built the series index in {} seconds: {} time series, {} bytes",
+                    build_watch.elapsedSeconds(), data->numSeries(), data->bytes());
                 continue;
             }
 
@@ -1606,21 +1710,23 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
 
             /// The "time ranges" table is listed first and applied last: the row with the tags of a time series is written before
             /// the row with its time range, so the time series with a time range already have their tags.
-            if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_check.not_applied, local_context)
-                || !applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_check.not_applied, local_context))
+            if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_check.not_applied, local_context, num_threads)
+                || !applyDataParts(*tables, /* is_tags_table = */ false, time_ranges_check.not_applied, local_context, num_threads))
                 break;
         }
 
         if (shutdown_called)
             return false;
 
+        /// The background task calculates the size, a query uses the estimate.
+        if (!max_rows)
+            updatePostingsBytes(/* force = */ false);
+
         size_t num_series = 0;
         size_t bytes = 0;
         size_t num_unresolved = 0;
         {
-            std::lock_guard lock{mutex};
-            data->updatePostingsBytes();
-            rows_since_postings_bytes_update = 0;
+            std::shared_lock lock{mutex};
             num_series = data->numSeries();
             bytes = data->bytes();
             num_unresolved = data->numUnresolved();
@@ -1704,6 +1810,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         NotBuilt,
         /// The index is built, and the tables have data parts it has not applied.
         NotApplied,
+        /// The index is built, and it must be rebuilt or it waits for the tags of some time series.
+        Stale,
     };
 
     /// Returns the start of the time the index can hold now, in the scale of the timestamps of the table:
@@ -1730,11 +1838,17 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         std::optional<Int64> min_time,
         std::optional<Int64> max_time,
         const ContextPtr & parts_context,
-        LookupResult & res)
+        LookupResult & res,
+        size_t & not_applied_rows)
     {
+        not_applied_rows = 0;
         auto tables = tryGetTables(parts_context, /* for_building = */ false);
         if (!tables)
             return LookupStatus::CannotAnswer;
+
+        /// A query doesn't wait for the lock while the index is built.
+        if (state != State::Ready)
+            return LookupStatus::NotBuilt;
 
         std::shared_lock lock{mutex};
         if (state != State::Ready)
@@ -1750,9 +1864,15 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         auto tags_parts = getVisibleDataParts(tables->tags_storage, tables->tags_metadata, parts_context);
         auto time_ranges_check = checkTable(time_ranges_state, time_ranges_parts, tables->time_ranges_metadata);
         auto tags_check = checkTable(tags_state, tags_parts, tables->tags_metadata);
-        if (time_ranges_check.changed || tags_check.changed || !time_ranges_check.not_applied.empty() || !tags_check.not_applied.empty()
-            || data->numUnresolved())
+        if (time_ranges_check.changed || tags_check.changed)
+            return LookupStatus::Stale;
+        if (!time_ranges_check.not_applied.empty() || !tags_check.not_applied.empty())
+        {
+            not_applied_rows = time_ranges_check.not_applied_rows + tags_check.not_applied_rows;
             return LookupStatus::NotApplied;
+        }
+        if (data->numUnresolved())
+            return LookupStatus::Stale;
 
         std::vector<PreparedMatcher> prepared_matchers;
         PaddedPODArray<Ordinal> ordinals;
@@ -1798,15 +1918,17 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
     auto parts_context = Context::createCopy(query_context);
     parts_context->setSetting("enable_shared_storage_snapshot_in_query", false);
 
-    /// The background task builds the index and applies the data parts. A query which doesn't wait applies only a few rows itself.
-    const size_t max_attempts = wait ? 100 : 2;
-    for (size_t attempt = 0; attempt != max_attempts; ++attempt)
+    /// The background task builds the index and applies the data parts. A query which doesn't wait applies only a few rows itself,
+    /// and it reads the tables if the index is not built or is far behind them.
+    const size_t max_lookups = wait ? 100 : MAX_LOOKUPS_IN_QUERY;
+    for (size_t num_lookups = 1;; ++num_lookups)
     {
         LookupResult res;
-        auto status = impl->tryLookupImpl(matchers, min_time, max_time, parts_context, res);
+        size_t not_applied_rows = 0;
+        auto status = impl->tryLookupImpl(matchers, min_time, max_time, parts_context, res, not_applied_rows);
         if (status == Impl::LookupStatus::Found)
             return res;
-        if ((status == Impl::LookupStatus::CannotAnswer) || impl->shutdown_called)
+        if ((status == Impl::LookupStatus::CannotAnswer) || impl->shutdown_called || (num_lookups == max_lookups))
             return {};
 
         if (wait)
@@ -1816,14 +1938,13 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
         }
         else
         {
-            if (status == Impl::LookupStatus::NotBuilt)
+            if ((status != Impl::LookupStatus::NotApplied) || (not_applied_rows > MAX_ROWS_TO_APPLY_IN_QUERY))
                 return {};
             std::unique_lock sync_lock{impl->sync_mutex, std::defer_lock};
             if (!sync_lock.try_lock_for(MAX_WAIT_IN_QUERY) || !impl->synchronize(MAX_ROWS_TO_APPLY_IN_QUERY, /* immediately = */ false))
                 return {};
         }
     }
-    return {};
 }
 
 bool TimeSeriesSeriesIndex::contains(const ColumnPtr & id_column, PaddedPODArray<UInt8> & res) const

@@ -515,11 +515,13 @@ namespace
     /// the time series passing the filter (`timeSeriesStoreTags` registers the tags of the time series it's applied to).
     /// With `metric_id_ranges` the time ranges table is read by its primary key over the ranges of the selected metrics, and the time series
     /// with identifiers outside the ranges (written with another id generator) are kept without filtering by time.
+    /// Without `keep_ids_out_of_ranges` such time series are not selected.
     void addTimeRangesTableJoin(
         ASTSelectQuery & select_query,
         const StorageID & time_ranges_table_id,
         ASTs time_range_conditions,
-        const std::optional<TimeSeriesIDRanges> & metric_id_ranges)
+        const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
+        bool keep_ids_out_of_ranges)
     {
         const char * subquery_alias = "time_ranges_subquery";
         const char * matched_column = "matched";
@@ -573,7 +575,7 @@ namespace
         {
             ASTPtr condition = makeASTFunction(
                 "equals", make_intrusive<ASTIdentifier>(std::vector<String>{subquery_alias, matched_column}), make_intrusive<ASTLiteral>(UInt64{1}));
-            if (metric_id_ranges)
+            if (metric_id_ranges && keep_ids_out_of_ranges)
                 condition = makeASTForLogicalOr({std::move(condition), makeIDOutOfRangesCondition(id, *metric_id_ranges)});
             if (select_query.where())
                 condition = makeASTForLogicalAnd({select_query.where(), std::move(condition)});
@@ -590,12 +592,15 @@ namespace
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        bool keep_ids_out_of_ranges = true)
     {
         if (!time_ranges_table_id || time_range_to_filter_ids.containsAllTimestamps())
             return;
 
-        addTimeRangesTableJoin(select_query, time_ranges_table_id, makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type), metric_id_ranges);
+        addTimeRangesTableJoin(
+            select_query, time_ranges_table_id, makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type), metric_id_ranges,
+            keep_ids_out_of_ranges);
     }
 
     /// Makes the WHERE clause of a query selecting identifiers from the tags table.
@@ -650,7 +655,8 @@ namespace
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        bool keep_ids_out_of_ranges = true)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -697,7 +703,8 @@ namespace
         }
 
         /// If there is a time ranges table: LEFT JOIN it and keep the time series with a matching time range (see addTimeRangesTableJoin).
-        applyTimeRangeFilterToSelectIDsQuery(*select_query, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type);
+        applyTimeRangeFilterToSelectIDsQuery(
+            *select_query, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type, keep_ids_out_of_ranges);
 
         return wrapIntoSelectWithUnionQuery(std::move(select_query));
     }
@@ -1525,7 +1532,6 @@ void StorageTimeSeriesSelector::readImpl(
 
     if (series_index)
     {
-        Stopwatch watch;
         const bool check_series_index = query_settings[Setting::time_series_check_series_index];
 
         /// The query reads none of these tables with the index, so the access to them is checked here.
@@ -1537,15 +1543,15 @@ void StorageTimeSeriesSelector::readImpl(
             Strings{TimeSeriesColumnNames::ID, TimeSeriesColumnNames::MinTime, TimeSeriesColumnNames::MaxTime});
 
         /// The tables are read before the index is asked, so the index has everything they have returned.
-        /// The time ranges table is read without the ranges of identifiers: with them the query keeps the time series
-        /// written with another id generator whatever their time ranges are.
+        /// The query which reads the tables without the index keeps the time series with identifiers outside the ranges
+        /// of the selected metrics whatever their time ranges are. The index filters them by time, so they are not checked.
         ColumnPtr ids_from_tables;
         if (check_series_index)
         {
             ids_from_tables = executeSelectIDsQuery(
                 makeSelectQueryFromTagsTable(
                     tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids,
-                    /* metric_id_ranges = */ {}, config.table_timestamp_type),
+                    metric_id_ranges, config.table_timestamp_type, /* keep_ids_out_of_ranges = */ false),
                 interpreter_context);
         }
 
@@ -1572,6 +1578,7 @@ void StorageTimeSeriesSelector::readImpl(
         if (time_range_to_filter_ids.max_time)
             max_time_to_filter_ids = time_range_to_filter_ids.max_time->value;
 
+        Stopwatch watch;
         auto found = series_index->tryLookup(matchers, min_time_to_filter_ids, max_time_to_filter_ids, context, /* wait = */ check_series_index);
         ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexLookupMicroseconds, watch.elapsedMicroseconds());
 

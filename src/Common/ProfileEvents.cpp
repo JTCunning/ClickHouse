@@ -138,6 +138,7 @@
     M(TimeSeriesSeriesIndexLookupMicroseconds, "Time spent on resolving selectors with the in-memory series index of a TimeSeries table, including the time spent on applying new data parts by the query.", ValueType::Microseconds) \
     M(TimeSeriesSeriesIndexAppliedParts, "Number of data parts of the tags tables and the time ranges tables applied to the in-memory series indexes of TimeSeries tables.", ValueType::Number) \
     M(TimeSeriesSeriesIndexAppliedRows, "Number of rows of the tags tables and the time ranges tables applied to the in-memory series indexes of TimeSeries tables.", ValueType::Number) \
+    M(TimeSeriesSeriesIndexApplyMicroseconds, "Time spent on reading data parts of the tags tables and the time ranges tables and applying them to the in-memory series indexes of TimeSeries tables.", ValueType::Microseconds) \
     M(TimeSeriesSeriesIndexRebuilds, "Number of times the in-memory series index of a TimeSeries table started building from scratch.", ValueType::Number) \
     M(IcebergMetadataReadWaitTimeMicroseconds, "Total time data readers spend waiting for iceberg metadata files to be read and parsed, summed across all reader threads.", ValueType::Microseconds) \
     M(ParquetMetadataCacheHits, "Number of times parquet metadata has been found in the cache.", ValueType::Number) \
