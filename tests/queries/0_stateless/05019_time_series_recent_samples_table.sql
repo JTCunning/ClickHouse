@@ -39,8 +39,10 @@ SELECT value FROM prometheusQuery(ts_recent, 'sum(test_metric)', now()) ORDER BY
 
 SELECT '-- a query outside the TTL window reads from the main samples table';
 
+-- The series index finds no time series for this time, and then the query reads no table.
 SELECT plan LIKE '%.inner_id.recentsamples.%' AS reads_recent, plan LIKE '%.inner_id.samples.%' AS reads_main
-FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN SELECT sum(value) FROM prometheusQuery(ts_recent, 'test_metric', toDateTime64('2020-01-01 00:00:00', 3))));
+FROM (SELECT arrayStringConcat(groupArray(explain), '\n') AS plan FROM (EXPLAIN SELECT sum(value) FROM prometheusQuery(ts_recent, 'test_metric', toDateTime64('2020-01-01 00:00:00', 3))))
+SETTINGS time_series_use_series_index = 0;
 
 SELECT '-- disabling the preference reads from the main samples table';
 

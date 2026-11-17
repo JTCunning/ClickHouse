@@ -453,6 +453,7 @@
     M(TimeSeriesTagsDeduplicationCacheBytes, "Approximate size in bytes of the deduplication caches of the tags tables of TimeSeries tables") \
     M(TimeSeriesSeriesIndexSeries, "Number of time series in the in-memory series indexes of TimeSeries tables") \
     M(TimeSeriesSeriesIndexBytes, "Approximate size in bytes of the in-memory series indexes of TimeSeries tables") \
+    M(TimeSeriesSeriesIndexUnresolved, "Number of time series in the in-memory series indexes of TimeSeries tables which have a time range and wait for their tags") \
     M(TimeSeriesSeriesIndexThreads, "Number of threads in the thread pools making the tags of the time series found by the in-memory series indexes of TimeSeries tables") \
     M(TimeSeriesSeriesIndexThreadsActive, "Number of active threads in the thread pools making the tags of the time series found by the in-memory series indexes of TimeSeries tables") \
     M(TimeSeriesSeriesIndexThreadsScheduled, "Number of queued or active jobs in the thread pools making the tags of the time series found by the in-memory series indexes of TimeSeries tables") \

@@ -194,6 +194,13 @@ std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
 }
 
 
+bool isFirstComponentOfTimeSeriesIDMadeFromMetricName(const ASTPtr & id_generator, const DataTypePtr & id_type)
+{
+    ASTPtr first_component = tryGetFirstComponent(id_generator);
+    return first_component && dependsOnMetricNameOnly(first_component) && tryGetSecondComponentType(id_type);
+}
+
+
 ASTPtr makeIDInRangeCondition(const ASTPtr & id, const TimeSeriesIDRange & range)
 {
     return makeASTForLogicalAnd(

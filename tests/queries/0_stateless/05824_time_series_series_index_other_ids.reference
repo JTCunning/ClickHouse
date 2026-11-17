@@ -1,0 +1,19 @@
+-- the default identifiers: the index
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+-- another second component of the identifiers: the index
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+-- the tags in the first component of the identifiers: the tables
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+-- identifiers of one component: the tables
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+[('__name__','m'),('series','1')]
+[('__name__','m'),('series','2')]
+05824_1_default	1	0
+05824_2_other_second	1	0
+05824_3_tags_in_first	0	1
+05824_4_uuid	0	1
+05824_5_uint64	0	1

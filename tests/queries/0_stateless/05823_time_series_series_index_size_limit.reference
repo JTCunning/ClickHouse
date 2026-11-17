@@ -1,0 +1,9 @@
+-- a recent time range: the index
+10
+1	0
+-- a time range with the old time series: the tables
+30010
+0	1
+-- a new time series
+11
+1	0

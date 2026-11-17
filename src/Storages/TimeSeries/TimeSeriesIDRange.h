@@ -34,6 +34,10 @@ using TimeSeriesIDRanges = std::vector<TimeSeriesIDRange>;
 std::optional<TimeSeriesIDRanges> tryGetTimeSeriesIDRanges(
     const PrometheusQueryTree::MatcherList & matchers, const ASTPtr & id_generator, const DataTypePtr & id_type);
 
+/// Whether the identifiers are two-component tuples and the id generator is `tuple(<expression of the metric name only>, <anything>)`:
+/// then the first component of an identifier tells the metric of the time series.
+bool isFirstComponentOfTimeSeriesIDMadeFromMetricName(const ASTPtr & id_generator, const DataTypePtr & id_type);
+
 /// `<id> >= tuple(<first_component>, <min_S>) AND <id> <= tuple(<first_component>, <max_S>)`
 ASTPtr makeIDInRangeCondition(const ASTPtr & id, const TimeSeriesIDRange & range);
 

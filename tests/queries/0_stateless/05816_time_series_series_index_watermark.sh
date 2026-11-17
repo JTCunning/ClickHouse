@@ -3,8 +3,9 @@
 # Tag no-fasttest: PromQL needs ANTLR4, which is disabled in the fast-test build.
 # Tag no-parallel-replicas: a query with parallel replicas reads the tags table instead of the series index.
 
-# The series index of a `TimeSeries` table with the recent samples table holds only the time series
-# with samples newer than the retention of that table. A query for an older time range reads the tags table.
+# The series index of a `TimeSeries` table with the recent samples table does not admit the time series
+# without samples newer than the retention of that table. It remembers the newest time of the last sample of these time series,
+# and a query for a time range which does not start after that time reads the tags table.
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -49,7 +50,7 @@ echo '-- an old time range: the tables'
 select_series ts $((old - 100)) $((old + 100)) 05816_old
 hits_and_misses 05816_old
 
-echo '-- a time range which starts before the retention: the tables'
+echo '-- a time range which starts before the last sample of the old time series: the tables'
 select_series ts $((old - 100)) "$now" 05816_wide
 hits_and_misses 05816_wide
 
@@ -58,7 +59,7 @@ $CLIENT -q "INSERT INTO ts (metric_name, tags, samples) VALUES ('m', map('series
 select_series ts $((now - 600)) "$now" 05816_again
 hits_and_misses 05816_again
 
-echo '-- an old time series gets a new sample and its tags are not written again: the tables'
+echo '-- an old time series gets a new sample and its tags are not written again: the index reads its tags from the tags table'
 $CLIENT -q "CREATE TABLE ts_cached ENGINE = TimeSeries"
 $CLIENT -q "INSERT INTO ts_cached (metric_name, tags, samples) VALUES ('m', map('series', 'old'), [(toDateTime64($old, 3), 1.)])"
 $CLIENT -q "INSERT INTO ts_cached (metric_name, tags, samples) VALUES ('m', map('series', 'recent'), [(toDateTime64($((now - 60)), 3), 2.)])"

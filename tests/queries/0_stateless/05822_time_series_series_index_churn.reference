@@ -1,0 +1,39 @@
+-- all the time series
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','returns_with_tags')]
+[('__name__','m'),('series','returns_without_tags')]
+[('__name__','m'),('series','stopped')]
+the index has dropped the time series which stopped: 1
+-- a time range which starts at the last samples of the dropped time series: the tables
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','returns_with_tags')]
+[('__name__','m'),('series','returns_without_tags')]
+[('__name__','m'),('series','stopped')]
+0	1
+-- a later time range: the index
+[('__name__','m'),('series','active')]
+1	0
+-- a dropped time series returns after the cache of the tags table has forgotten it, so its tags are written again: the index
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','returns_with_tags')]
+1	0
+-- a dropped time series returns with a time range only, as from a writer which has its tags in the cache: the index reads its tags from the tags table
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','returns_with_tags')]
+1	0
+-- a time range which ends before the time series returned: the index selects them, because their time ranges start earlier in the table
+1	0
+-- old samples of a new time series: the index does not take it, and a query for the old time reads the tables
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','returns_with_tags')]
+1	0
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','backfilled')]
+[('__name__','m'),('series','returns_with_tags')]
+[('__name__','m'),('series','returns_without_tags')]
+[('__name__','m'),('series','stopped')]
+0	1
+-- merged data parts with the rows of the dropped time series
+[('__name__','m'),('series','active')]
+[('__name__','m'),('series','returns_with_tags')]
+1	0

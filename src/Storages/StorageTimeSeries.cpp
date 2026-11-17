@@ -1597,23 +1597,41 @@ The index gives the same time series as the tables:
   makes the server build the index anew, and the queries read the tables meanwhile.
 - Every server has its own index. No state is shared between the replicas.
 
-The index holds the time series with samples newer than [recent_samples_ttl_seconds](#settings) only (if the table has
-the [recent samples](#recent-samples-table) table), so a query for an older time range reads the tables.
-If the index grows bigger than [series_index_max_size_bytes](#settings), the server drops it and builds it again an hour later.
+The [tags](#tags-table) table keeps a time series forever, and the index does not, so the index does not grow without a limit
+when time series are replaced by new ones:
+
+- If the table has the [recent samples](#recent-samples-table) table, the index drops a time series which has no samples in the last
+  [recent_samples_ttl_seconds](#settings) seconds and which got no samples for twice the time of
+  `tags_deduplication_cache_expiration_seconds`. When the index is built, it does not admit the time series without samples
+  in the last `recent_samples_ttl_seconds` seconds.
+- The index remembers the newest time of the last sample of the time series it has dropped or has not admitted. A query uses
+  the index only if its time range starts after that time, and a query for an older time range reads the tables.
+  So a dropped time series changes how fast a query is, and never what it returns.
+- A time series which returns after the index has dropped it can come without its tags, because a writer does not write again
+  the tags it has written recently. The server reads the tags of such a time series from the tags table in the background.
+  The queries which select the metric of this time series read the tables meanwhile.
+- When the index takes more than 90% of [series_index_max_size_bytes](#settings), it keeps the time series with samples in a shorter
+  time: three quarters of the previous one each time, but not shorter than 6 hours. If the index grows bigger than the limit anyway,
+  the server drops it and builds it again an hour later.
+
 The server also drops the index of a table which received no PromQL queries for an hour.
 
 The index is used only if the [tags](#tags-table) and [time ranges](#time-ranges-table) tables are inner tables
-with the default engines and without `TTL`, and the table has [version](#schema-versioning) 11 or later.
+with the default engines and without `TTL`, the table has [version](#schema-versioning) 11 or later, and the identifiers
+of the time series are tuples of two components where the first one is calculated from the metric name alone, as the default ones are.
+With another type or another `DEFAULT` expression of the `id` column of the tags table the queries read the tables.
 The setting [use_series_index](#settings) disables the index of a table, and the query-level setting
 `time_series_use_series_index` disables it for a query.
 `SYSTEM DROP TIME SERIES CACHES` drops the index, so the next query builds it anew.
 
 The metrics `TimeSeriesSeriesIndexSeries` and `TimeSeriesSeriesIndexBytes` show the size of the indexes of all the tables,
-and the profile events `TimeSeriesSeriesIndexHits` and `TimeSeriesSeriesIndexMisses` count the selectors resolved with and without the index.
+and `TimeSeriesSeriesIndexUnresolved` shows the number of the time series which wait for their tags.
+The profile events `TimeSeriesSeriesIndexHits` and `TimeSeriesSeriesIndexMisses` count the selectors resolved with and without the index,
 `TimeSeriesSeriesIndexHitsAfterWait` counts the selectors resolved with the index after a wait for new data parts,
 and `TimeSeriesSeriesIndexWaitMicroseconds` is the time of these waits.
 The profile events `TimeSeriesSeriesIndexAppliedRows` and `TimeSeriesSeriesIndexApplyMicroseconds` show the rows the server has read
 to build the indexes and to follow the tables, and the time it took.
+`TimeSeriesSeriesIndexResolveMicroseconds` is the time of reading the tags of the time series which returned without them.
 
 ## Altering settings {#altering-settings}
 
@@ -1659,7 +1677,7 @@ Here is a list of settings which can be specified while defining a `TimeSeries` 
 | `tags_deduplication_cache_size_bytes` | UInt64 | 104857600 | Maximum size in bytes of the deduplication cache of the [tags](#tags-table) table. The cache remembers the time series written recently, so their tags aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). The cache is used only when the [tags](#tags-table) table doesn't store `min_time` and `max_time` (tables of [version](#schema-versioning) 7 or earlier store them unless `store_min_time_and_max_time` is disabled), because otherwise every insert changes these columns: the default value is ignored then, and an explicit non-zero value is rejected. Set to 0 to disable the cache, see also `tags_deduplication_cache_expiration_seconds` |
 | `tags_deduplication_cache_expiration_seconds` | UInt64 | 3600 | Time after which an entry of the deduplication cache of the [tags](#tags-table) table expires, counted from the moment the time series was written. The actual lifetime of an entry is uniformly random in the range `[0.8 * expiration_seconds, expiration_seconds]`, so the time series written together aren't all written again at the same moment. So every time series is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by `TRUNCATE TABLE` executed on it or by `SYSTEM DROP TIME SERIES CACHES`. Used only when the [tags](#tags-table) table doesn't store `min_time` and `max_time`, see `tags_deduplication_cache_size_bytes`. Set to 0 to disable the cache |
 | `use_series_index` | Bool | true | If set to true then the server keeps the [series index](#series-index) of the table in memory and uses it to resolve the selectors of PromQL queries instead of reading the [tags](#tags-table) and [time ranges](#time-ranges-table) tables |
-| `series_index_max_size_bytes` | UInt64 | 0 | Maximum size in bytes of the [series index](#series-index) of the table. When the index gets bigger, the server drops it and builds it again an hour later, and the queries read the [tags](#tags-table) and [time ranges](#time-ranges-table) tables meanwhile. Zero means one tenth of the memory available to the server |
+| `series_index_max_size_bytes` | UInt64 | 0 | Maximum size in bytes of the [series index](#series-index) of the table. Near the limit the index keeps the time series with samples in a shorter time. When the index gets bigger than the limit anyway, the server drops it and builds it again an hour later, and the queries read the [tags](#tags-table) and [time ranges](#time-ranges-table) tables meanwhile. Zero means one tenth of the memory available to the server |
 | `samples_index_granularity` | UInt64 | 256 | Sets `index_granularity` of the inner [samples](#samples-table) table. When set explicitly, it overrides `index_granularity` from the engine declaration. Ignored for a non-MergeTree engine. The default is 32768 for tables of [version](#schema-versioning) 10 or earlier, which store one sample per row |
 | `samples_index_granularity_bytes` | UInt64 | 262144 | Sets `index_granularity_bytes` of the inner [samples](#samples-table) table. When set explicitly, it overrides `index_granularity_bytes` from the engine declaration. Ignored for a non-MergeTree engine |
 | `recent_samples_ttl_seconds` | UInt64 | 345600 | Retention of the additional [recent samples](#recent-samples-table) target table, which every inserted sample is written to as well. An inner recent samples table always gets `TTL toDateTime(bucket) + toIntervalSecond(recent_samples_ttl_seconds + recent_samples_bucket_step_seconds)` derived from this setting (overriding any TTL from the engine declaration): a row expires when all its samples are older than the TTL. Queries whose time range fits in the TTL window prefer the recent samples table to the main samples table (see the query-level setting `time_series_prefer_recent_samples_table`). The default is 4 days; the effective value is pinned into the table definition at CREATE time. Set to 0 to disable the recent samples table |

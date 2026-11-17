@@ -1303,12 +1303,7 @@ namespace
     }
 
     /// Checks that the series index has found every time series which the tags table and the time ranges table have returned.
-    void checkSeriesIndexResult(
-        const TimeSeriesSeriesIndex & series_index,
-        const ColumnPtr & ids_from_tables,
-        const ColumnPtr & ids_from_index,
-        const TableTimeRange & time_range_to_filter_ids,
-        const PrometheusQueryTree & selector)
+    void checkSeriesIndexResult(const ColumnPtr & ids_from_tables, const ColumnPtr & ids_from_index, const PrometheusQueryTree & selector)
     {
         if (!ids_from_tables)
             return;
@@ -1317,16 +1312,9 @@ namespace
         for (size_t row = 0; row != ids_from_index->size(); ++row)
             found.insert(hashOfID(*ids_from_index, row));
 
-        std::optional<Int64> min_time;
-        std::optional<Int64> max_time;
-        if (time_range_to_filter_ids.min_time)
-            min_time = time_range_to_filter_ids.min_time->value;
-        if (time_range_to_filter_ids.max_time)
-            max_time = time_range_to_filter_ids.max_time->value;
-
         for (size_t row = 0; row != ids_from_tables->size(); ++row)
         {
-            if (found.has(hashOfID(*ids_from_tables, row)) || series_index.isMissExplained(ids_from_tables, row, min_time, max_time))
+            if (found.has(hashOfID(*ids_from_tables, row)))
                 continue;
             throw Exception(ErrorCodes::LOGICAL_ERROR,
                 "The series index did not return the time series {} which the tags table returned for selector {}",
@@ -1538,7 +1526,7 @@ void StorageTimeSeriesSelector::readImpl(
     if (time_range_to_filter_ids.max_time)
         max_time_to_filter_ids = time_range_to_filter_ids.max_time->value;
 
-    /// A query doesn't prepare the lookup if the index is not built or never holds the time range of the query.
+    /// A query doesn't prepare the lookup if the index is not built or cannot answer for the time range of the query.
     const bool check_series_index = query_settings[Setting::time_series_check_series_index];
     if (series_index && !series_index->prepareLookup(min_time_to_filter_ids, context) && !check_series_index)
     {
@@ -1598,7 +1586,7 @@ void StorageTimeSeriesSelector::readImpl(
                 quoteString(config.selector.toString()), found->ids->size(), watch.elapsedMilliseconds());
 
             if (check_series_index)
-                checkSeriesIndexResult(*series_index, ids_from_tables, found->ids, time_range_to_filter_ids, config.selector);
+                checkSeriesIndexResult(ids_from_tables, found->ids, config.selector);
 
             /// No time series, so there is nothing to read - an uninitialized query plan reads from an empty source.
             if (found->ids->empty())

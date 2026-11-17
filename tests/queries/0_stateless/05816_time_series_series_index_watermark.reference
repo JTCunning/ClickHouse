@@ -6,7 +6,7 @@
 [('__name__','m'),('series','both')]
 [('__name__','m'),('series','old')]
 0	1
--- a time range which starts before the retention: the tables
+-- a time range which starts before the last sample of the old time series: the tables
 [('__name__','m'),('series','both')]
 [('__name__','m'),('series','old')]
 [('__name__','m'),('series','recent')]
@@ -16,9 +16,9 @@
 [('__name__','m'),('series','old')]
 [('__name__','m'),('series','recent')]
 1	0
--- an old time series gets a new sample and its tags are not written again: the tables
+-- an old time series gets a new sample and its tags are not written again: the index reads its tags from the tags table
 [('__name__','m'),('series','recent')]
 1	0
 [('__name__','m'),('series','old')]
 [('__name__','m'),('series','recent')]
-0	1
+1	0
