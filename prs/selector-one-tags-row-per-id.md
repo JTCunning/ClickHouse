@@ -2,6 +2,9 @@
 
 Branch: `lilred-perf-selector-one-tags-row-per-id` @ `952df5b41e35` (base `2b1bef1d3b52`; 2 commits) · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-selector-one-tags-row-per-id · handoff: https://github.com/JTCunning/ClickHouse/issues/18
 
+**Status 2026-11-17: dropped, not to be submitted.** James's build: T1 −13% at `max_threads` 2, −5% at 8 (under the 10% bar); the merged wide selector +13% at 2 threads (52 → 59 ms). The saved rows sit downstream of the single-stream merge of the sorted part streams, which stays the critical path at 8 threads. See the report's update of 2026-11-17.
+
+
 <!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->
 Related: https://github.com/ClickHouse/ClickHouse/pull/127847
 
