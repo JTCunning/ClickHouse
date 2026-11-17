@@ -321,6 +321,10 @@ Until it completes, the `Mergeable Check` of a draft run fails, so the pull requ
 
 To run the full CI on a draft anyway, add the `ci-force-all` label and re-run the workflow (or push a commit).
 
+To run the AI `Code Review` on a draft without the rest of the CI, add the `ci-code-review` label and re-run the workflow (or push a commit).
+The review runs next to the fast test.
+The `Mergeable Check` still fails until the full CI completes.
+
 A draft backport pull request still runs its full CI.
 
 ## Revert pull requests {#revert-pull-requests}

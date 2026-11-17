@@ -82,6 +82,8 @@ class Labels:
 
     CI_BUILD = "ci-build"
     CI_FORCE_ALL = "ci-force-all"
+    # Runs the AI `Code Review` job on a draft pull request (see `filter_job.py`).
+    CI_CODE_REVIEW = "ci-code-review"
     # Exempts a bug fix PR from the requirement to add new tests in `new_tests_check.py`,
     # e.g. a dependency bump that has no meaningful regression test.
     CI_SKIP_NEW_TESTS_CHECK = "ci-skip-new-tests-check"

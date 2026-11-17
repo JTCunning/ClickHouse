@@ -954,10 +954,16 @@ def should_skip_job(job_name):
     # Only the main PR workflow, whose `can_be_merged.py` post-hook blocks the merge of a
     # draft-only run: `BackportPR` has no fast test and no merge gate but has automerge,
     # so a draft backport must still run its full CI.
+    # The `ci-code-review` label adds the `Code Review` job to a draft. The merge gate in
+    # `can_be_merged.py` still fails until the full CI runs.
     if (
         _info_cache.pr_is_draft
         and _info_cache.workflow_name == SMALL_PR_WORKFLOW
         and job_name not in DRAFT_PR_JOBS
+        and not (
+            job_name == JobNames.CODE_REVIEW
+            and Labels.CI_CODE_REVIEW in _info_cache.pr_labels
+        )
     ):
         _add_draft_note()
         return True, DRAFT_PR_SKIP_REASON
