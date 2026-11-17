@@ -14,14 +14,13 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 CLIENT="$CLICKHOUSE_CLIENT --allow_experimental_time_series_table 1 --session_timezone UTC"
 
-zk_path="/clickhouse/tables/$CLICKHOUSE_TEST_ZOOKEEPER_PREFIX/05817"
 for replica in r1 r2; do
     $CLIENT -q "
         CREATE TABLE ts_$replica ENGINE = TimeSeries SETTINGS recent_samples_ttl_seconds = 0
-        SAMPLES ENGINE = ReplicatedAggregatingMergeTree('$zk_path/samples', '$replica')
-        TAGS ENGINE = ReplicatedReplacingMergeTree('$zk_path/tags', '$replica')
-        TIME RANGES ENGINE = ReplicatedAggregatingMergeTree('$zk_path/time_ranges', '$replica')
-        METRIC FAMILIES ENGINE = ReplicatedReplacingMergeTree('$zk_path/metric_families', '$replica')"
+        SAMPLES ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/$CLICKHOUSE_TEST_ZOOKEEPER_PREFIX/05817/samples', '$replica')
+        TAGS ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/$CLICKHOUSE_TEST_ZOOKEEPER_PREFIX/05817/tags', '$replica')
+        TIME RANGES ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/$CLICKHOUSE_TEST_ZOOKEEPER_PREFIX/05817/time_ranges', '$replica')
+        METRIC FAMILIES ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/$CLICKHOUSE_TEST_ZOOKEEPER_PREFIX/05817/metric_families', '$replica')"
 done
 
 # inner_table <replica> <kind>

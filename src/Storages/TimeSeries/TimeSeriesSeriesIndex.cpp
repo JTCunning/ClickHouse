@@ -16,8 +16,11 @@
 #include <Common/ProfileEvents.h>
 #include <Common/SharedMutex.h>
 #include <Common/Stopwatch.h>
+#include <Common/ThreadPool.h>
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
+#include <Common/setThreadName.h>
+#include <Common/threadPoolCallbackRunner.h>
 #include <Core/BackgroundSchedulePool.h>
 #include <Core/BackgroundSchedulePoolTaskHolder.h>
 #include <Core/DecimalFunctions.h>
@@ -67,6 +70,9 @@ namespace CurrentMetrics
 {
     extern const Metric TimeSeriesSeriesIndexBytes;
     extern const Metric TimeSeriesSeriesIndexSeries;
+    extern const Metric TimeSeriesSeriesIndexThreads;
+    extern const Metric TimeSeriesSeriesIndexThreadsActive;
+    extern const Metric TimeSeriesSeriesIndexThreadsScheduled;
 }
 
 
@@ -103,13 +109,21 @@ constexpr UInt8 FLAG_UNRESOLVED = 1;
 constexpr size_t POLL_INTERVAL_MS = 500;
 constexpr size_t POLL_INTERVAL_AFTER_APPLY_MS = 20;
 /// A query applies new data parts itself if they have no more rows than this in total, otherwise it reads the tables.
-constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 1'000'000;
+constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 500'000;
 /// A query waits this long for the background task which applies data parts at the moment.
-constexpr auto MAX_WAIT_IN_QUERY = std::chrono::milliseconds(100);
+constexpr auto MAX_WAIT_IN_QUERY = std::chrono::milliseconds(50);
 /// The number of lookups a query makes: it applies new data parts between them.
-constexpr size_t MAX_LOOKUPS_IN_QUERY = 3;
+constexpr size_t MAX_LOOKUPS_IN_QUERY = 2;
+/// After a query has found the index behind the tables, the next queries don't wait for the index and don't apply
+/// data parts for this time: they use the index only if it has applied everything.
+constexpr Int64 TIME_WITHOUT_WAIT_AFTER_MISS_MS = 1000;
 /// The background task reads data parts with this number of threads. A query reads them with one thread.
 constexpr size_t NUM_THREADS_TO_READ = 8;
+/// The tags of the time series found by a lookup are made by a few threads if there are many time series.
+/// The lookups of one table share this number of threads.
+constexpr size_t MAX_THREADS_TO_MAKE_TAGS = 16;
+constexpr size_t MAX_THREADS_TO_MAKE_TAGS_IN_LOOKUP = 8;
+constexpr size_t MIN_SERIES_PER_THREAD_TO_MAKE_TAGS = 4096;
 /// One query to a target table reads no more rows than this, if it reads more than one data part.
 constexpr size_t MAX_ROWS_IN_BATCH = 20'000'000;
 /// The index is rebuilt if a time series stays without tags this long while they could have been skipped.
@@ -225,6 +239,21 @@ public:
                 if (equal(ordinal))
                     return ordinal;
             }
+        }
+    }
+
+    /// Returns the first ordinal which `find` would check, to prefetch its data.
+    Ordinal findCandidate(UInt64 hash) const
+    {
+        const size_t mask = cells.size() - 1;
+        const UInt64 tag = hash >> 32;
+        for (size_t pos = hash & mask;; pos = (pos + 1) & mask)
+        {
+            const UInt64 cell = cells[pos];
+            if (!cell)
+                return NO_ORDINAL;
+            if ((cell >> 32) == tag)
+                return static_cast<Ordinal>(cell) - 1;
         }
     }
 
@@ -454,10 +483,11 @@ public:
         const size_t num_rows = id_column.size();
         IDReader reader{id_column, layout};
 
+        /// The cell of the hash table, the identifier and the time range of a time series are far from each other in the memory,
+        /// so they are prefetched for a batch of rows.
         constexpr size_t batch_size = 32;
         char ids[batch_size][MAX_ID_SIZE];
         UInt64 hashes[batch_size];
-        Ordinal ordinals[batch_size];
 
         for (size_t begin = 0; begin < num_rows; begin += batch_size)
         {
@@ -470,20 +500,18 @@ public:
             }
             for (size_t i = 0; i != count; ++i)
             {
-                ordinals[i] = find(ids[i], hashes[i]);
-                if (ordinals[i] != NO_ORDINAL)
-                    __builtin_prefetch(&times[2 * static_cast<size_t>(ordinals[i])]);
+                const Ordinal candidate = table.findCandidate(hashes[i]);
+                if (candidate != NO_ORDINAL)
+                {
+                    __builtin_prefetch(getID(candidate));
+                    __builtin_prefetch(&times[2 * static_cast<size_t>(candidate)]);
+                }
             }
             for (size_t i = 0; i != count; ++i)
             {
                 const Int64 min_time = min_time_column.getInt(begin + i);
                 const Int64 max_time = max_time_column.getInt(begin + i);
-                Ordinal ordinal = ordinals[i];
-                if (ordinal == NO_ORDINAL)
-                {
-                    /// The same identifier can be twice in one batch.
-                    ordinal = find(ids[i], hashes[i]);
-                }
+                Ordinal ordinal = find(ids[i], hashes[i]);
                 if (ordinal == NO_ORDINAL)
                 {
                     if (horizon_start && (max_time < *horizon_start))
@@ -769,25 +797,28 @@ public:
         return ColumnTuple::create(std::move(columns));
     }
 
-    [[nodiscard]] VectorWithMemoryTracking<TimeSeriesSeriesIndex::TagNamesAndValuesPtr> makeTags(const PaddedPODArray<Ordinal> & ordinals) const
+    /// Makes the tags of time series. `pool` is used if the time series are many.
+    [[nodiscard]] VectorWithMemoryTracking<TimeSeriesSeriesIndex::TagNamesAndValuesPtr> makeTags(const PaddedPODArray<Ordinal> & ordinals, ThreadPool & pool) const
     {
-        using TagNamesAndValues = ContextTimeSeriesTagsCollector::TagNamesAndValues;
-        VectorWithMemoryTracking<TimeSeriesSeriesIndex::TagNamesAndValuesPtr> res;
-        res.reserve(ordinals.size());
-        std::vector<UInt32> pairs;
-        for (Ordinal ordinal : ordinals)
+        VectorWithMemoryTracking<TimeSeriesSeriesIndex::TagNamesAndValuesPtr> res(ordinals.size());
+        const size_t num_jobs = std::min(MAX_THREADS_TO_MAKE_TAGS_IN_LOOKUP, ordinals.size() / MIN_SERIES_PER_THREAD_TO_MAKE_TAGS);
+        if (num_jobs <= 1)
         {
-            pairs.clear();
-            forEachPair(ordinal, [&](UInt32 pair) { pairs.push_back(pair); });
-            /// The tags are sorted by name.
-            std::sort(pairs.begin(), pairs.end(),
-                [&](UInt32 left, UInt32 right) { return names[pair_name[left]]->rank < names[pair_name[right]]->rank; });
-            auto tags = std::make_shared<TagNamesAndValues>();
-            tags->reserve(pairs.size());
-            for (UInt32 pair : pairs)
-                tags->emplace_back(names[pair_name[pair]]->name, pair_value[pair]);
-            res.push_back(std::move(tags));
+            makeTagsOfRange(ordinals, 0, ordinals.size(), res);
+            return res;
         }
+
+        /// The jobs use only what is declared before the runner, which waits for them.
+        const auto * ordinals_ptr = &ordinals;
+        auto * res_ptr = &res;
+        ThreadPoolCallbackRunnerLocal<void> runner(pool, ThreadName::DEFAULT_THREAD_POOL);
+        for (size_t job = 0; job != num_jobs; ++job)
+        {
+            const size_t begin = ordinals.size() * job / num_jobs;
+            const size_t end = ordinals.size() * (job + 1) / num_jobs;
+            runner.enqueueAndKeepTrack([this, ordinals_ptr, res_ptr, begin, end] { makeTagsOfRange(*ordinals_ptr, begin, end, *res_ptr); });
+        }
+        runner.waitForAllToFinishAndRethrowFirstError();
         return res;
     }
 
@@ -856,6 +887,27 @@ private:
         flags.push_back(UInt8{0});
         table.insert(hash, ordinal, [&](Ordinal other) { return hashID(getID(other), id_size); });
         return ordinal;
+    }
+
+    void makeTagsOfRange(
+        const PaddedPODArray<Ordinal> & ordinals, size_t begin, size_t end,
+        VectorWithMemoryTracking<TimeSeriesSeriesIndex::TagNamesAndValuesPtr> & res) const
+    {
+        using TagNamesAndValues = ContextTimeSeriesTagsCollector::TagNamesAndValues;
+        std::vector<UInt32> pairs;
+        for (size_t i = begin; i != end; ++i)
+        {
+            pairs.clear();
+            forEachPair(ordinals[i], [&](UInt32 pair) { pairs.push_back(pair); });
+            /// The tags are sorted by name.
+            std::sort(pairs.begin(), pairs.end(),
+                [&](UInt32 left, UInt32 right) { return names[pair_name[left]]->rank < names[pair_name[right]]->rank; });
+            auto tags = std::make_shared<TagNamesAndValues>();
+            tags->reserve(pairs.size());
+            for (UInt32 pair : pairs)
+                tags->emplace_back(names[pair_name[pair]]->name, pair_value[pair]);
+            res[i] = std::move(tags);
+        }
     }
 
     /// Adds time series to lists: an element of `adds` is the number of a list in the upper 32 bits and the ordinal in the lower ones.
@@ -1210,6 +1262,11 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         return std::chrono::duration_cast<std::chrono::seconds>(Clock::now().time_since_epoch()).count();
     }
 
+    static Int64 nowMilliseconds()
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
+    }
+
     const StorageTimeSeries & time_series_storage;
     const UInt64 max_size_bytes;
     const LoggerPtr log;
@@ -1219,6 +1276,14 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     std::atomic<bool> task_started = false;
     /// The time of the last lookup in seconds of the steady clock.
     std::atomic<Int64> last_lookup_seconds = 0;
+    /// The queries don't wait for the index and don't apply data parts before this time, in milliseconds of the steady clock.
+    std::atomic<Int64> no_wait_before_ms = 0;
+
+    /// Makes the tags of the time series found by the lookups. The threads stop when there is no job for them.
+    ThreadPool lookup_pool{
+        CurrentMetrics::TimeSeriesSeriesIndexThreads, CurrentMetrics::TimeSeriesSeriesIndexThreadsActive,
+        CurrentMetrics::TimeSeriesSeriesIndexThreadsScheduled,
+        MAX_THREADS_TO_MAKE_TAGS, /* max_free_threads = */ 0, /* queue_size = */ 0};
 
     /// Held while data parts are applied or the index is rebuilt, so only one thread does that at a time.
     std::timed_mutex sync_mutex;
@@ -1398,7 +1463,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     /// Applies the specified data parts of a target table, and marks as applied the ones which were read for sure.
     /// Returns false if the index has reached its size limit or is shut down.
     bool applyDataParts(
-        const TargetTables & tables, bool is_tags_table, const DataPartsVector & parts, const ContextPtr & local_context, size_t num_threads)
+        const TargetTables & tables, bool is_tags_table, const DataPartsVector & parts_, const ContextPtr & local_context, size_t num_threads)
     {
         Stopwatch watch;
         SCOPE_EXIT({ ProfileEvents::increment(ProfileEvents::TimeSeriesSeriesIndexApplyMicroseconds, watch.elapsedMicroseconds()); });
@@ -1409,6 +1474,11 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         const String select_list = is_tags_table
             ? tables.tags_select_list
             : fmt::format("{}, {}, {}", backQuote(TimeSeriesColumnNames::ID), backQuote(TimeSeriesColumnNames::MinTime), backQuote(TimeSeriesColumnNames::MaxTime));
+
+        /// The new data parts are small, and the queries wait for them. A big data part is the result of a merge.
+        DataPartsVector parts = parts_;
+        std::stable_sort(parts.begin(), parts.end(),
+            [](const DataPartPtr & left, const DataPartPtr & right) { return left->rows_count < right->rows_count; });
 
         size_t begin = 0;
         while (begin != parts.size())
@@ -1879,7 +1949,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         if (data->prepareMatchers(matchers, prepared_matchers))
             data->filterByTime(data->match(prepared_matchers), min_time, max_time, ordinals);
         res.ids = data->makeIDColumn(id_type, ordinals);
-        res.tags = data->makeTags(ordinals);
+        res.tags = data->makeTags(ordinals, lookup_pool);
         return LookupStatus::Found;
     }
 };
@@ -1935,14 +2005,22 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
         {
             std::unique_lock sync_lock{impl->sync_mutex};
             impl->synchronize({}, /* immediately = */ true);
+            continue;
         }
-        else
+
+        if (status != Impl::LookupStatus::NotApplied)
+            return {};
+
+        /// The index is behind the tables. The query brings it up to date if that is quick, otherwise the next queries don't try for a while.
+        const Int64 now_ms = Impl::nowMilliseconds();
+        if (now_ms < impl->no_wait_before_ms)
+            return {};
+        std::unique_lock sync_lock{impl->sync_mutex, std::defer_lock};
+        if ((not_applied_rows > MAX_ROWS_TO_APPLY_IN_QUERY) || !sync_lock.try_lock_for(MAX_WAIT_IN_QUERY)
+            || !impl->synchronize(MAX_ROWS_TO_APPLY_IN_QUERY, /* immediately = */ false))
         {
-            if ((status != Impl::LookupStatus::NotApplied) || (not_applied_rows > MAX_ROWS_TO_APPLY_IN_QUERY))
-                return {};
-            std::unique_lock sync_lock{impl->sync_mutex, std::defer_lock};
-            if (!sync_lock.try_lock_for(MAX_WAIT_IN_QUERY) || !impl->synchronize(MAX_ROWS_TO_APPLY_IN_QUERY, /* immediately = */ false))
-                return {};
+            impl->no_wait_before_ms = now_ms + TIME_WITHOUT_WAIT_AFTER_MISS_MS;
+            return {};
         }
     }
 }
