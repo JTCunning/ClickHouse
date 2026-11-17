@@ -109,14 +109,17 @@ constexpr UInt8 FLAG_UNRESOLVED = 1;
 constexpr size_t POLL_INTERVAL_MS = 500;
 constexpr size_t POLL_INTERVAL_AFTER_APPLY_MS = 20;
 /// A query applies new data parts itself if they have no more rows than this in total, otherwise it reads the tables.
-constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 500'000;
+constexpr size_t MAX_ROWS_TO_APPLY_IN_QUERY = 1'000'000;
 /// A query waits this long for the background task which applies data parts at the moment.
 constexpr auto MAX_WAIT_IN_QUERY = std::chrono::milliseconds(50);
 /// The number of lookups a query makes: it applies new data parts between them.
 constexpr size_t MAX_LOOKUPS_IN_QUERY = 2;
-/// After a query has found the index behind the tables, the next queries don't wait for the index and don't apply
+/// After a query has waited for the index in vain, the next queries don't wait for the index and don't apply
 /// data parts for this time: they use the index only if it has applied everything.
 constexpr Int64 TIME_WITHOUT_WAIT_AFTER_MISS_MS = 1000;
+/// A matcher with a regular expression selects the time series from the lists of the values it accepts. To unite many lists
+/// is slow, so with fewer candidates per list than this the candidates are checked instead.
+constexpr size_t MAX_CANDIDATES_PER_LIST_TO_CHECK = 128;
 /// The background task reads data parts with this number of threads. A query reads them with one thread.
 constexpr size_t NUM_THREADS_TO_READ = 8;
 /// The tags of the time series found by a lookup are made by a few threads if there are many time series.
@@ -731,6 +734,13 @@ public:
                 if (matcher->matchesValue(pair_value[pair]) == select_accepted)
                     selected_pairs.push_back(pair);
             }
+            if (result && (selected_pairs.size() != label.pairs.size()) && (selected_pairs.size() > 1)
+                && (result->cardinality() < selected_pairs.size() * MAX_CANDIDATES_PER_LIST_TO_CHECK))
+            {
+                filterCandidatesByPairs(*result, selected_pairs, /* keep_with_pairs = */ select_accepted);
+                continue;
+            }
+
             roaring::Roaring bitmap;
             if (selected_pairs.size() == label.pairs.size())
             {
@@ -1019,6 +1029,27 @@ private:
                 rejected.add(ordinal);
         }
         candidates -= rejected;
+    }
+
+    /// Leaves in `candidates` the time series which have one of `pairs` if `keep_with_pairs` is set,
+    /// or the time series which have none of them if it is not set.
+    void filterCandidatesByPairs(roaring::Roaring & candidates, const std::vector<UInt32> & pairs, bool keep_with_pairs) const
+    {
+        PODArray<UInt64> is_selected;
+        is_selected.resize_fill((pair_name.size() + 63) / 64);
+        for (UInt32 pair : pairs)
+            is_selected[pair / 64] |= (1ULL << (pair % 64));
+
+        PODArray<Ordinal> rejected;
+        for (Ordinal ordinal : candidates)
+        {
+            bool has_pair = false;
+            forEachPair(ordinal, [&](UInt32 pair) { has_pair |= ((is_selected[pair / 64] >> (pair % 64)) & 1) != 0; });
+            if (has_pair != keep_with_pairs)
+                rejected.push_back(ordinal);
+        }
+        if (!rejected.empty())
+            candidates -= roaring::Roaring(rejected.size(), rejected.data());
     }
 
     const IDLayout layout;
@@ -2011,13 +2042,15 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
         if (status != Impl::LookupStatus::NotApplied)
             return {};
 
-        /// The index is behind the tables. The query brings it up to date if that is quick, otherwise the next queries don't try for a while.
+        /// The index is behind the tables. The query brings it up to date if the new rows are few.
+        /// If that takes time and doesn't help, the next queries don't try for a while.
+        if (not_applied_rows > MAX_ROWS_TO_APPLY_IN_QUERY)
+            return {};
         const Int64 now_ms = Impl::nowMilliseconds();
         if (now_ms < impl->no_wait_before_ms)
             return {};
         std::unique_lock sync_lock{impl->sync_mutex, std::defer_lock};
-        if ((not_applied_rows > MAX_ROWS_TO_APPLY_IN_QUERY) || !sync_lock.try_lock_for(MAX_WAIT_IN_QUERY)
-            || !impl->synchronize(MAX_ROWS_TO_APPLY_IN_QUERY, /* immediately = */ false))
+        if (!sync_lock.try_lock_for(MAX_WAIT_IN_QUERY) || !impl->synchronize(MAX_ROWS_TO_APPLY_IN_QUERY, /* immediately = */ false))
         {
             impl->no_wait_before_ms = now_ms + TIME_WITHOUT_WAIT_AFTER_MISS_MS;
             return {};
