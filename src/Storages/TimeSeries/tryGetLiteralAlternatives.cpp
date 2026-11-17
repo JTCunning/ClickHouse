@@ -1,5 +1,7 @@
 #include <Storages/TimeSeries/tryGetLiteralAlternatives.h>
 
+#include <fmt/format.h>
+
 
 namespace DB
 {
@@ -40,6 +42,39 @@ std::optional<Strings> tryGetLiteralAlternatives(std::string_view regex)
     if (depth != 0)
         return {};
     return terms;
+}
+
+String makeFullMatchRegexp(std::string_view regex)
+{
+    bool has_alternatives = false;
+    size_t depth = 0;
+    bool in_character_class = false;
+    for (size_t pos = 0; pos < regex.size(); ++pos)
+    {
+        char c = regex[pos];
+        if (c == '\\')
+            ++pos;
+        else if (in_character_class)
+            in_character_class = (c != ']');
+        else if (c == '[')
+            in_character_class = true;
+        else if (c == '(')
+            ++depth;
+        else if ((c == ')') && depth)
+            --depth;
+        else if ((c == '|') && !depth)
+            has_alternatives = true;
+    }
+
+    if (has_alternatives)
+        return fmt::format("^(?:{})$", regex);
+
+    String res{regex};
+    if (!res.starts_with('^'))
+        res = '^' + res;
+    if (!res.ends_with('$'))
+        res += '$';
+    return res;
 }
 
 }
