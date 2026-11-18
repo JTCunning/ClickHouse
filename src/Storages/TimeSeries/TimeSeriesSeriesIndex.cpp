@@ -202,10 +202,11 @@ constexpr Int64 MIN_SWEEP_INTERVAL_MS = 250;
 /// The tags of a time series without a time range wait for its time range in a set which is replaced by an empty one
 /// after this time or when it takes this number of bytes. A shard keeps the current set and the previous one.
 constexpr Int64 PENDING_TAGS_ROTATION_INTERVAL_MS = 10'000;
-constexpr size_t MAX_PENDING_TAGS_BYTES = 1 << 20;
+constexpr size_t MAX_PENDING_TAGS_BYTES = 8 << 20;
 
-/// The tags of a time series without tags are read from the "tags" table after this time: usually the data part
-/// with the tags is applied earlier. The next attempts wait twice as long each, up to the maximum.
+/// The tags of a time series without tags are read from the "tags" table when the background task has applied
+/// every data part of that table which was there when the time series got its time range, or after this time.
+/// The next attempts wait twice as long each, up to the maximum.
 constexpr Int64 MIN_TIME_TO_RESOLVE_MS = 1000;
 constexpr Int64 MAX_TIME_BETWEEN_ATTEMPTS_TO_RESOLVE_MS = 60'000;
 constexpr size_t MAX_SERIES_TO_RESOLVE_IN_QUERY = 10'000;
@@ -631,6 +632,7 @@ public:
     struct UnresolvedSeries
     {
         /// The times in milliseconds of the steady clock.
+        Int64 created_ms = 0;
         Int64 next_attempt_ms = 0;
         Int64 time_between_attempts_ms = 0;
     };
@@ -901,14 +903,15 @@ public:
     }
 
     /// Appends to `ids` the identifiers of the time series without tags whose tags should be read from the "tags" table now,
-    /// and sets the time of the next attempt for them. With `all` the function takes every time series without tags.
-    void takeUnresolvedToResolve(Int64 now_ms, bool all, size_t max_count, PODArray<char> & ids)
+    /// and sets the time of the next attempt for them: the ones which wait since before `created_before_ms`,
+    /// and the ones with the time of the next attempt in the past. With `all` the function takes every time series without tags.
+    void takeUnresolvedToResolve(Int64 now_ms, bool all, Int64 created_before_ms, size_t max_count, PODArray<char> & ids)
     {
         for (auto & [ordinal, series] : unresolved)
         {
             if (ids.size() >= max_count * id_size)
                 break;
-            if (!all && (now_ms < series.next_attempt_ms))
+            if (!all && (series.created_ms >= created_before_ms) && (now_ms < series.next_attempt_ms))
                 continue;
             series.time_between_attempts_ms = std::min(series.time_between_attempts_ms * 2, MAX_TIME_BETWEEN_ATTEMPTS_TO_RESOLVE_MS);
             series.next_attempt_ms = now_ms + series.time_between_attempts_ms;
@@ -1207,7 +1210,9 @@ private:
     {
         flags[ordinal] |= FLAG_UNRESOLVED;
         unresolved.emplace(
-            ordinal, UnresolvedSeries{.next_attempt_ms = now_ms + MIN_TIME_TO_RESOLVE_MS, .time_between_attempts_ms = MIN_TIME_TO_RESOLVE_MS / 2});
+            ordinal,
+            UnresolvedSeries{
+                .created_ms = now_ms, .next_attempt_ms = now_ms + MIN_TIME_TO_RESOLVE_MS, .time_between_attempts_ms = MIN_TIME_TO_RESOLVE_MS / 2});
         ++unresolved_by_first_component[getFirstComponent(getID(ordinal))];
     }
 
@@ -2977,8 +2982,10 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     /// by the first components of their identifiers, so the query reads a range of the primary key.
     /// A time series of an unknown metric has no row in the data parts which are applied. A row which comes later
     /// is applied as usual, so the time series waits no more after this function.
-    /// With `all` the function doesn't wait for the time of the next attempt. Requires `follower_mutex`.
-    void resolve(const TargetTables & tables, SeriesIndexData & index_data, bool all)
+    /// The function takes the time series which wait since before `created_before_ms`: the caller has applied every data part
+    /// of the "tags" table which was there at that time, so no data part which comes later has their tags.
+    /// It also takes the ones which wait for long. With `all` it takes every time series without tags. Requires `follower_mutex`.
+    void resolve(const TargetTables & tables, SeriesIndexData & index_data, bool all, Int64 created_before_ms)
     {
         if (!index_data.numUnresolved())
             return;
@@ -2990,7 +2997,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             if (!shard.num_unresolved)
                 continue;
             std::lock_guard lock{shard.mutex};
-            shard.series->takeUnresolvedToResolve(now_ms, all, MAX_SERIES_TO_RESOLVE_IN_QUERY, ids);
+            shard.series->takeUnresolvedToResolve(now_ms, all, created_before_ms, MAX_SERIES_TO_RESOLVE_IN_QUERY, ids);
         }
         if (ids.empty())
             return;
@@ -3093,6 +3100,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         size_t num_time_ranges_passes = 0;
         size_t num_passes_when_ready = 0;
         bool all_applied = false;
+        /// Every data part of the "tags" table which was there at this time is applied. Zero if it is not known.
+        Int64 tags_applied_as_of_ms = 0;
 
         while (true)
         {
@@ -3108,6 +3117,7 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 num_time_ranges_passes = 0;
             }
             const UInt64 current_epoch = epoch;
+            const Int64 list_time_ms = nowMilliseconds();
 
             PartsList time_ranges_list;
             PartsList tags_list;
@@ -3164,6 +3174,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
                 continue;
             }
 
+            if (tags_check.not_applied.empty())
+                tags_applied_as_of_ms = list_time_ms;
             if (time_ranges_check.not_applied.empty() && tags_check.not_applied.empty())
             {
                 all_applied = true;
@@ -3187,6 +3199,12 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             auto tags_parts = claimDataParts(/* is_tags_table = */ true, tags_check.not_applied, MAX_ROWS_IN_BATCH, /* at_least_one = */ true);
             if (!applyDataParts(*tables, /* is_tags_table = */ true, tags_list.snapshot, tags_parts, current_epoch, NUM_THREADS_TO_READ))
                 break;
+            if (tags_parts.size() == tags_check.not_applied.size())
+            {
+                std::shared_lock lock{mutex};
+                if (checkCoverage(tags_state, tags_list.parts).not_applied.empty())
+                    tags_applied_as_of_ms = list_time_ms;
+            }
 
             /// Other threads apply the rest of the data parts.
             if (tags_parts.empty() && time_ranges_parts.empty())
@@ -3202,7 +3220,10 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             return false;
         if (state == State::Ready)
         {
-            resolve(*tables, *index_data, /* all = */ immediately);
+            resolve(*tables, *index_data, /* all = */ immediately, tags_applied_as_of_ms);
+            /// The time series which still wait for their tags are looked at again soon.
+            if (index_data->numUnresolved())
+                has_more_to_apply = true;
             maintain(*index_data);
         }
         updatePostingsBytes(/* force = */ false);
@@ -3312,6 +3333,8 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
         PartsList tags;
         /// The epoch of the index at the last lookup.
         UInt64 epoch = 0;
+        /// The number of rows which the query can still apply itself.
+        size_t rows_to_apply_left = MAX_ROWS_TO_APPLY_IN_QUERY;
     };
 
     /// Finds the time series if the index is built and has applied all the data parts of the query.
@@ -3446,17 +3469,19 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
     }
 
     /// Applies the data parts of a query which are not applied and which no other thread applies, if they have few rows.
-    /// The background task applies the other ones.
-    void applyInQuery(const QueryParts & query_parts)
+    /// The background task applies the other ones. The data parts of the "tags" table are applied when all the data parts
+    /// of the "time ranges" table of the query are applied, so the index knows the time series when it gets their tags.
+    /// Returns whether the function has applied some data parts.
+    bool applyInQuery(QueryParts & query_parts)
     {
         /// The memory of the index doesn't belong to the query which applies data parts to it.
         MemoryTrackerSwitcher memory_tracker_switcher{&total_memory_tracker};
 
         auto tables = tryGetTables(getContext(), /* for_building = */ true);
         if (!tables)
-            return;
+            return false;
 
-        size_t rows_left = MAX_ROWS_TO_APPLY_IN_QUERY;
+        bool applied = false;
         for (bool is_tags_table : {false, true})
         {
             const auto & list = is_tags_table ? query_parts.tags : query_parts.time_ranges;
@@ -3464,17 +3489,21 @@ struct TimeSeriesSeriesIndex::Impl : public WithContext
             {
                 std::shared_lock lock{mutex};
                 if ((epoch != query_parts.epoch) || (state != State::Ready))
-                    return;
+                    return applied;
+                if (is_tags_table && !checkCoverage(time_ranges_state, query_parts.time_ranges.parts).not_applied.empty())
+                    return applied;
                 not_applied = checkCoverage(is_tags_table ? tags_state : time_ranges_state, list.parts).not_applied;
             }
-            auto parts = claimDataParts(is_tags_table, not_applied, rows_left, /* at_least_one = */ false);
+            auto parts = claimDataParts(is_tags_table, not_applied, query_parts.rows_to_apply_left, /* at_least_one = */ false);
             if (parts.empty())
                 continue;
             for (const auto & part : parts)
-                rows_left -= part->rows_count;
+                query_parts.rows_to_apply_left -= part->rows_count;
             if (!applyDataParts(*tables, is_tags_table, list.snapshot, parts, query_parts.epoch, /* num_threads = */ 1))
-                return;
+                return applied;
+            applied = true;
         }
+        return applied;
     }
 };
 
@@ -3571,6 +3600,7 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
 
         /// The index has not applied some data parts of the query. The query applies the ones with few rows itself,
         /// and waits for the threads which apply the other ones. After the time limit the query reads the tables.
+        bool timed_out = false;
         if (!waited)
         {
             const Int64 now_ms = Impl::nowMilliseconds();
@@ -3580,12 +3610,20 @@ std::optional<TimeSeriesSeriesIndex::LookupResult> TimeSeriesSeriesIndex::tryLoo
             wait_watch.restart();
             deadline = Impl::Clock::now() + std::chrono::milliseconds(max_wait_ms);
             impl->task->schedule();
-            if (status == Impl::LookupStatus::NotApplied)
-                impl->applyInQuery(query_parts);
-            continue;
+        }
+        else
+        {
+            timed_out = (Impl::Clock::now() >= deadline);
         }
 
-        if ((Impl::Clock::now() >= deadline) || !impl->waitForChange(change_version, deadline))
+        if (!timed_out)
+        {
+            if ((status == Impl::LookupStatus::NotApplied) && impl->applyInQuery(query_parts))
+                continue;
+            timed_out = !impl->waitForChange(change_version, deadline);
+        }
+
+        if (timed_out)
         {
             /// The index is far behind the tables: the next queries don't wait for it for a while.
             /// A time series without tags is another case: it concerns the queries of one metric.
