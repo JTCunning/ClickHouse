@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-17T23:05:07Z",
+  "updated": "2026-11-18T11:20:57Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -304,8 +304,8 @@
     {
       "slug": "selector-ids-fixed-join-order",
       "title": "Do not optimize the join order of the TimeSeries selector's ids query",
-      "summary": "your build, verdict fail: cold -6.8..-17% (T3 under the 7% bar, 13 statistics loads left); prewarmed +15..+40%",
-      "status": "results-in",
+      "summary": "dropped after your build: cold -6.8..-17%, but prewarmed +15..+40% (99.5%); the loss doesn't reproduce on 2 vCPU",
+      "status": "dropped",
       "priority": 9,
       "branch": "lilred-perf-selector-ids-fixed-join-order",
       "head": "df2da4e4f1c30481f4669b5d45b3bafe3a83dd3c",
@@ -334,7 +334,7 @@
       ],
       "claim": "On object storage with statistics not cached (bench/tags-in-subquery-cold: 64 fresh parts per inner table, 50 ms per GET), the selector's id lookup is 9-13% faster for narrow, rare-token, wide and metric-only selectors and loads no statistics (92/154 -> 0); prewarmed and warm unchanged (+-3%).",
       "pass_if": "05640 passes on B; on A its four 'join order optimizations:' lines print 1. 05452, 05493, 04836 pass on B. Lab T1-T4 (cold) at least 7% faster on B at 99.5% with LoadedStatistics 0; G1 (prewarmed), G2 (warm, 30 rounds), the guard perf XMLs and E1 (/api/v1/series, /api/v1/labels) not significantly slower.",
-      "notes": "The A/B is the cold S3 lab (bench/tags-in-subquery-cold + bench/idlookup-adaptive-index, README there), not a perf XML: the gain needs statistics that aren't cached, which CI perf runs never have. The lab server resumes merges on restart: rerun gen.sh after each start. The .reference of 05640 is master's output with the setting forced on the session (the branch's behaviour); take it from the built branch if it differs. Merges cleanly with #18's branch. Users can get the same effect today with query_plan_optimize_join_order_limit = 0 in the PromQL user's profile."
+      "notes": "Run 1 (2026-11-14) failed: T3 cold under the 7% bar, G1 prewarmed +15..+40% significant. Rerun 2026-11-18 on the 2 vCPU lab, end to end through prometheusQueryRange: cold -6.4..-8.5% with the same statistics counts as the build (0/0/13/0); prewarmed +-2.4% with a shared or a separate statistics cache, identical parts, marks and GETs. Cause of the prewarmed loss open. Do not use query_plan_optimize_join_order_limit = 0 in a PromQL profile. Branch kept, untouched."
     },
     {
       "slug": "time-ranges-metric-filter",

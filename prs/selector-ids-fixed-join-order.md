@@ -1,5 +1,7 @@
 # [unbuilt] Do not optimize the join order of the `TimeSeries` selector's ids query
 
+**Status 2026-11-18: dropped, not to be submitted.** James's build: cold −6.8 to −17% (the wide selector under the 7% bar), prewarmed +15 to +40% (significant at 99.5%), warm flat. The prewarmed loss doesn't reproduce on the 2 vCPU lab (±2.4% end to end), so its cause is open. See the report's update of 2026-11-18.
+
 Branch: `lilred-perf-selector-ids-fixed-join-order` @ `df2da4e4f1c3` (base `923c77c86030`; 1 commit) · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-selector-ids-fixed-join-order · handoff: https://github.com/JTCunning/ClickHouse/issues/20
 
 <!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->

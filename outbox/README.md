@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-17 23:05 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-18 11:20 UTC.
 
 ## For you, in order
 
@@ -16,9 +16,7 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 
 ## With lil red: nothing for you
 
-| item | issue | lil red is | what it's for |
-|---|---|---|---|
-| [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | judging your results | your build, verdict fail: cold -6.8..-17% (T3 under the 7% bar, 13 statistics loads left); prewarmed +15..+40% |
+None.
 
 ## Submitted
 
@@ -36,6 +34,7 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | [#10](https://github.com/JTCunning/ClickHouse/issues/10) | parked: James chose upstream 124777 (dense array) as the fix for 125759; run 2 was 8.4x / 5.7x on the gap but the rule kept misfiring |
 | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | [#15](https://github.com/JTCunning/ClickHouse/issues/15) | dropped: upstream #131667 (merged 2026-11-15) is the same fix; your run 1 was -6.1% on a window with 2 of the 13 serial index loads |
 | [selector-one-tags-row-per-id](../prs/selector-one-tags-row-per-id.md) | [#18](https://github.com/JTCunning/ClickHouse/issues/18) | dropped 2026-11-17: built T1 -13% at 2 threads but -5% at 8 (bar 10%); merged wide +13% at 2 threads; the cost is the part-stream merge (#19) |
+| [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | dropped after your build: cold -6.8..-17%, but prewarmed +15..+40% (99.5%); the loss doesn't reproduce on 2 vCPU |
 
 ## How an item moves
 
