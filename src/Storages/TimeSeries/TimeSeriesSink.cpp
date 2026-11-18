@@ -53,6 +53,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsASTFunction id_generator;
     extern const TimeSeriesSettingsUInt64 recent_samples_bucket_step_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsUInt64 tags_bucket_step_seconds;
     extern const TimeSeriesSettingsMap tags_to_columns;
 }
 
@@ -647,6 +648,80 @@ namespace
         throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Unexpected column {} of timestamps in the column with samples", ts_timestamps.getName());
     }
 
+    /// Splits the rows of the tags block by time buckets of `bucket_step` (with the scale of the timestamp type):
+    /// a time series gets a row for each bucket containing samples of the series, and no rows if it has no samples.
+    /// The `bucket` column with the starts of the buckets is added at the end of the block.
+    template <typename TimestampColumn>
+    Block splitTagsBlockByBucketsForTimestampType(
+        const Block & tags_block,
+        const PaddedPODArray<UInt8> & filter,
+        const TimestampColumn & ts_timestamps,
+        const DataTypePtr & timestamp_type,
+        const ColumnArray::Offsets & ts_offsets,
+        Decimal64 bucket_step)
+    {
+        const auto & timestamps = ts_timestamps.getData();
+
+        auto bucket_column = timestamp_type->createColumn();
+        auto & buckets = assert_cast<TimestampColumn &>(*bucket_column).getData();
+        buckets.reserve(tags_block.rows());
+
+        IColumn::Offsets replicate_offsets;
+        replicate_offsets.reserve(tags_block.rows());
+
+        std::vector<Int64> buckets_of_series;
+        size_t num_rows = 0;
+        for (size_t i = 0; i != filter.size(); ++i)
+        {
+            if (!filter[i])
+                continue;
+
+            buckets_of_series.clear();
+            for (size_t j = ts_offsets[i - 1]; j != ts_offsets[i]; ++j)
+            {
+                Int64 bucket = getBucket(toDecimal64(timestamps[j]), bucket_step).value;
+                if (buckets_of_series.empty() || (buckets_of_series.back() != bucket))
+                    buckets_of_series.push_back(bucket);
+            }
+
+            /// The samples of a series are usually sorted, then the buckets are distinct already.
+            if (buckets_of_series.size() > 1)
+            {
+                ::sort(buckets_of_series.begin(), buckets_of_series.end());
+                buckets_of_series.erase(std::unique(buckets_of_series.begin(), buckets_of_series.end()), buckets_of_series.end());
+            }
+
+            for (Int64 bucket : buckets_of_series)
+                buckets.push_back(toTimestamp<TimestampColumn>(Decimal64(bucket)));
+            num_rows += buckets_of_series.size();
+            replicate_offsets.push_back(num_rows);
+        }
+        chassert(replicate_offsets.size() == tags_block.rows());
+
+        Block res;
+        for (const auto & column : tags_block)
+            res.insert(ColumnWithTypeAndName{column.column->replicate(replicate_offsets), column.type, column.name});
+        res.insert(ColumnWithTypeAndName{std::move(bucket_column), timestamp_type, TimeSeriesColumnNames::Bucket});
+        return res;
+    }
+
+    Block splitTagsBlockByBuckets(
+        const Block & tags_block,
+        const PaddedPODArray<UInt8> & filter,
+        const IColumn & ts_timestamps,
+        const DataTypePtr & timestamp_type,
+        const ColumnArray::Offsets & ts_offsets,
+        Decimal64 bucket_step)
+    {
+        if (const auto * decimal_timestamps = typeid_cast<const ColumnDecimal<DateTime64> *>(&ts_timestamps))
+            return splitTagsBlockByBucketsForTimestampType(tags_block, filter, *decimal_timestamps, timestamp_type, ts_offsets, bucket_step);
+
+        if (const auto * uint32_timestamps = typeid_cast<const ColumnUInt32 *>(&ts_timestamps))
+            return splitTagsBlockByBucketsForTimestampType(tags_block, filter, *uint32_timestamps, timestamp_type, ts_offsets, bucket_step);
+
+        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Unexpected column {} of timestamps in the column with samples", ts_timestamps.getName());
+    }
+
     /// Returns the total number of samples in the outer column with samples across all rows.
     size_t getTotalSamples(const ColumnArray::Offsets & ts_offsets)
     {
@@ -988,6 +1063,14 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
             tags_header.insert(column);
     }
 
+    if (settings.hasBucketedTags())
+    {
+        /// A row contains the tags of one series which has samples in one time bucket.
+        tags_header.insert(ColumnWithTypeAndName{timestamp_type, TimeSeriesColumnNames::Bucket});
+        Int64 timestamp_scale_multiplier = DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*timestamp_type).value_or(0));
+        tags_bucket_step = Decimal64(static_cast<Int64>(settings[TimeSeriesSetting::tags_bucket_step_seconds].value) * timestamp_scale_multiplier);
+    }
+
     tags_pipeline = createTargetPipeline(ViewTarget::Tags, tags_header);
     tags_deduplication_cache = time_series_storage.getTagsDeduplicationCache();
 
@@ -1190,9 +1273,18 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     ColumnPtr id_column = tags_block.getByName(TimeSeriesColumnNames::ID).column;
 
     /// Step 3. Push the tags block without the time series already written to the "tags" table.
+    /// A table with a row per time bucket identifies a row by the time series and the bucket.
+    std::optional<size_t> bucket_column_index;
+    if (tags_bucket_step.value)
+    {
+        tags_block = splitTagsBlockByBuckets(tags_block, filter, ts_timestamps, timestamp_type, ts_offsets, tags_bucket_step);
+        bucket_column_index = tags_block.getPositionByName(TimeSeriesColumnNames::Bucket);
+    }
+
     if (tags_deduplication_cache)
         tags_block = tags_deduplication_cache->filterOutWrittenRows(
-            tags_block, /* key_column_index = */ tags_block.getPositionByName(TimeSeriesColumnNames::ID), pending_tags);
+            tags_block, /* key_column_index = */ tags_block.getPositionByName(TimeSeriesColumnNames::ID), pending_tags,
+            /* filter = */ {}, bucket_column_index);
 
     /// Tags are pushed first so that if the samples insert fails,
     /// we don't end up with sample rows referencing IDs that were never written to the tags table.

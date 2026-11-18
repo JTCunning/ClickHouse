@@ -48,6 +48,10 @@ namespace DB
 ///       `recent_samples_index_granularity_bytes` were introduced, and the defaults of `samples_index_granularity` and
 ///       `recent_samples_index_granularity` changed. Tables of earlier versions stored one sample per row in the columns
 ///       `timestamp` and `value`.
+///  12 - The "tags" target table stores a row of a time series for each time bucket with samples of the series (the column
+///       `bucket`, the settings `tags_bucket_step_seconds` and `tags_ttl_seconds`), uses `MergeTree` partitioned by `bucket`,
+///       and stores the values of the tags as `LowCardinality(String)`. The time series are filtered by time with the
+///       `bucket` column, so there is no "time ranges" target table and no `store_time_ranges` setting.
 namespace TimeSeriesVersion
 {
     /// The minimum version which can be read with SELECT and whose creation can be replayed on another node.
@@ -107,11 +111,15 @@ namespace TimeSeriesVersion
     /// The earlier versions stored one sample per row.
     constexpr UInt64 MIN_WITH_BUCKETED_SAMPLES = 11;
 
+    /// The first version storing a row per time series and time bucket in the "tags" target table (see the version history above).
+    /// The earlier versions store one row per time series, and versions 8 to 11 can have the "time ranges" target table.
+    constexpr UInt64 MIN_WITH_BUCKETED_TAGS = 12;
+
     /// The latest version, new tables get it unless the CREATE query specifies another supported version.
     /// Bump it each time the schema of the target tables or the semantics of the stored data changes;
     /// every version in [MIN_SUPPORTED, LATEST] must stay supported, so either make the schema generation
     /// version-aware or bump MIN_SUPPORTED too.
-    constexpr UInt64 LATEST = 11;
+    constexpr UInt64 LATEST = 12;
 
     static_assert(MIN_WITH_ID_TYPE_SETTING <= LATEST);
     static_assert(MIN_WITH_SAMPLES_OUTER_COLUMN <= LATEST);
@@ -123,6 +131,7 @@ namespace TimeSeriesVersion
     static_assert(MIN_WITH_UTC_PARTITION_KEY <= LATEST);
     static_assert(MIN_WITHOUT_EXTERNAL_TARGETS <= LATEST);
     static_assert(MIN_WITH_BUCKETED_SAMPLES <= LATEST);
+    static_assert((MIN_WITH_TIME_RANGES_TARGET <= MIN_WITH_BUCKETED_TAGS) && (MIN_WITH_BUCKETED_TAGS <= LATEST));
     static_assert((MIN_WITH_ID_TYPE_SETTING <= MIN_WITHOUT_ID_SETTINGS) && (MIN_WITHOUT_ID_SETTINGS <= LATEST));
 
     static_assert(MIN_SUPPORTED <= LATEST);

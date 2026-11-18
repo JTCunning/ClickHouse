@@ -65,6 +65,7 @@ namespace ErrorCodes
 namespace TimeSeriesSetting
 {
     extern const TimeSeriesSettingsBool filter_by_min_time_and_max_time;
+    extern const TimeSeriesSettingsUInt64 tags_bucket_step_seconds;
     extern const TimeSeriesSettingsMap tags_to_columns;
     extern const TimeSeriesSettingsASTFunction id_generator;
     extern const TimeSeriesSettingsUInt64 recent_samples_bucket_step_seconds;
@@ -216,19 +217,30 @@ TableTimeRange makeTableTimeRange(
 
 /// Returns the time range to filter the identifiers of time series by the stored time ranges of the series (`min_time`, `max_time`):
 /// `table_time_range` if the table stores them in the "time ranges" table (`time_ranges_table_id` is set), or in the "tags" table
-/// (tables of earlier versions) with the `filter_by_min_time_and_max_time` setting enabled. Otherwise the range with all timestamps:
+/// (tables of earlier versions) with the `filter_by_min_time_and_max_time` setting enabled, or if the "tags" table stores a row
+/// per time bucket (then the identifiers are filtered by the `bucket` column). Otherwise the range with all timestamps:
 /// the identifiers aren't filtered by time, only the samples are filtered by their timestamps.
 /// A `table_time_range` without timestamps is returned as is: no series can have samples in it, whatever the table stores.
 TableTimeRange getTimeRangeToFilterIDs(
     const TableTimeRange & table_time_range, const StorageID & time_ranges_table_id, const TimeSeriesSettings & settings)
 {
-    if (table_time_range.containsNoTimestamps() || time_ranges_table_id)
+    if (table_time_range.containsNoTimestamps() || time_ranges_table_id || settings.hasBucketedTags())
         return table_time_range;
 
     if (settings.hasMinTimeAndMaxTimeInTagsTable() && settings[TimeSeriesSetting::filter_by_min_time_and_max_time])
         return table_time_range;
 
     return TableTimeRange::ALL_TIMESTAMPS;
+}
+
+/// Returns the step of the buckets of the "tags" table at the scale of the timestamp type of the table,
+/// zero for a table storing one row per time series (see `TimeSeriesSettings::hasBucketedTags`).
+Decimal64 getTagsBucketStep(const TimeSeriesSettings & settings, const DataTypePtr & table_timestamp_type)
+{
+    if (!settings.hasBucketedTags())
+        return Decimal64{0};
+    return Decimal64{static_cast<Int64>(settings[TimeSeriesSetting::tags_bucket_step_seconds].value)
+        * DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*table_timestamp_type).value_or(0))};
 }
 
 }
@@ -537,6 +549,40 @@ namespace
         return conditions;
     }
 
+    /// Makes the conditions selecting the rows of a table with time buckets of `bucket_step` whose buckets intersect `time_range`:
+    /// `bucket >= <the bucket of min_time> AND bucket <= <max_time>`.
+    /// The bounds of `time_range` must have the scale of `table_timestamp_type`.
+    ASTs makeBucketConditions(
+        const TableTimeRange & time_range,
+        const DataTypePtr & table_timestamp_type,
+        Decimal64 bucket_step)
+    {
+        ASTs conditions;
+
+        if (time_range.min_time)
+        {
+            /// The same rounding as in TimeSeriesSink: towards negative infinity, so that a bucket starts at or before its samples.
+            DateTime64 min_bucket{DateLUTImpl::roundDownToMultiple(time_range.min_time->value, bucket_step.value)};
+
+            /// bucket >= <min_bucket>
+            conditions.push_back(makeASTFunction(
+                "greaterOrEquals",
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket),
+                timeSeriesTimestampToAST(min_bucket, table_timestamp_type)));
+        }
+
+        if (time_range.max_time)
+        {
+            /// bucket <= <max_time>
+            conditions.push_back(makeASTFunction(
+                "lessOrEquals",
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket),
+                timeSeriesTimestampToAST(*time_range.max_time, table_timestamp_type)));
+        }
+
+        return conditions;
+    }
+
     /// Wraps a select query into ASTSelectWithUnionQuery.
     ASTPtr wrapIntoSelectWithUnionQuery(ASTPtr select_query)
     {
@@ -679,15 +725,17 @@ namespace
     }
 
     /// Makes the WHERE clause of a query selecting identifiers from the tags table.
-    /// The conditions on the time range are added only if the tags table stores it itself (tables of earlier versions),
-    /// otherwise the time range filter is applied by applyTimeRangeFilterToSelectIDsQuery.
+    /// The conditions on the time range are added only if the tags table stores it itself: as the columns `min_time` and `max_time`
+    /// (tables of earlier versions), or as a row per time bucket (then `tags_bucket_step` is the step of the buckets, otherwise zero).
+    /// Otherwise the time range filter is applied by applyTimeRangeFilterToSelectIDsQuery.
     /// The bounds of `time_range_to_filter_ids` must have the scale of `table_timestamp_type`.
     ASTPtr makeWhereFilterForTagsTable(
         const PrometheusQueryTree::MatcherList & matchers,
         const std::unordered_map<String, String> & column_name_by_tag_name,
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        Decimal64 tags_bucket_step)
     {
         ASTs asts;
         for (const auto & matcher : matchers)
@@ -696,7 +744,9 @@ namespace
         if (asts.empty())
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Instant selector without matchers is not allowed");
 
-        if (!time_ranges_table_id)
+        if (tags_bucket_step.value)
+            insertAtEnd(asts, makeBucketConditions(time_range_to_filter_ids, table_timestamp_type, tags_bucket_step));
+        else if (!time_ranges_table_id)
             insertAtEnd(asts, makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type));
 
         return makeASTForLogicalAnd(std::move(asts));
@@ -730,7 +780,8 @@ namespace
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        Decimal64 tags_bucket_step)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -772,7 +823,8 @@ namespace
 
         /// WHERE <filter>
         {
-            auto where_filter = makeWhereFilterForTagsTable(matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type);
+            auto where_filter = makeWhereFilterForTagsTable(
+                matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type, tags_bucket_step);
             select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_filter));
         }
 
@@ -791,28 +843,7 @@ namespace
         const DataTypePtr & table_timestamp_type,
         Decimal64 bucket_step)
     {
-        ASTs conditions;
-
-        if (time_range.min_time)
-        {
-            /// The same rounding as in TimeSeriesSink: towards negative infinity, so that a bucket starts at or before its samples.
-            DateTime64 min_bucket{DateLUTImpl::roundDownToMultiple(time_range.min_time->value, bucket_step.value)};
-
-            /// bucket >= <min_bucket>
-            conditions.push_back(makeASTFunction(
-                "greaterOrEquals",
-                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket),
-                timeSeriesTimestampToAST(min_bucket, table_timestamp_type)));
-        }
-
-        if (time_range.max_time)
-        {
-            /// bucket <= <max_time>
-            conditions.push_back(makeASTFunction(
-                "lessOrEquals",
-                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket),
-                timeSeriesTimestampToAST(*time_range.max_time, table_timestamp_type)));
-        }
+        ASTs conditions = makeBucketConditions(time_range, table_timestamp_type, bucket_step);
 
         /// max_time >= <min_time> AND min_time <= <max_time>
         insertAtEnd(conditions, makeTimeRangeConditions(time_range, table_timestamp_type));
@@ -1210,7 +1241,9 @@ namespace
             }
 
             ASTPtr probe_where = makeASTForLogicalAnd(
-                {makeWhereFilterForTagsTable(name_matcher_only, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type),
+                {makeWhereFilterForTagsTable(
+                     name_matcher_only, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, table_timestamp_type,
+                     /* tags_bucket_step = */ Decimal64{0}),
                  std::move(counterexample)});
 
             /// SELECT id FROM tags_table WHERE <probe_where>
@@ -1315,7 +1348,7 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
             matchers, getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type), table_id_type);
         select_query = makeSelectQueryFromTagsTable(
             tags_table_id, matchers, makeColumnNameByTagNameMap(time_series_settings), time_ranges_table_id, time_range_to_filter_ids,
-            metric_id_ranges, table_timestamp_type);
+            metric_id_ranges, table_timestamp_type, getTagsBucketStep(time_series_settings, table_timestamp_type));
     }
 
     /// Alias the returned expression (`timeSeriesStoreTags(...)`, which returns `id`) so callers can reference the column by a fixed name.
@@ -1437,7 +1470,7 @@ void StorageTimeSeriesSelector::readImpl(
 
     ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
         tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
-        config.table_timestamp_type);
+        config.table_timestamp_type, getTagsBucketStep(*time_series_settings, config.table_timestamp_type));
 
     if (whole_metric_id_range_condition)
     {

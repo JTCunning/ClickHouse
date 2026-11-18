@@ -1,0 +1,58 @@
+-- definition of the tags table
+id	Tuple(UInt64, LowCardinality(UUID))
+metric_name	LowCardinality(String)
+tags	Map(LowCardinality(String), LowCardinality(String))
+bucket	DateTime64(3)
+MergeTree PARTITION BY bucket PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192
+tags_bucket_step_seconds = 86400
+-- time ranges tables: version 11, version 12
+1
+0
+-- the time ranges table is rejected
+INVALID_SETTING_VALUE
+INCORRECT_QUERY
+-- rows of the tags table: one row per time series and bucket
+cpu	1	0	1
+cpu	1	86400	1
+cpu	2	0	1
+cpu	3	86400	1
+mem		0	1
+mem		86400	1
+-- instant query in the first bucket
+[('__name__','cpu'),('instance','1'),('job','a')]	1
+[('__name__','cpu'),('instance','2'),('job','a')]	10
+equal to version 11
+-- instant query in the second bucket
+[('__name__','cpu'),('instance','1'),('job','a')]	3
+[('__name__','cpu'),('instance','3'),('job','b')]	200
+equal to version 11
+-- aggregation in the second bucket
+[('job','a')]	3
+[('job','b')]	200
+equal to version 11
+-- matchers
+[('__name__','cpu'),('instance','1'),('job','a')]	3
+equal to version 11
+-- window over both buckets
+[('instance','1'),('job','a')]	3
+[('instance','2'),('job','a')]	10
+[('instance','3'),('job','b')]	200
+equal to version 11
+[('instance','1'),('job','a')]	3
+[('instance','2'),('job','a')]	1
+[('job','a')]	2
+equal to version 11
+-- range query over both buckets
+[('job','a')]	[('1970-01-01 00:16:40.000',2),('1970-01-02 00:16:40.000',1)]
+[('job','b')]	[('1970-01-02 00:16:40.000',1)]
+equal to version 11
+-- window without samples
+0
+equal to version 11
+-- TTL of the tags table
+MergeTree PARTITION BY bucket PRIMARY KEY metric_name ORDER BY (metric_name, id) TTL toDateTime(bucket) + toIntervalSecond(10800) SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
+-- the expired bucket leaves the tags table, the live series stays
+live	1	1
+[('__name__','cpu'),('instance','live')]	3
+-- a query older than the retention finds no time series
+0

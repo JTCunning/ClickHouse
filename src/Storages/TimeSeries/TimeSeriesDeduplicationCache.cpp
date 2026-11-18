@@ -58,7 +58,11 @@ TimeSeriesDeduplicationCache::TimePoint TimeSeriesDeduplicationCache::currentTim
 }
 
 Block TimeSeriesDeduplicationCache::filterOutWrittenRows(
-    const Block & block, size_t key_column_index, PendingRows & pending_rows, PaddedPODArray<UInt8> filter)
+    const Block & block,
+    size_t key_column_index,
+    PendingRows & pending_rows,
+    PaddedPODArray<UInt8> filter,
+    std::optional<size_t> second_key_column_index)
 {
     size_t num_rows = block.rows();
     if (num_rows == 0)
@@ -71,14 +75,18 @@ Block TimeSeriesDeduplicationCache::filterOutWrittenRows(
         filter.resize_fill(num_rows, true);
     chassert(filter.size() == num_rows);
 
-    size_t num_passed_rows = excludeWrittenRowsFromFilter(block, key_column_index, filter, pending_rows);
+    size_t num_passed_rows = excludeWrittenRowsFromFilter(block, key_column_index, second_key_column_index, filter, pending_rows);
     return applyFilter(block, filter, num_passed_rows);
 }
 
 size_t TimeSeriesDeduplicationCache::excludeWrittenRowsFromFilter(
-    const Block & block, size_t key_column_index, PaddedPODArray<UInt8> & filter, PendingRows & pending_rows)
+    const Block & block,
+    size_t key_column_index,
+    std::optional<size_t> second_key_column_index,
+    PaddedPODArray<UInt8> & filter,
+    PendingRows & pending_rows)
 {
-    auto hashed_rows = hashRows(block, key_column_index, filter);
+    auto hashed_rows = hashRows(block, key_column_index, second_key_column_index, filter);
 
     std::vector<KeyHash> key_hashes;
     key_hashes.reserve(hashed_rows.size());
@@ -96,13 +104,14 @@ size_t TimeSeriesDeduplicationCache::excludeWrittenRowsFromFilter(
 }
 
 TimeSeriesDeduplicationCache::HashedRows TimeSeriesDeduplicationCache::hashRows(
-    const Block & block, size_t key_column_index, const PaddedPODArray<UInt8> & filter)
+    const Block & block, size_t key_column_index, std::optional<size_t> second_key_column_index, const PaddedPODArray<UInt8> & filter)
 {
     size_t num_rows = block.rows();
     HashedRows hashed_rows;
     hashed_rows.reserve(num_rows);
 
     const auto & key_column = *block.getByPosition(key_column_index).column;
+    const IColumn * second_key_column = second_key_column_index ? block.getByPosition(*second_key_column_index).column.get() : nullptr;
     for (size_t row = 0; row != num_rows; ++row)
     {
         if (!filter[row])
@@ -110,6 +119,8 @@ TimeSeriesDeduplicationCache::HashedRows TimeSeriesDeduplicationCache::hashRows(
 
         SipHash key_hash_calculator;
         key_column.updateHashWithValue(row, key_hash_calculator);
+        if (second_key_column)
+            second_key_column->updateHashWithValue(row, key_hash_calculator);
 
         SipHash row_hash_calculator;
         for (const auto & column : block)

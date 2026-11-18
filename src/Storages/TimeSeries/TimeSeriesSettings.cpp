@@ -39,6 +39,8 @@ namespace ErrorCodes
     DECLARE(UInt64, recent_samples_index_granularity, 256, "Sets 'index_granularity' of the inner 'recent samples' table. When set explicitly, it overrides 'index_granularity' from the engine declaration. Ignored for a non-MergeTree engine. The default is 8192 for tables of version 10 or earlier, which store one sample per row. Requires 'recent_samples_ttl_seconds' to be non-zero", 0) \
     DECLARE(UInt64, recent_samples_index_granularity_bytes, 131072, "Sets 'index_granularity_bytes' of the inner 'recent samples' table. When set explicitly, it overrides 'index_granularity_bytes' from the engine declaration. Ignored for a non-MergeTree engine. Requires 'recent_samples_ttl_seconds' to be non-zero and 'version' to be at least 11", 0) \
     DECLARE(UInt64, tags_index_granularity, 8192, "Sets 'index_granularity' of the inner 'tags' table. When set explicitly, it overrides 'index_granularity' from the engine declaration. Ignored for a non-MergeTree engine", 0) \
+    DECLARE(UInt64, tags_bucket_step_seconds, 86400, "The length in seconds of the time buckets of the 'tags' table: the table contains a row of a time series for each bucket with samples of the series, and the 'bucket' column contains the start of the bucket, i.e. the timestamp rounded down to a multiple of this setting. The inner 'tags' table is partitioned by 'bucket'. The default is 1 day; the effective value is pinned into the table definition at CREATE time. Requires 'version' to be at least 12", 0) \
+    DECLARE(UInt64, tags_ttl_seconds, 0, "Retention of the 'tags' table. If non-zero, an inner 'tags' table gets 'TTL toDateTime(bucket) + toIntervalSecond(tags_ttl_seconds + tags_bucket_step_seconds)' and 'ttl_only_drop_parts = 1', so an expired bucket is dropped as a whole partition. A query whose time range is older than the retention finds no time series. The default is 0, i.e. no TTL. Requires 'version' to be at least 12", 0) \
     DECLARE(UInt64, tags_deduplication_cache_expiration_seconds, 3600, "Time after which an entry of the deduplication cache of the 'tags' table expires, counted from the moment the time series was written. The actual lifetime of an entry is uniformly random in the range [0.8 * expiration_seconds, expiration_seconds], so the time series written together aren't all written again at the same moment. So every time series is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by 'TRUNCATE TABLE' executed on it or by 'SYSTEM DROP TIME SERIES CACHES'. Used only when the 'tags' table doesn't store 'min_time' and 'max_time', see 'tags_deduplication_cache_size_bytes'. Set to 0 to disable the cache", 0) \
     DECLARE(UInt64, tags_deduplication_cache_size_bytes, 104857600, "Maximum size in bytes of the deduplication cache of the 'tags' table. The cache remembers the time series written recently, so their tags aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). The cache is used only when the 'tags' table doesn't store 'min_time' and 'max_time' (tables of version 7 or earlier store them unless 'store_min_time_and_max_time' is disabled), because otherwise every insert changes these columns: the default value is ignored then, and an explicit non-zero value is rejected. Set to 0 to disable the cache, see also 'tags_deduplication_cache_expiration_seconds'", 0) \
     DECLARE(UInt64, metric_families_deduplication_cache_expiration_seconds, 3600, "Time after which an entry of the deduplication cache of the 'metric families' table expires, counted from the moment the metric family was written. The actual lifetime of an entry is uniformly random in the range [0.8 * expiration_seconds, expiration_seconds], so the metric families written together aren't all written again at the same moment. So every metric family is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by 'TRUNCATE TABLE' executed on it or by 'SYSTEM DROP TIME SERIES CACHES'. Set to 0 to disable the cache", 0) \
@@ -140,8 +142,25 @@ bool TimeSeriesSettings::isRecentSamplesTargetEnabled() const
 
 bool TimeSeriesSettings::isTimeRangesTargetEnabled() const
 {
-    return ((*this)[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET)
+    UInt64 version = (*this)[TimeSeriesSetting::version];
+    return (version >= TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET) && (version < TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS)
         && (*this)[TimeSeriesSetting::store_time_ranges];
+}
+
+bool TimeSeriesSettings::hasBucketedTags() const
+{
+    return (*this)[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS;
+}
+
+UInt64 TimeSeriesSettings::getTagsDeduplicationCacheExpirationSeconds() const
+{
+    const auto & expiration_seconds = (*this)[TimeSeriesSetting::tags_deduplication_cache_expiration_seconds];
+    if (!hasBucketedTags() || expiration_seconds.isChanged())
+        return expiration_seconds;
+
+    /// The lifetime of a cache entry is at least 0.8 of the expiration time, so this value makes it at least one bucket.
+    UInt64 bucket_step_seconds = (*this)[TimeSeriesSetting::tags_bucket_step_seconds];
+    return bucket_step_seconds + bucket_step_seconds / 4;
 }
 
 bool TimeSeriesSettings::hasBucketedSamples() const
@@ -201,6 +220,10 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
     check_bucket_step(settings[TimeSeriesSetting::samples_bucket_step_seconds], "samples_bucket_step_seconds");
     check_bucket_step(settings[TimeSeriesSetting::recent_samples_bucket_step_seconds], "recent_samples_bucket_step_seconds");
 
+    check_setting_requires_version("tags_bucket_step_seconds", TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS);
+    check_setting_requires_version("tags_ttl_seconds", TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS);
+    check_bucket_step(settings[TimeSeriesSetting::tags_bucket_step_seconds], "tags_bucket_step_seconds");
+
     if (settings.hasMinTimeAndMaxTimeInTagsTable())
     {
         /// Every insert changes `min_time` and `max_time` of a time series, so the rows of the tags table can't be deduplicated
@@ -245,6 +268,13 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
                     setting_name, TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET - 1, version);
         }
     }
+
+    /// The `bucket` column of the "tags" table replaces the "time ranges" table (see TimeSeriesVersion.h).
+    if (settings.hasBucketedTags() && settings.isChanged("store_time_ranges"))
+        throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+            "Setting `store_time_ranges` applies to tables of version {} or earlier only, but the table has version {}: "
+            "the tags table stores a row per time bucket instead of the time ranges table",
+            TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS - 1, version);
 
     /// The type of the `id` column and the expression generating identifiers are declared in the inner columns of the "tags" table,
     /// tables of earlier versions could declare them in the settings (see TimeSeriesVersion.h).
@@ -297,6 +327,9 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
             const auto & tuple = entry.safeGet<Tuple>();
             const auto & tag_name = tuple.at(0).safeGet<String>();
             const auto & column_name = tuple.at(1).safeGet<String>();
+            if (settings.hasBucketedTags() && (column_name == TimeSeriesColumnNames::Bucket))
+                throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+                    "Setting `tags_to_columns`: column name `{}` is reserved for the TimeSeries tags table", column_name);
             if (tag_name.empty())
                 throw Exception(ErrorCodes::INVALID_SETTING_VALUE, "Setting `tags_to_columns` has an entry with empty tag name");
             if (column_name.empty())

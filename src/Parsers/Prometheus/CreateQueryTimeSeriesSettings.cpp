@@ -86,6 +86,11 @@ bool isTimeSeriesRecentSamplesTargetEnabled(const ASTCreateQuery & query, bool f
 
 bool isTimeSeriesTimeRangesTargetEnabled(const ASTCreateQuery & query, bool for_restore)
 {
+    /// The tags table with a `bucket` column replaces the time ranges table.
+    const UInt64 version = getTimeSeriesVersion(query);
+    if (version >= TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS)
+        return false;
+
     if (const auto * value = tryGetSettingValue(query, "store_time_ranges"))
         return fieldToNumberSettingValue<bool>(*value);
 
@@ -93,7 +98,7 @@ bool isTimeSeriesTimeRangesTargetEnabled(const ASTCreateQuery & query, bool for_
     if (hasTimeSeriesTargetDefinition(query, ViewTarget::TimeRanges))
         return true;
 
-    if (getTimeSeriesVersion(query) < TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET)
+    if (version < TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET)
         return false;
 
     /// A backup without the setting and without the clauses was made by a version without the time ranges table.

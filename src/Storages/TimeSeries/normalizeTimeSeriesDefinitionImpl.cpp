@@ -62,8 +62,10 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsASTFunction samples_partition_by;
     extern const TimeSeriesSettingsBool store_min_time_and_max_time;
     extern const TimeSeriesSettingsBool store_time_ranges;
+    extern const TimeSeriesSettingsUInt64 tags_bucket_step_seconds;
     extern const TimeSeriesSettingsUInt64 tags_index_granularity;
     extern const TimeSeriesSettingsMap tags_to_columns;
+    extern const TimeSeriesSettingsUInt64 tags_ttl_seconds;
     extern const TimeSeriesSettingsUInt64 version;
 }
 
@@ -580,7 +582,8 @@ namespace
     /// The engine kind of an inner table generated for `settings`, without the family prefix (see `getInnerEngineFamilyPrefix`).
     /// The tables merging rows need an aggregating engine: the samples tables of a table with buckets of samples (the rows of the same
     /// series and bucket), the time ranges table (the range of a series), and the tags table of the earlier versions aggregating
-    /// `min_time` and `max_time`. The other tables use `MergeTree` or `ReplacingMergeTree`.
+    /// `min_time` and `max_time`. The other tables use `MergeTree` or `ReplacingMergeTree`: the tags table with a row per time bucket
+    /// uses `MergeTree`, because a time series is written once per bucket and so its parts need no rewrite to remove duplicates.
     std::string_view getDefaultInnerEngineKind(const TimeSeriesSettings & settings, ViewTarget::Kind inner_table_kind)
     {
         switch (inner_table_kind)
@@ -591,6 +594,8 @@ namespace
 
             case ViewTarget::Tags:
             {
+                if (settings.hasBucketedTags())
+                    return "MergeTree";
                 bool aggregate = (settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET)
                     && settings[TimeSeriesSetting::aggregate_min_time_and_max_time];
                 return aggregate ? "AggregatingMergeTree" : "ReplacingMergeTree";
@@ -698,6 +703,16 @@ namespace
         return makeASTOperator("plus", std::move(time), makeASTFunction("toIntervalSecond", make_intrusive<ASTLiteral>(ttl_seconds)));
     }
 
+    /// The generated TTL expression of an inner tags table with a row per time bucket: a row expires when its whole bucket
+    /// is older than `tags_ttl_seconds`.
+    ASTPtr getTagsTTLFromSettings(const TimeSeriesSettings & settings)
+    {
+        UInt64 ttl_seconds = settings[TimeSeriesSetting::tags_ttl_seconds].value + settings[TimeSeriesSetting::tags_bucket_step_seconds].value;
+        return makeASTOperator("plus",
+            makeASTFunction("toDateTime", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket)),
+            makeASTFunction("toIntervalSecond", make_intrusive<ASTLiteral>(ttl_seconds)));
+    }
+
     /// The codec declared by the entry `CODEC <name> (...)` of the column list of an inner table, where `name` is a column
     /// or a subcolumn of a column written as a dotted name (e.g. `samples.timestamp`), or nullptr if there is no such entry.
     ASTPtr getCodecDeclaration(const ASTColumns & inner_table_columns, std::string_view name)
@@ -773,6 +788,12 @@ namespace
             old_settings.removeSettings({"store_min_time_and_max_time", "aggregate_min_time_and_max_time", "filter_by_min_time_and_max_time"});
         else
             old_settings.removeSetting("store_time_ranges");
+
+        /// The tags table with a row per time bucket replaces the "time ranges" table (see TimeSeriesVersion.h).
+        if (new_version >= TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS)
+            old_settings.removeSetting("store_time_ranges");
+        else
+            old_settings.removeSettings({"tags_bucket_step_seconds", "tags_ttl_seconds"});
 
         /// The settings of the buckets of samples exist from version MIN_WITH_BUCKETED_SAMPLES (see TimeSeriesVersion.h),
         /// so they aren't copied into a table pinned to an earlier version.
@@ -1060,7 +1081,10 @@ namespace
                     return type_name == "LowCardinality(String)";
 
                 if (name == TimeSeriesColumnNames::Tags)
-                    return type_name == "Map(LowCardinality(String), String)";
+                    return (type_name == "Map(LowCardinality(String), String)") || (type_name == "Map(LowCardinality(String), LowCardinality(String))");
+
+                if (settings.hasBucketedTags() && (name == TimeSeriesColumnNames::Bucket))
+                    return is_timestamp_type(*type);
 
                 if ((name == TimeSeriesColumnNames::MinTime) || (name == TimeSeriesColumnNames::MaxTime))
                 {
@@ -1188,6 +1212,8 @@ namespace
             /// the keys over them can't be kept by a table which doesn't store them there.
             if (old_settings.hasMinTimeAndMaxTimeInTagsTable() && !new_settings.hasMinTimeAndMaxTimeInTagsTable())
                 missing_columns = {TimeSeriesColumnNames::MinTime, TimeSeriesColumnNames::MaxTime};
+            else if (old_settings.hasBucketedTags() && !new_settings.hasBucketedTags())
+                missing_columns = {TimeSeriesColumnNames::Bucket};
         }
 
         if (missing_columns.empty())
@@ -1355,6 +1381,15 @@ namespace
                 remove_settings({
                     {"index_granularity", settings[TimeSeriesSetting::tags_index_granularity].value},
                     {"allow_dimensions_outside_sorting_key", static_cast<UInt64>(1)}});
+
+                if (settings.hasBucketedTags())
+                {
+                    if (partitioning_equals(TimeSeriesColumnNames::Bucket))
+                        inner_engine.reset(inner_engine.partition_by);
+                    if (ttl_equals(getTagsTTLFromSettings(settings)->formatWithSecretsOneLine()))
+                        inner_engine.reset(inner_engine.ttl_table);
+                    remove_settings({{"ttl_only_drop_parts", static_cast<UInt64>(1)}});
+                }
                 break;
             }
 
@@ -1516,8 +1551,17 @@ namespace
                     add_column_if_missing(column_name, makeASTDataType("String"));
                 }
 
+                /// The tags table with a row per time bucket repeats the tags of a time series in each bucket,
+                /// so the values of the tags are stored in dictionaries too.
+                ASTPtr tag_value_type = makeASTDataType("String");
+                if (time_series_settings.hasBucketedTags())
+                    tag_value_type = makeASTDataType("LowCardinality", std::move(tag_value_type));
                 add_column_if_missing(TimeSeriesColumnNames::Tags,
-                    makeASTDataType("Map", makeASTDataType("LowCardinality", makeASTDataType("String")), makeASTDataType("String")));
+                    makeASTDataType("Map", makeASTDataType("LowCardinality", makeASTDataType("String")), std::move(tag_value_type)));
+
+                /// `bucket` is computed on insertion from the `tags_bucket_step_seconds` setting of the table.
+                if (time_series_settings.hasBucketedTags())
+                    add_column_if_missing(TimeSeriesColumnNames::Bucket, dataTypeToAST(resolved_types.timestamp_type));
 
                 /// Columns "min_time" and "max_time" (tables of earlier versions kept them in the tags table).
                 if (time_series_settings.hasMinTimeAndMaxTimeInTagsTable())
@@ -2034,6 +2078,25 @@ namespace
                 {
                     set_engine_setting("allow_dimensions_outside_sorting_key", 1);
                 }
+
+                if (settings.hasBucketedTags())
+                {
+                    /// One partition per bucket: a query reads the partitions of its time range only,
+                    /// and the parts of a finished bucket are not merged with the parts of the later buckets.
+                    if (is_merge_tree() && !has_partition_by())
+                        set_partition_by(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Bucket));
+
+                    if (settings[TimeSeriesSetting::tags_ttl_seconds] != 0)
+                    {
+                        require_merge_tree("The TTL defined by the `tags_ttl_seconds` setting");
+
+                        /// The table is partitioned by bucket, so `ttl_only_drop_parts` lets the TTL drop whole expired parts instead of rewriting them.
+                        if (!has_engine_setting("ttl_only_drop_parts"))
+                            set_engine_setting("ttl_only_drop_parts", 1);
+
+                        set_ttl(getTagsTTLFromSettings(settings));
+                    }
+                }
                 break;
             }
 
@@ -2304,6 +2367,9 @@ namespace
 
                 check_column_is_string_map(TimeSeriesColumnNames::Tags);
                 check_column_is_string_map(TimeSeriesColumnNames::AllTags, /*if_exists=*/ true);
+
+                if (time_series_settings.hasBucketedTags())
+                    check_column_type(TimeSeriesColumnNames::Bucket, resolved_types.timestamp_type);
 
                 if (time_series_settings.hasMinTimeAndMaxTimeInTagsTable())
                 {
@@ -2673,6 +2739,14 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
             }
         }
 
+        /// Pin the step of the buckets of the tags table too: the time series are filtered by time with the assumption
+        /// that the buckets are aligned to the step.
+        if (settings.hasBucketedTags() && create_query.storage && !settings[TimeSeriesSetting::tags_bucket_step_seconds].isChanged())
+        {
+            setEngineSettings(*create_query.storage, "tags_bucket_step_seconds",
+                Field(settings[TimeSeriesSetting::tags_bucket_step_seconds].value));
+        }
+
         /// A RECENT SAMPLES declaration can't be used with `recent_samples_ttl_seconds = 0`
         if (!recent_samples_enabled)
         {
@@ -2696,6 +2770,11 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
                     throw Exception(ErrorCodes::INCORRECT_QUERY,
                         "The TIME RANGES target requires `version` to be at least {}, but the table has version {}",
                         TimeSeriesVersion::MIN_WITH_TIME_RANGES_TARGET, settings[TimeSeriesSetting::version].value);
+                if (settings.hasBucketedTags())
+                    throw Exception(ErrorCodes::INCORRECT_QUERY,
+                        "The TIME RANGES target applies to tables of version {} or earlier only, but the table has version {}: "
+                        "the tags table stores a row per time bucket instead of the time ranges table",
+                        TimeSeriesVersion::MIN_WITH_BUCKETED_TAGS - 1, settings[TimeSeriesSetting::version].value);
                 throw Exception(ErrorCodes::INCORRECT_QUERY,
                     "The TIME RANGES target requires the setting `store_time_ranges` to be enabled");
             }
