@@ -672,6 +672,12 @@ MergeTreeIndexFactory::MergeTreeIndexFactory()
         .related = {"tokenbf_v1"}});
     registerValidator("text", textIndexValidator);
 
+    registerCreator("time_series", timeSeriesIndexCreator, Documentation{
+        .description = "An index of the time series of a part: a sorted dictionary of the values of each label with a posting list per value, and the identifier and the labels of each row. A selector of a `TimeSeries` table reads the index files instead of the table. The index does not filter granules.",
+        .syntax = "INDEX name (id, tags[, column, ...]) TYPE time_series([column = 'label name', ...]) GRANULARITY 100000000",
+        .related = {"text"}});
+    registerValidator("time_series", timeSeriesIndexValidator);
+
     /// Index type 'hypothesis' is no longer supported.
     /// To allow loading tables with old indexes, register a dummy index which allows attach but
     /// throws an exception when the user attempts to create or use it.

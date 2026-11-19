@@ -34,8 +34,10 @@
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <Parsers/Prometheus/CreateQueryTimeSeriesSettings.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
+#include <Storages/MergeTree/MergeTreeIndexTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
 #include <Storages/TimeSeries/TimeSeriesIDGenerator.h>
+#include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <base/EnumReflection.h>
 #include <algorithm>
 #include <optional>
@@ -653,6 +655,35 @@ namespace
         return index;
     }
 
+    /// The index of the time series of a part. A selector reads its files instead of the tags table.
+    ASTPtr getDefaultTagsSeriesIndex()
+    {
+        auto index = make_intrusive<ASTIndexDeclaration>(
+            makeASTFunction("tuple",
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID),
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Tags),
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName)),
+            makeASTFunction("time_series", makeASTOperator("equals",
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName), make_intrusive<ASTLiteral>(TimeSeriesTagNames::MetricName))),
+            "series_idx");
+        index->granularity = ASTIndexDeclaration::DEFAULT_TEXT_INDEX_GRANULARITY;
+        return index;
+    }
+
+    /// The index of type `time_series` is generated if all the labels are in the columns `tags` and `metric_name`,
+    /// and the index supports the types of the columns.
+    bool hasDefaultTagsSeriesIndex(const TimeSeriesSettings & settings, const ColumnsDescription & tags_table_columns)
+    {
+        const Map & tags_to_columns = settings[TimeSeriesSetting::tags_to_columns];
+        if (settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_TAGS_SERIES_INDEX || !tags_to_columns.empty())
+            return false;
+
+        auto id = tags_table_columns.tryGetPhysical(TimeSeriesColumnNames::ID);
+        auto tags = tags_table_columns.tryGetPhysical(TimeSeriesColumnNames::Tags);
+        auto metric_name = tags_table_columns.tryGetPhysical(TimeSeriesColumnNames::MetricName);
+        return id && tags && metric_name && MergeTreeIndexTimeSeries::supportsColumnTypes(id->type, {tags->type, metric_name->type});
+    }
+
     /// The generated partition key of a samples table with buckets of samples: one partition per month. `toDateTime` makes the key
     /// work for any type of the timestamps, and the timezone is named because `toYYYYMM` counts from local midnight, so a change
     /// of the server timezone would otherwise move the meaning of the partition values already written.
@@ -1127,8 +1158,13 @@ namespace
             return;
 
         const auto default_index = getDefaultTagsIndex()->formatWithSecretsOneLine();
+        const auto default_series_index = getDefaultTagsSeriesIndex()->formatWithSecretsOneLine();
         auto & indices = inner_columns.indices->children;
-        auto is_generated = [&](const ASTPtr & index) { return index->formatWithSecretsOneLine() == default_index; };
+        auto is_generated = [&](const ASTPtr & index)
+        {
+            const auto formatted = index->formatWithSecretsOneLine();
+            return formatted == default_index || formatted == default_series_index;
+        };
         indices.erase(std::remove_if(indices.begin(), indices.end(), is_generated), indices.end());
     }
 
@@ -2060,7 +2096,12 @@ namespace
 
     /// Adds the default text index for exact label lookups in the `tags` map.
     /// Explicit index declarations are kept, and engines outside the `MergeTree` family have no indexes.
-    bool normalizeInnerIndices(ASTColumns & inner_columns, const ASTStorage & inner_engine, ViewTarget::Kind kind)
+    bool normalizeInnerIndices(
+        ASTColumns & inner_columns,
+        const ASTStorage & inner_engine,
+        ViewTarget::Kind kind,
+        const TimeSeriesSettings & settings,
+        const ColumnsDescription & inner_columns_description)
     {
         if (kind != ViewTarget::Tags || !inner_engine.engine->name.ends_with("MergeTree")
             || (inner_columns.indices && !inner_columns.indices->children.empty()))
@@ -2068,6 +2109,8 @@ namespace
 
         auto indices = make_intrusive<ASTExpressionList>();
         indices->children.push_back(getDefaultTagsIndex());
+        if (hasDefaultTagsSeriesIndex(settings, inner_columns_description))
+            indices->children.push_back(getDefaultTagsSeriesIndex());
         inner_columns.setOrReplace(inner_columns.indices, indices);
         return true;
     }
@@ -2727,7 +2770,8 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
                     create_query.setTargetInnerColumns(kind, inner_columns);
 
                 /// Validate the user-provided types of the inner columns the same way external targets are validated.
-                checkTargetTable(toColumnsDescription(*inner_columns, kind, table_id), kind, /* is_external = */ false, settings, resolved_types, table_id);
+                const auto inner_columns_description = toColumnsDescription(*inner_columns, kind, table_id);
+                checkTargetTable(inner_columns_description, kind, /* is_external = */ false, settings, resolved_types, table_id);
 
                 auto inner_engine = create_query.getTargetInnerEngine(kind)
                     ? boost::static_pointer_cast<ASTStorage>(create_query.getTargetInnerEngine(kind)->clone())
@@ -2736,7 +2780,7 @@ void normalizeTimeSeriesDefinitionImpl(ASTCreateQuery & create_query, const Norm
                     create_query.setTargetInnerEngine(kind, inner_engine);
 
                 if (settings[TimeSeriesSetting::version] >= TimeSeriesVersion::MIN_WITH_TAGS_TEXT_INDEX
-                    && normalizeInnerIndices(*inner_columns, *inner_engine, kind))
+                    && normalizeInnerIndices(*inner_columns, *inner_engine, kind, settings, inner_columns_description))
                     create_query.setTargetInnerColumns(kind, inner_columns);
             }
         }

@@ -41,6 +41,9 @@ struct MergeTreeIndexSubstream
         TextIndexDictionary,
         TextIndexPostings,
         TextIndexPositions,
+        TimeSeriesIndexDictionary,
+        TimeSeriesIndexPostings,
+        TimeSeriesIndexSeries,
     };
 
     Type type;
@@ -53,7 +56,8 @@ struct MergeTreeIndexSubstream
     {
         /// Text index postings and positions are not compressed by write buffer,
         /// because the compression is implicitly applied during building them.
-        return type != Type::TextIndexPostings && type != Type::TextIndexPositions;
+        /// The postings of an index of type `time_series` are Roaring bitmaps, read at arbitrary positions.
+        return type != Type::TextIndexPostings && type != Type::TextIndexPositions && type != Type::TimeSeriesIndexPostings;
     }
 };
 

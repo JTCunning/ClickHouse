@@ -15,6 +15,7 @@
 #include <Core/Settings.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/ContextTimeSeriesTagsCollector.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterSelectQueryAnalyzer.h>
 #include <Interpreters/SelectQueryOptions.h>
@@ -31,7 +32,16 @@
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
 #include <Parsers/makeASTForLogicalFunction.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Access/Common/RowPolicyDefs.h>
+#include <Core/UUID.h>
+#include <IO/WriteHelpers.h>
+#include <Processors/Executors/PushingPipelineExecutor.h>
+#include <QueryPipeline/QueryPipeline.h>
 #include <Storages/ColumnsDescription.h>
+#include <Storages/ConstraintsDescription.h>
+#include <Storages/MergeTree/MergeTreeData.h>
+#include <Storages/MergeTree/MergeTreeIndexTimeSeries.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageTimeSeries.h>
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
@@ -59,7 +69,9 @@ namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
     extern const int LOGICAL_ERROR;
+    extern const int NOT_IMPLEMENTED;
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
+    extern const int THERE_IS_NO_QUERY;
 }
 
 namespace TimeSeriesSetting
@@ -1273,6 +1285,141 @@ namespace
 }
 
 
+namespace
+{
+    /// Returns the index of type `time_series` of the tags table, if the table has it.
+    std::shared_ptr<const MergeTreeIndexTimeSeries> tryGetTagsSeriesIndex(const StoragePtr & tags_table, const StorageMetadataPtr & tags_table_metadata)
+    {
+        const auto * merge_tree = dynamic_cast<const MergeTreeData *>(tags_table.get());
+        if (!merge_tree)
+            return nullptr;
+
+        for (const auto & index : tags_table_metadata->getSecondaryIndices())
+        {
+            if (index.type == "time_series")
+                return std::dynamic_pointer_cast<const MergeTreeIndexTimeSeries>(
+                    MergeTreeIndexFactory::instance().get(tags_table_metadata, index, *merge_tree->getSettings()));
+        }
+        return nullptr;
+    }
+
+    TimeSeriesIndexMatchers makeSeriesIndexMatchers(const PrometheusQueryTree::MatcherList & matchers)
+    {
+        TimeSeriesIndexMatchers res;
+        res.reserve(matchers.size());
+        for (const auto & matcher : matchers)
+        {
+            auto & index_matcher = res.emplace_back();
+            index_matcher.label = matcher.label_name;
+            index_matcher.value = matcher.label_value;
+            switch (matcher.matcher_type)
+            {
+                case PrometheusQueryTree::MatcherType::EQ:  index_matcher.kind = TimeSeriesIndexMatcher::Kind::Equal; break;
+                case PrometheusQueryTree::MatcherType::NE:  index_matcher.kind = TimeSeriesIndexMatcher::Kind::NotEqual; break;
+                case PrometheusQueryTree::MatcherType::RE:  index_matcher.kind = TimeSeriesIndexMatcher::Kind::Regex; break;
+                case PrometheusQueryTree::MatcherType::NRE: index_matcher.kind = TimeSeriesIndexMatcher::Kind::NotRegex; break;
+            }
+            if ((index_matcher.kind == TimeSeriesIndexMatcher::Kind::Regex) || (index_matcher.kind == TimeSeriesIndexMatcher::Kind::NotRegex))
+            {
+                index_matcher.alternatives = tryGetLiteralAlternatives(matcher.label_value);
+                index_matcher.value = anchorRegex(matcher.label_value);
+            }
+        }
+        return res;
+    }
+
+    /// Finds the time series matching the selector in the files of the index of type `time_series` of the parts of the tags table,
+    /// stores their tags in the collector of the query, and makes a query returning their identifiers:
+    ///
+    /// SELECT id FROM <temporary table with the identifiers>
+    ///
+    /// or, if the table has a time ranges table and the time range does not contain all timestamps:
+    ///
+    /// SELECT id FROM time_ranges_table WHERE <time_range_conditions> AND id IN (SELECT id FROM <temporary table with the identifiers>)
+    ///
+    /// The tags table is not read.
+    ASTPtr makeSelectIDsQueryWithSeriesIndex(
+        const MergeTreeIndexTimeSeries & series_index,
+        const StoragePtr & tags_table,
+        const PrometheusQueryTree::MatcherList & matchers,
+        const StorageID & time_ranges_table_id,
+        const TableTimeRange & time_range_to_filter_ids,
+        const DataTypePtr & table_timestamp_type,
+        const ContextPtr & context,
+        LoggerPtr log)
+    {
+        const auto & merge_tree = dynamic_cast<const MergeTreeData &>(*tags_table);
+        const auto tags_table_id = tags_table->getStorageID();
+
+        if (context->getRowPolicyFilter(tags_table_id.getDatabaseName(), tags_table_id.getTableName(), RowPolicyFilterType::SELECT_FILTER))
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED,
+                "A selector cannot read index {} of table {} because the table has a row policy", series_index.index.name, tags_table_id.getNameForLogs());
+
+        if (!context->hasQueryContext())
+            throw Exception(ErrorCodes::THERE_IS_NO_QUERY, "A selector can be executed only in a query");
+
+        auto parts = merge_tree.getDataPartsVectorForInternalUsage();
+        for (const auto & part : parts)
+        {
+            if (part->hasLightweightDelete())
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED,
+                    "A selector cannot read index {} of part {} of table {} because the part has deleted rows",
+                    series_index.index.name, part->name, tags_table_id.getNameForLogs());
+        }
+
+        auto found = series_index.lookup(parts, makeSeriesIndexMatchers(matchers), context);
+        const size_t num_series = found.labels.size();
+        ColumnPtr ids = std::move(found.ids);
+
+        LOG_DEBUG(log, "Found {} time series in index {} of {} parts of the tags table", num_series, series_index.index.name, parts.size());
+
+        VectorWithMemoryTracking<ContextTimeSeriesTagsCollector::TagNamesAndValuesPtr> tags_vector;
+        tags_vector.reserve(num_series);
+        for (auto & labels : found.labels)
+            tags_vector.push_back(std::move(labels));
+        context->getQueryContext()->getTimeSeriesTagsCollector()->storeTags(ids, tags_vector);
+
+        /// A temporary table with the `Memory` engine in the query context is sent to the other servers reading the samples.
+        /// The name is unique: a query can have many selectors.
+        String ids_table_name = "_time_series_selector_ids_" + toString(UUIDHelpers::generateV4());
+        std::erase(ids_table_name, '-');
+        {
+            TemporaryTableHolder ids_table_holder(
+                context, ColumnsDescription{NamesAndTypesList{{TimeSeriesColumnNames::ID, series_index.id_type}}}, ConstraintsDescription{});
+            auto ids_table = ids_table_holder.getTable();
+            auto ids_table_metadata = ids_table->getInMemoryMetadataPtr(context, false);
+            QueryPipeline ids_table_out(ids_table->write(ASTPtr(), ids_table_metadata, context, /* async_insert = */ false));
+            PushingPipelineExecutor executor(ids_table_out);
+            executor.start();
+            executor.push(Block{ColumnWithTypeAndName{ids, series_index.id_type, TimeSeriesColumnNames::ID}});
+            executor.finish();
+            context->getQueryContext()->addExternalTable(ids_table_name, std::move(ids_table_holder));
+        }
+
+        auto make_select_id = [](ASTPtr table, ASTPtr where)
+        {
+            auto select_query = make_intrusive<ASTSelectQuery>();
+            auto select_list_exp = make_intrusive<ASTExpressionList>();
+            select_list_exp->children.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID));
+            select_query->setExpression(ASTSelectQuery::Expression::SELECT, select_list_exp);
+            select_query->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(std::move(table)));
+            if (where)
+                select_query->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where));
+            return wrapIntoSelectWithUnionQuery(std::move(select_query));
+        };
+
+        ASTPtr select_ids = make_select_id(make_intrusive<ASTTableIdentifier>(ids_table_name), nullptr);
+        if (!time_ranges_table_id || time_range_to_filter_ids.containsAllTimestamps())
+            return select_ids;
+
+        ASTs conditions = makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type);
+        conditions.push_back(makeASTFunction(
+            "in", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID), make_intrusive<ASTSubquery>(std::move(select_ids))));
+        return make_select_id(make_intrusive<ASTTableIdentifier>(time_ranges_table_id), makeASTForLogicalAnd(std::move(conditions)));
+    }
+}
+
+
 void StorageTimeSeriesSelector::applySettingsForSelectIDsQuery(Context & context)
 {
     /// The time ranges table is joined by a merge join over both tables read in the order of `id` (see addTimeRangesTableJoin):
@@ -1392,7 +1539,9 @@ void StorageTimeSeriesSelector::readImpl(
         * DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*config.table_timestamp_type).value_or(0))};
 
     auto samples_table_metadata = time_series_storage->getTargetTable(samples_table_kind, context)->getInMemoryMetadataPtr(context, false);
-    auto tags_table_metadata = time_series_storage->getTargetTable(ViewTarget::Tags, context)->getInMemoryMetadataPtr(context, false);
+    auto tags_table = time_series_storage->getTargetTable(ViewTarget::Tags, context);
+    auto tags_table_metadata = tags_table->getInMemoryMetadataPtr(context, false);
+    const auto tags_series_index = tryGetTagsSeriesIndex(tags_table, tags_table_metadata);
 
     auto modified_context = Context::createCopy(context);
     ContextPtr interpreter_context = modified_context;
@@ -1418,7 +1567,7 @@ void StorageTimeSeriesSelector::readImpl(
     /// the set is used by the primary-key index analysis too, which is cheap with the few rows of such a table, and the set selects
     /// the granules of the selected series only, while the probe would cost a query per selector.
     ASTPtr whole_metric_id_range_condition;
-    if (!time_series_settings->hasBucketedSamples())
+    if (!time_series_settings->hasBucketedSamples() && !tags_series_index)
     {
         whole_metric_id_range_condition = tryMakeWholeMetricIDRangeConditions(
             metric_id_ranges,
@@ -1435,9 +1584,19 @@ void StorageTimeSeriesSelector::readImpl(
             log);
     }
 
-    ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
-        tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
-        config.table_timestamp_type);
+    ASTPtr select_query_from_tags_table;
+    if (tags_series_index)
+    {
+        select_query_from_tags_table = makeSelectIDsQueryWithSeriesIndex(
+            *tags_series_index, tags_table, matchers, time_ranges_table_id, time_range_to_filter_ids, config.table_timestamp_type,
+            context, log);
+    }
+    else
+    {
+        select_query_from_tags_table = makeSelectQueryFromTagsTable(
+            tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
+            config.table_timestamp_type);
+    }
 
     if (whole_metric_id_range_condition)
     {

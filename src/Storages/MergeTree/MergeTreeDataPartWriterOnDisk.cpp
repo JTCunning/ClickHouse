@@ -6,6 +6,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeIndexGranularity.h>
 #include <Storages/MergeTree/MergeTreeIndexText.h>
+#include <Storages/MergeTree/MergeTreeIndexTimeSeries.h>
 #include <Storages/MergeTree/MergeTreeIndicesSerialization.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/MergeTree/ParallelSyncFiles.h>
@@ -195,8 +196,10 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
 
         /// Full-text indices are not supported and never packed: their merge output goes
         /// through MergeTextIndexesTask which writes standalone files.
+        /// The files of an index of type `time_series` are read at arbitrary positions.
         const bool packs_this_index = packing_enabled
-            && dynamic_cast<const MergeTreeIndexText *>(skip_index.get()) == nullptr;
+            && dynamic_cast<const MergeTreeIndexText *>(skip_index.get()) == nullptr
+            && dynamic_cast<const MergeTreeIndexTimeSeries *>(skip_index.get()) == nullptr;
 
         auto & index_streams = skip_indices_streams.emplace_back();
 

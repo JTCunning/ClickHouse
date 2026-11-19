@@ -466,6 +466,9 @@ void ginIndexValidator(const IndexDescription & index, bool attach, const MergeT
 MergeTreeIndexPtr textIndexCreator(StorageMetadataPtr metadata_snapshot, const IndexDescription & index, const MergeTreeSettings & settings);
 void textIndexValidator(const IndexDescription & index, bool attach, const MergeTreeSettings & settings);
 
+MergeTreeIndexPtr timeSeriesIndexCreator(StorageMetadataPtr metadata_snapshot, const IndexDescription & index, const MergeTreeSettings & settings);
+void timeSeriesIndexValidator(const IndexDescription & index, bool attach, const MergeTreeSettings & settings);
+
 String getIndexFileName(const String & index_name, bool escape_filename);
 
 /// Check if an index substream file exists for the part. Returns true if the file is listed
