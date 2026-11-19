@@ -71,6 +71,10 @@ struct TimeSeriesSettings
     /// they are stored in that table but not aggregated.
     [[nodiscard]] bool hasMinTimeAndMaxTimeInTagsSortingKey() const;
 
+    /// Whether the "tags" table stores the column `heartbeat` and the table has no "time ranges" target
+    /// (tables of version MIN_WITH_TAGS_HEARTBEAT or later, see TimeSeriesVersion.h).
+    [[nodiscard]] bool hasTagsHeartbeat() const;
+
 private:
     std::unique_ptr<TimeSeriesSettingsImpl> impl;
 };

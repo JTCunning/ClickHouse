@@ -16,8 +16,8 @@ $CLICKHOUSE_CLIENT -q "
     DROP TABLE IF EXISTS ts_v12;
     DROP TABLE IF EXISTS ts_v12_no_ranges;
     CREATE TABLE ts_v11 ENGINE = TimeSeries SETTINGS version = 11;
-    CREATE TABLE ts_v12 ENGINE = TimeSeries;
-    CREATE TABLE ts_v12_no_ranges ENGINE = TimeSeries SETTINGS store_time_ranges = 0;
+    CREATE TABLE ts_v12 ENGINE = TimeSeries SETTINGS version = 12;
+    CREATE TABLE ts_v12_no_ranges ENGINE = TimeSeries SETTINGS version = 12, store_time_ranges = 0;
 "
 
 echo '-- the index of the tags table'

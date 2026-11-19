@@ -47,6 +47,7 @@ namespace ProfileEvents
 {
     extern const Event TimeSeriesIndexLookupMicroseconds;
     extern const Event TimeSeriesIndexLookupParts;
+    extern const Event TimeSeriesIndexLookupRowsPrunedByHeartbeat;
     extern const Event TimeSeriesIndexLookupSeries;
 }
 
@@ -69,7 +70,7 @@ namespace
 
 using SubstreamType = MergeTreeIndexSubstream::Type;
 
-constexpr UInt64 FORMAT_VERSION = 1;
+constexpr UInt64 FORMAT_VERSION = 2;
 
 /// The number of values in a block of a dictionary. A value is found by its number without a search.
 constexpr size_t DICTIONARY_BLOCK_SIZE = 128;
@@ -152,8 +153,9 @@ struct TimeSeriesIndexBuildState
         UInt64 num_rows = 0;
     };
 
-    explicit TimeSeriesIndexBuildState(size_t id_width_)
+    TimeSeriesIndexBuildState(size_t id_width_, bool has_heartbeat_)
         : id_width(id_width_)
+        , has_heartbeat(has_heartbeat_)
     {
     }
 
@@ -201,6 +203,9 @@ struct TimeSeriesIndexBuildState
     /// The identifiers of all rows one after another, `id_width` bytes each.
     size_t id_width;
     PODArray<char> id_bytes;
+    /// The heartbeats of all rows if the index has a column with heartbeats.
+    bool has_heartbeat;
+    PODArray<Int64> heartbeats;
     Arena arena;
 
     VectorWithMemoryTracking<std::unique_ptr<Label>> labels;
@@ -377,7 +382,7 @@ void writeTimeSeriesIndex(const TimeSeriesIndexBuildState & state, MergeTreeInde
         std::sort(positions.begin(), positions.end(), [&](UInt32 left, UInt32 right) { return label_number[label_set[left]] < label_number[label_set[right]]; });
     }
 
-    /// A block of series: the identifiers of its rows, the end of the record of each row, and the records.
+    /// A block of series: the identifiers of its rows, their heartbeats if any, the end of the record of each row, and the records.
     /// A record is the number of the label set and the numbers of the values of its labels.
     VectorWithMemoryTracking<MarkInCompressedFile> series_block_marks;
     auto & series_out = series_stream.compressed_hashing;
@@ -391,6 +396,12 @@ void writeTimeSeriesIndex(const TimeSeriesIndexBuildState & state, MergeTreeInde
             series_block_marks.push_back(startCompressedBlockIfNeeded(series_stream, SERIES_COMPRESS_BLOCK_SIZE));
 
             series_out.write(state.id_bytes.data() + block_start * state.id_width, (block_end - block_start) * state.id_width);
+
+            if (state.has_heartbeat)
+            {
+                for (size_t row = block_start; row != block_end; ++row)
+                    writeBinaryLittleEndian(state.heartbeats[row], series_out);
+            }
 
             records.clear();
             record_ends.clear();
@@ -419,6 +430,7 @@ void writeTimeSeriesIndex(const TimeSeriesIndexBuildState & state, MergeTreeInde
     writeVarUInt(FORMAT_VERSION, header_out);
     writeVarUInt(num_rows, header_out);
     writeVarUInt(state.id_width, header_out);
+    writeVarUInt(state.has_heartbeat ? 1 : 0, header_out);
 
     writeVarUInt(num_labels, header_out);
     for (size_t number = 0; number != num_labels; ++number)
@@ -483,7 +495,7 @@ struct MergeTreeIndexAggregatorTimeSeries final : public IMergeTreeIndexAggregat
 {
     explicit MergeTreeIndexAggregatorTimeSeries(const MergeTreeIndexTimeSeries & index_)
         : index(index_)
-        , state(std::make_shared<TimeSeriesIndexBuildState>(index.id_width))
+        , state(std::make_shared<TimeSeriesIndexBuildState>(index.id_width, index.heartbeat_column_position.has_value()))
     {
     }
 
@@ -492,7 +504,7 @@ struct MergeTreeIndexAggregatorTimeSeries final : public IMergeTreeIndexAggregat
     MergeTreeIndexGranulePtr getGranuleAndReset() override
     {
         auto granule = std::make_shared<MergeTreeIndexGranuleTimeSeries>(std::move(state));
-        state = std::make_shared<TimeSeriesIndexBuildState>(index.id_width);
+        state = std::make_shared<TimeSeriesIndexBuildState>(index.id_width, index.heartbeat_column_position.has_value());
         return granule;
     }
 
@@ -518,6 +530,14 @@ struct MergeTreeIndexAggregatorTimeSeries final : public IMergeTreeIndexAggregat
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED,
                     "Index {} of type `time_series` requires identifiers with a binary representation of a fixed size, type {} does not have it",
                     index.index.name, index.id_type->getName());
+        }
+
+        if (index.heartbeat_column_position)
+        {
+            auto heartbeat_column
+                = recursiveRemoveSparse(block.getByName(column_names[*index.heartbeat_column_position]).column->convertToFullColumnIfConst());
+            for (size_t row = *pos; row != *pos + rows_read; ++row)
+                state->heartbeats.push_back(heartbeat_column->getInt(row));
         }
 
         struct Source
@@ -838,13 +858,15 @@ public:
     }
 
     /// Reads the rows of `rows` in their order and calls `callback(id_data, label_set, value_numbers)`.
+    /// With `min_heartbeat` the rows with a heartbeat not greater than it are skipped and counted in `num_pruned_rows`.
     template <typename Callback>
-    void readSeries(const roaring::Roaring & rows, Callback && callback)
+    void readSeries(const roaring::Roaring & rows, std::optional<Int64> min_heartbeat, size_t & num_pruned_rows, Callback && callback)
     {
         auto & stream = getStream(SubstreamType::TimeSeriesIndexSeries);
         const size_t id_width = index.id_width;
         VectorWithMemoryTracking<UInt64> value_numbers;
         PODArray<char> ids;
+        PODArray<Int64> heartbeats;
         PODArray<UInt32> record_ends;
         PODArray<char> records;
         VectorWithMemoryTracking<UInt32> rows_in_block_to_read;
@@ -870,6 +892,12 @@ public:
             ids.resize(rows_in_block * id_width);
             in.readStrict(ids.data(), ids.size());
 
+            if (has_heartbeat)
+            {
+                heartbeats.resize(rows_in_block);
+                in.readStrict(reinterpret_cast<char *>(heartbeats.data()), rows_in_block * sizeof(Int64));
+            }
+
             record_ends.resize(rows_in_block);
             in.readStrict(reinterpret_cast<char *>(record_ends.data()), rows_in_block * sizeof(UInt32));
 
@@ -879,6 +907,12 @@ public:
 
             for (UInt32 row : rows_in_block_to_read)
             {
+                if (has_heartbeat && min_heartbeat && (heartbeats[row] <= *min_heartbeat))
+                {
+                    ++num_pruned_rows;
+                    continue;
+                }
+
                 const size_t record_begin = row ? record_ends[row - 1] : 0;
                 const size_t record_end = record_ends[row];
                 if (record_begin > record_end || record_end > records_size)
@@ -919,6 +953,13 @@ private:
         if (stored_id_width != index.id_width)
             throw Exception(ErrorCodes::CORRUPTED_DATA, "Index {} of part {} has identifiers of {} bytes, expected {} bytes",
                 index.index.name, part->name, stored_id_width, index.id_width);
+
+        UInt64 stored_has_heartbeat = 0;
+        readVarUInt(stored_has_heartbeat, in);
+        has_heartbeat = (stored_has_heartbeat != 0);
+        if (has_heartbeat != index.heartbeat_column_position.has_value())
+            throw Exception(ErrorCodes::CORRUPTED_DATA, "Index {} of part {} {} heartbeats, and the definition of the index {}",
+                index.index.name, part->name, has_heartbeat ? "has" : "has no", has_heartbeat ? "has no column for them" : "has a column for them");
 
         UInt64 num_labels = 0;
         readVarUInt(num_labels, in);
@@ -1117,6 +1158,7 @@ private:
     MergeTreeReaderSettings reader_settings;
 
     UInt64 num_rows = 0;
+    bool has_heartbeat = false;
     VectorWithMemoryTracking<Label> labels;
     VectorWithMemoryTracking<VectorWithMemoryTracking<UInt32>> label_sets;
     VectorWithMemoryTracking<MarkInCompressedFile> series_block_marks;
@@ -1256,6 +1298,8 @@ void lookupInPart(
     const MergeTreeData::DataPartPtr & part,
     const PreparedMatchers & matchers,
     const MergeTreeReaderSettings & reader_settings,
+    std::optional<Int64> min_heartbeat,
+    size_t & num_pruned_rows,
     HashSet<UInt128, UInt128TrivialHash> * seen_ids,
     TimeSeriesIndexLookupResult & result)
 {
@@ -1300,7 +1344,7 @@ void lookupInPart(
     auto id_serialization = index.id_type->getDefaultSerialization();
     FormatSettings format_settings;
 
-    reader.readSeries(rows, [&](const char * id_data, UInt64 label_set_number, const VectorWithMemoryTracking<UInt64> & value_numbers)
+    reader.readSeries(rows, min_heartbeat, num_pruned_rows, [&](const char * id_data, UInt64 label_set_number, const VectorWithMemoryTracking<UInt64> & value_numbers)
     {
         for (auto & check : checks)
         {
@@ -1349,7 +1393,7 @@ void lookupInPart(
 MergeTreeIndexTimeSeries::MergeTreeIndexTimeSeries(StorageMetadataPtr metadata_snapshot_, const IndexDescription & index_)
     : IMergeTreeIndex(std::move(metadata_snapshot_), index_)
     , id_type(index_.data_types.at(0))
-    , label_sources(parseLabelSources(index_))
+    , label_sources(parseLabelSources(index_, &heartbeat_column_position))
 {
     auto default_id = id_type->createColumn();
     default_id->insertDefault();
@@ -1358,8 +1402,10 @@ MergeTreeIndexTimeSeries::MergeTreeIndexTimeSeries(StorageMetadataPtr metadata_s
     id_width = out.count();
 }
 
-MergeTreeIndexTimeSeries::LabelSources MergeTreeIndexTimeSeries::parseLabelSources(const IndexDescription & description)
+MergeTreeIndexTimeSeries::LabelSources MergeTreeIndexTimeSeries::parseLabelSources(
+    const IndexDescription & description, std::optional<size_t> * heartbeat_column_position)
 {
+    bool has_heartbeat = false;
     std::unordered_map<String, String> label_name_by_column; // STYLE_CHECK_ALLOW_STD_CONTAINERS
     if (description.arguments)
     {
@@ -1392,6 +1438,21 @@ MergeTreeIndexTimeSeries::LabelSources MergeTreeIndexTimeSeries::parseLabelSourc
     {
         const auto & column_name = description.column_names[i];
         const auto type = removeLowCardinality(description.data_types[i]);
+
+        if (isDateTime64(type) || isDateTime(type) || isUInt32(type))
+        {
+            if (has_heartbeat)
+                throw Exception(ErrorCodes::INCORRECT_QUERY,
+                    "Index {} of type `time_series` cannot have two columns with heartbeats, got {}", description.name, column_name);
+            if (label_name_by_column.contains(column_name))
+                throw Exception(ErrorCodes::INCORRECT_QUERY,
+                    "Index {} of type `time_series` cannot name a label for column {} with heartbeats", description.name, column_name);
+            has_heartbeat = true;
+            if (heartbeat_column_position)
+                *heartbeat_column_position = i;
+            continue;
+        }
+
         auto & source = sources.emplace_back();
         source.column_position = i;
 
@@ -1416,10 +1477,14 @@ MergeTreeIndexTimeSeries::LabelSources MergeTreeIndexTimeSeries::parseLabelSourc
         else
         {
             throw Exception(ErrorCodes::INCORRECT_QUERY,
-                "Column {} of index {} of type `time_series` must have type `String` or `Map(String, String)`, got {}",
+                "Column {} of index {} of type `time_series` must have type `String`, `Map(String, String)`, `DateTime`, `DateTime64`, or `UInt32`, got {}",
                 column_name, description.name, description.data_types[i]->getName());
         }
     }
+
+    if (sources.empty())
+        throw Exception(ErrorCodes::INCORRECT_QUERY,
+            "Index {} of type `time_series` must have a column with the labels of time series", description.name);
 
     if (!label_name_by_column.empty())
         throw Exception(ErrorCodes::INCORRECT_QUERY,
@@ -1464,7 +1529,10 @@ MergeTreeIndexConditionPtr MergeTreeIndexTimeSeries::createIndexCondition(const 
 }
 
 TimeSeriesIndexLookupResult MergeTreeIndexTimeSeries::lookup(
-    const MergeTreeData::DataPartsVector & parts, const TimeSeriesIndexMatchers & matchers, const ContextPtr & context) const
+    const MergeTreeData::DataPartsVector & parts,
+    const TimeSeriesIndexMatchers & matchers,
+    std::optional<Int64> min_heartbeat,
+    const ContextPtr & context) const
 {
     Stopwatch watch;
 
@@ -1485,13 +1553,15 @@ TimeSeriesIndexLookupResult MergeTreeIndexTimeSeries::lookup(
     /// The same time series can be in several parts until they are merged.
     HashSet<UInt128, UInt128TrivialHash> seen_ids;
 
+    size_t num_pruned_rows = 0;
     for (const auto & part : parts)
     {
         if (part->rows_count)
-            lookupInPart(*this, part, prepared_matchers, reader_settings, (num_parts > 1) ? &seen_ids : nullptr, result);
+            lookupInPart(*this, part, prepared_matchers, reader_settings, min_heartbeat, num_pruned_rows, (num_parts > 1) ? &seen_ids : nullptr, result);
     }
 
     ProfileEvents::increment(ProfileEvents::TimeSeriesIndexLookupParts, num_parts);
+    ProfileEvents::increment(ProfileEvents::TimeSeriesIndexLookupRowsPrunedByHeartbeat, num_pruned_rows);
     ProfileEvents::increment(ProfileEvents::TimeSeriesIndexLookupSeries, result.labels.size());
     ProfileEvents::increment(ProfileEvents::TimeSeriesIndexLookupMicroseconds, watch.elapsedMicroseconds());
     return result;

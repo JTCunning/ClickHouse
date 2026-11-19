@@ -86,6 +86,10 @@ bool isTimeSeriesRecentSamplesTargetEnabled(const ASTCreateQuery & query, bool f
 
 bool isTimeSeriesTimeRangesTargetEnabled(const ASTCreateQuery & query, bool for_restore)
 {
+    /// A table with heartbeats in the "tags" table has no time ranges table.
+    if (getTimeSeriesVersion(query) >= TimeSeriesVersion::MIN_WITH_TAGS_HEARTBEAT)
+        return false;
+
     if (const auto * value = tryGetSettingValue(query, "store_time_ranges"))
         return fieldToNumberSettingValue<bool>(*value);
 

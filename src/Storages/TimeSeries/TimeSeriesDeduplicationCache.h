@@ -10,6 +10,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -44,7 +45,22 @@ public:
     /// apart from the cache until the insert is finished, because a failed insert must not make the next inserts skip its rows.
     /// The map holds at most as many rows as the cache. When a block overflows it, the keys of the block's last written rows are
     /// forgotten and removed from the cache too, so that an older row of such a key isn't skipped when it's written again.
-    using PendingRows = std::unordered_map<KeyHash, RowHash, UInt128TrivialHash>;
+    struct PendingRow
+    {
+        RowHash row_hash{};
+        /// The latest heartbeat written for the key in this insert, see `Heartbeat`.
+        Int64 heartbeat = 0;
+    };
+    using PendingRows = std::unordered_map<KeyHash, PendingRow, UInt128TrivialHash>;
+
+    /// A column with a timestamp which changes with every insert (the `heartbeat` column of the tags table).
+    /// The column is not a part of the values of a row. A row with the same values is written again when its heartbeat
+    /// is `step` or more later than the heartbeat written last, so the written heartbeat of a key is never `step` behind.
+    struct Heartbeat
+    {
+        size_t column_index = 0;
+        Int64 step = 0;
+    };
 
     using TimePoint = std::chrono::steady_clock::time_point;
 
@@ -65,7 +81,12 @@ public:
     /// only if all its values are equal. The other rows are added to `pending_rows`, pass them to `markRowsAsWritten`
     /// after they are written.
     /// The rows with `filter[row] == 0` (if `filter` is passed) are removed too, without being looked up.
-    Block filterOutWrittenRows(const Block & block, size_t key_column_index, PendingRows & pending_rows, PaddedPODArray<UInt8> filter = {});
+    Block filterOutWrittenRows(
+        const Block & block,
+        size_t key_column_index,
+        PendingRows & pending_rows,
+        PaddedPODArray<UInt8> filter = {},
+        const std::optional<Heartbeat> & heartbeat = {});
 
     /// Moves the pending rows to the cache, so that `filterOutWrittenRows` skips them next time, and leaves `pending_rows` empty.
     /// Called after the pending rows have been written to the table.
@@ -77,6 +98,7 @@ private:
     {
         RowHash row_hash{};
         TimePoint expiration_time{};
+        Int64 heartbeat = 0;
     };
 
     struct WrittenRowWeight
@@ -97,6 +119,7 @@ private:
         KeyHash key_hash;
         RowHash row_hash;
         size_t row_in_filter;
+        Int64 heartbeat;
     };
     using HashedRows = std::vector<HashedRow>;
 
@@ -106,22 +129,30 @@ private:
     /// Resets `filter` for the rows of `block` already written or pending, and adds the other rows passing the filter
     /// to `pending_rows`, which is then trimmed to the capacity of the cache. Returns the number of rows passing the filter.
     size_t excludeWrittenRowsFromFilter(
-        const Block & block, size_t key_column_index, PaddedPODArray<UInt8> & filter, PendingRows & pending_rows);
+        const Block & block,
+        size_t key_column_index,
+        PaddedPODArray<UInt8> & filter,
+        PendingRows & pending_rows,
+        const std::optional<Heartbeat> & heartbeat);
 
     /// Calculates the hashes of the rows of `block` passing `filter`.
-    static HashedRows hashRows(const Block & block, size_t key_column_index, const PaddedPODArray<UInt8> & filter);
+    static HashedRows hashRows(
+        const Block & block, size_t key_column_index, const PaddedPODArray<UInt8> & filter, const std::optional<Heartbeat> & heartbeat);
 
     /// Resets `filter` for the duplicate rows and returns the number of such duplicate rows.
     /// A row is considered a duplicate in one of the following cases:
     /// - its key is already pending in this insert and the row is the same as the pending row;
     /// - its key isn't pending and the row is the same as the row written by an earlier insert (the entry in `written_rows`),
     ///   and that entry hasn't expired.
+    /// With `heartbeat_step` a row is a duplicate only if its heartbeat is also less than `heartbeat_step` later than
+    /// the heartbeat of the pending row or of the written row.
     /// Each other row becomes the pending row.
     size_t excludeDuplicateRowsFromFilter(
         const HashedRows & hashed_rows,
         const WrittenRows & written_rows,
         PaddedPODArray<UInt8> & filter,
-        PendingRows & pending_rows) const;
+        PendingRows & pending_rows,
+        std::optional<Int64> heartbeat_step) const;
 
     /// Trims `pending_rows` to the capacity of the cache, starting from the keys of the last written rows of the block
     /// (the rows passing `filter`). The trimmed keys are removed from the cache too, see `PendingRows`.

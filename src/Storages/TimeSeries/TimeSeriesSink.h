@@ -109,6 +109,10 @@ private:
     Decimal64 samples_bucket_step{0};
     std::optional<Decimal64> recent_samples_bucket_step;
 
+    /// The period of the `heartbeat` column of the tags table with the scale of `timestamp_type`,
+    /// std::nullopt means the tags table has no such column.
+    std::optional<Int64> tags_heartbeat_step;
+
     std::unique_ptr<TargetPipeline> tags_pipeline;
     std::unique_ptr<TargetPipeline> time_ranges_pipeline;
     std::unique_ptr<TargetPipeline> samples_pipeline;

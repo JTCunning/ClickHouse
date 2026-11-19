@@ -39,6 +39,9 @@ struct TimeSeriesColumnNames
     static constexpr const char * MinTime = "min_time";
     static constexpr const char * MaxTime = "max_time";
 
+    /// The "tags" table of a table with heartbeats contains a timestamp of a sample of the time series written with the row.
+    static constexpr const char * Heartbeat = "heartbeat";
+
     /// The "metric families" table contains general information (metadata) about metric families:
     static constexpr const char * MetricFamily = "metric_family";
     static constexpr const char * Type = "type";

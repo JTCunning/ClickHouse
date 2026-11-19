@@ -1,0 +1,192 @@
+-- the inner tables
+ts_v11	['metricfamilies','recentsamples','samples','tags','timeranges']
+ts_v13	['metricfamilies','recentsamples','samples','tags']
+ts_v13_sql	['metricfamilies','recentsamples','samples','tags']
+-- the tags table
+id	Tuple(UInt64, LowCardinality(UUID))
+metric_name	LowCardinality(String)
+tags	Map(LowCardinality(String), String)
+heartbeat	DateTime64(3)
+ReplacingMergeTree	ReplacingMergeTree(heartbeat)
+ts_v13	series_idx	id, tags, metric_name, heartbeat
+ts_v13	tags_idx	tags
+ts_v13_sql	tags_idx	tags
+-- settings which a table with heartbeats rejects
+-- heartbeats of the unmerged rows, with the deduplication cache
+down	a	[5000]
+up	a	[1000]
+up	b	[1000,1700,5000]
+up	c	[5000]
+up	d	[5000]
+-- heartbeats of the unmerged rows, without the deduplication cache
+down	a	[5000]
+up	a	[1000]
+up	b	[1000,1300,1599,1700,5000]
+up	c	[5000]
+up	d	[1000,5000]
+-- queries, several parts
+up	1100	3	1	1
+up	1400	1	1	1
+up	1650	1	1	1
+up	1800	1	1	1
+up	2300	0	1	1
+up	5100	3	1	1
+up	9000	0	1	1
+up	0, 10000	(6,11)	1	1
+up	1590, 1650	(1,1)	1	1
+up	1601, 1650	(0,0)	1	1
+up	2301, 4989	(0,0)	1	1
+up	4000, 6000	(3,5)	1	1
+up	6000, 7000	(0,0)	1	1
+up{instance=~"a|b"}	1100	2	1	1
+up{instance=~"a|b"}	1400	1	1	1
+up{instance=~"a|b"}	1650	1	1	1
+up{instance=~"a|b"}	1800	1	1	1
+up{instance=~"a|b"}	2300	0	1	1
+up{instance=~"a|b"}	5100	1	1	1
+up{instance=~"a|b"}	9000	0	1	1
+up{instance=~"a|b"}	0, 10000	(3,8)	1	1
+up{instance=~"a|b"}	1590, 1650	(1,1)	1	1
+up{instance=~"a|b"}	1601, 1650	(0,0)	1	1
+up{instance=~"a|b"}	2301, 4989	(0,0)	1	1
+up{instance=~"a|b"}	4000, 6000	(1,3)	1	1
+up{instance=~"a|b"}	6000, 7000	(0,0)	1	1
+up{instance!="b"}	1100	2	1	1
+up{instance!="b"}	1400	0	1	1
+up{instance!="b"}	1650	0	1	1
+up{instance!="b"}	1800	0	1	1
+up{instance!="b"}	2300	0	1	1
+up{instance!="b"}	5100	2	1	1
+up{instance!="b"}	9000	0	1	1
+up{instance!="b"}	0, 10000	(4,4)	1	1
+up{instance!="b"}	1590, 1650	(0,0)	1	1
+up{instance!="b"}	1601, 1650	(0,0)	1	1
+up{instance!="b"}	2301, 4989	(0,0)	1	1
+up{instance!="b"}	4000, 6000	(2,2)	1	1
+up{instance!="b"}	6000, 7000	(0,0)	1	1
+{instance="a"}	1100	1	1	1
+{instance="a"}	1400	0	1	1
+{instance="a"}	1650	0	1	1
+{instance="a"}	1800	0	1	1
+{instance="a"}	2300	0	1	1
+{instance="a"}	5100	1	1	1
+{instance="a"}	9000	0	1	1
+{instance="a"}	0, 10000	(2,2)	1	1
+{instance="a"}	1590, 1650	(0,0)	1	1
+{instance="a"}	1601, 1650	(0,0)	1	1
+{instance="a"}	2301, 4989	(0,0)	1	1
+{instance="a"}	4000, 6000	(1,1)	1	1
+{instance="a"}	6000, 7000	(0,0)	1	1
+{__name__=~".+"}	1100	3	1	1
+{__name__=~".+"}	1400	1	1	1
+{__name__=~".+"}	1650	1	1	1
+{__name__=~".+"}	1800	1	1	1
+{__name__=~".+"}	2300	0	1	1
+{__name__=~".+"}	5100	4	1	1
+{__name__=~".+"}	9000	0	1	1
+{__name__=~".+"}	0, 10000	(7,12)	1	1
+{__name__=~".+"}	1590, 1650	(1,1)	1	1
+{__name__=~".+"}	1601, 1650	(0,0)	1	1
+{__name__=~".+"}	2301, 4989	(0,0)	1	1
+{__name__=~".+"}	4000, 6000	(4,6)	1	1
+{__name__=~".+"}	6000, 7000	(0,0)	1	1
+[('instance','a')]	1
+[('instance','b')]	4
+[('instance','d')]	1
+[('instance','a')]	1
+[('instance','b')]	4
+[('instance','d')]	1
+-- series found and rows skipped by the heartbeat, several parts
+3
+4	0
+3
+3	3
+-- heartbeats of the merged rows, with the deduplication cache
+down	a	[5000]
+up	a	[1000]
+up	b	[5000]
+up	c	[5000]
+up	d	[5000]
+-- heartbeats of the merged rows, without the deduplication cache
+down	a	[5000]
+up	a	[1000]
+up	b	[5000]
+up	c	[5000]
+up	d	[5000]
+-- queries, one part
+up	1100	3	1	1
+up	1400	1	1	1
+up	1650	1	1	1
+up	1800	1	1	1
+up	2300	0	1	1
+up	5100	3	1	1
+up	9000	0	1	1
+up	0, 10000	(6,11)	1	1
+up	1590, 1650	(1,1)	1	1
+up	1601, 1650	(0,0)	1	1
+up	2301, 4989	(0,0)	1	1
+up	4000, 6000	(3,5)	1	1
+up	6000, 7000	(0,0)	1	1
+up{instance=~"a|b"}	1100	2	1	1
+up{instance=~"a|b"}	1400	1	1	1
+up{instance=~"a|b"}	1650	1	1	1
+up{instance=~"a|b"}	1800	1	1	1
+up{instance=~"a|b"}	2300	0	1	1
+up{instance=~"a|b"}	5100	1	1	1
+up{instance=~"a|b"}	9000	0	1	1
+up{instance=~"a|b"}	0, 10000	(3,8)	1	1
+up{instance=~"a|b"}	1590, 1650	(1,1)	1	1
+up{instance=~"a|b"}	1601, 1650	(0,0)	1	1
+up{instance=~"a|b"}	2301, 4989	(0,0)	1	1
+up{instance=~"a|b"}	4000, 6000	(1,3)	1	1
+up{instance=~"a|b"}	6000, 7000	(0,0)	1	1
+up{instance!="b"}	1100	2	1	1
+up{instance!="b"}	1400	0	1	1
+up{instance!="b"}	1650	0	1	1
+up{instance!="b"}	1800	0	1	1
+up{instance!="b"}	2300	0	1	1
+up{instance!="b"}	5100	2	1	1
+up{instance!="b"}	9000	0	1	1
+up{instance!="b"}	0, 10000	(4,4)	1	1
+up{instance!="b"}	1590, 1650	(0,0)	1	1
+up{instance!="b"}	1601, 1650	(0,0)	1	1
+up{instance!="b"}	2301, 4989	(0,0)	1	1
+up{instance!="b"}	4000, 6000	(2,2)	1	1
+up{instance!="b"}	6000, 7000	(0,0)	1	1
+{instance="a"}	1100	1	1	1
+{instance="a"}	1400	0	1	1
+{instance="a"}	1650	0	1	1
+{instance="a"}	1800	0	1	1
+{instance="a"}	2300	0	1	1
+{instance="a"}	5100	1	1	1
+{instance="a"}	9000	0	1	1
+{instance="a"}	0, 10000	(2,2)	1	1
+{instance="a"}	1590, 1650	(0,0)	1	1
+{instance="a"}	1601, 1650	(0,0)	1	1
+{instance="a"}	2301, 4989	(0,0)	1	1
+{instance="a"}	4000, 6000	(1,1)	1	1
+{instance="a"}	6000, 7000	(0,0)	1	1
+{__name__=~".+"}	1100	3	1	1
+{__name__=~".+"}	1400	1	1	1
+{__name__=~".+"}	1650	1	1	1
+{__name__=~".+"}	1800	1	1	1
+{__name__=~".+"}	2300	0	1	1
+{__name__=~".+"}	5100	4	1	1
+{__name__=~".+"}	9000	0	1	1
+{__name__=~".+"}	0, 10000	(7,12)	1	1
+{__name__=~".+"}	1590, 1650	(1,1)	1	1
+{__name__=~".+"}	1601, 1650	(0,0)	1	1
+{__name__=~".+"}	2301, 4989	(0,0)	1	1
+{__name__=~".+"}	4000, 6000	(4,6)	1	1
+{__name__=~".+"}	6000, 7000	(0,0)	1	1
+[('instance','a')]	1
+[('instance','b')]	4
+[('instance','d')]	1
+[('instance','a')]	1
+[('instance','b')]	4
+[('instance','d')]	1
+-- series found and rows skipped by the heartbeat, one part
+3
+4	0
+3
+3	1

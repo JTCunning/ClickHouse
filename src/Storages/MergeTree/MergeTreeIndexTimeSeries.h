@@ -48,6 +48,8 @@ struct TimeSeriesIndexLookupResult
 ///
 /// The first column of the index is the identifier of a time series. A column of type `Map` gives one label per key,
 /// and each other column gives one label, named by an argument of the index or by the column.
+/// A column of type `DateTime`, `DateTime64`, or `UInt32` is not a label, it is the heartbeat of a time series: a lookup can skip
+/// the rows with an old heartbeat.
 /// All the labels are equal for the index: each of them has a sorted dictionary of values with a posting list per value.
 ///
 /// The index has one granule per part and four files:
@@ -74,7 +76,8 @@ struct MergeTreeIndexTimeSeries final : public IMergeTreeIndex
 
     MergeTreeIndexTimeSeries(StorageMetadataPtr metadata_snapshot_, const IndexDescription & index_);
 
-    static LabelSources parseLabelSources(const IndexDescription & description);
+    /// `heartbeat_column_position` receives the position of the column with heartbeats in the index, if there is such a column.
+    static LabelSources parseLabelSources(const IndexDescription & description, std::optional<size_t> * heartbeat_column_position = nullptr);
 
     /// Whether the index can be built for a column with identifiers and columns with labels of these types.
     static bool supportsColumnTypes(const DataTypePtr & id_type, const DataTypes & label_types);
@@ -88,12 +91,18 @@ struct MergeTreeIndexTimeSeries final : public IMergeTreeIndex
     MergeTreeIndexConditionPtr createIndexCondition(const ActionsDAG::Node * predicate, ContextPtr context) const override;
 
     /// Finds the time series matching all `matchers` in `parts`. A time series stored in several parts is returned once.
+    /// With `min_heartbeat` the rows with a heartbeat not greater than it are skipped (if the index has a column with heartbeats).
     [[nodiscard]] TimeSeriesIndexLookupResult lookup(
-        const MergeTreeData::DataPartsVector & parts, const TimeSeriesIndexMatchers & matchers, const ContextPtr & context) const;
+        const MergeTreeData::DataPartsVector & parts,
+        const TimeSeriesIndexMatchers & matchers,
+        std::optional<Int64> min_heartbeat,
+        const ContextPtr & context) const;
 
     DataTypePtr id_type;
     /// The size of the binary representation of an identifier.
     size_t id_width = 0;
+    /// The position of the column with heartbeats in the index.
+    std::optional<size_t> heartbeat_column_position;
     LabelSources label_sources;
 };
 

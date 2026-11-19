@@ -53,6 +53,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsASTFunction id_generator;
     extern const TimeSeriesSettingsUInt64 recent_samples_bucket_step_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsUInt64 tags_heartbeat_seconds;
     extern const TimeSeriesSettingsMap tags_to_columns;
 }
 
@@ -275,6 +276,43 @@ namespace
             auto [min_time, max_time] = findMinMax(ts_timestamps, ts_start, ts_end);
             out_min_time_column.insert(min_time);
             out_max_time_column.insert(max_time);
+        }
+    }
+
+    /// Fills the column `heartbeat` for the "tags" table with the latest timestamp of each time series.
+    /// A time series without samples gets the default value.
+    void fillHeartbeatColumn(
+        const PaddedPODArray<UInt8> & filter,
+        const ColumnArray::Offsets & ts_offsets,
+        const IColumn & ts_timestamps,
+        IColumn & out_heartbeat_column)
+    {
+        for (size_t i = 0; i < filter.size(); ++i)
+        {
+            if (!filter[i])
+                continue;
+
+            size_t ts_start = (i == 0) ? 0 : ts_offsets[i - 1];
+            size_t ts_end = ts_offsets[i];
+
+            if (ts_start == ts_end)
+            {
+                out_heartbeat_column.insertDefault();
+                continue;
+            }
+
+            size_t latest = ts_start;
+            Int64 latest_timestamp = ts_timestamps.getInt(ts_start);
+            for (size_t j = ts_start + 1; j < ts_end; ++j)
+            {
+                Int64 timestamp = ts_timestamps.getInt(j);
+                if (timestamp > latest_timestamp)
+                {
+                    latest = j;
+                    latest_timestamp = timestamp;
+                }
+            }
+            out_heartbeat_column.insertFrom(ts_timestamps, latest);
         }
     }
 
@@ -948,6 +986,13 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
         tags_header_before_id.insert(ColumnWithTypeAndName{min_max_time_type, TimeSeriesColumnNames::MaxTime});
     }
 
+    if (settings.hasTagsHeartbeat())
+    {
+        tags_header_before_id.insert(ColumnWithTypeAndName{timestamp_type, TimeSeriesColumnNames::Heartbeat});
+        tags_heartbeat_step = static_cast<Int64>(settings[TimeSeriesSetting::tags_heartbeat_seconds].value)
+            * DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*timestamp_type).value_or(0));
+    }
+
     /// Precompute ExpressionActions for calculating the "id" column.
     ColumnDescription id_column_description{TimeSeriesColumnNames::ID, id_type};
     id_column_description.default_desc.kind = ColumnDefaultKind::Default;
@@ -1122,6 +1167,14 @@ Block TimeSeriesSink::makeTagsBlock(
         tags_block.insert(ColumnWithTypeAndName{std::move(max_time_column), min_max_time_type, TimeSeriesColumnNames::MaxTime});
     }
 
+    if (tags_heartbeat_step)
+    {
+        auto heartbeat_column = timestamp_type->createColumn();
+        heartbeat_column->reserve(num_time_series);
+        fillHeartbeatColumn(filter, ts_offsets, ts_timestamps, *heartbeat_column);
+        tags_block.insert(ColumnWithTypeAndName{std::move(heartbeat_column), timestamp_type, TimeSeriesColumnNames::Heartbeat});
+    }
+
     /// Calculate the identifiers with the precomputed expression actions on a copy of the block (the actions add columns
     /// to the block they run on; a Block copy is cheap, it only copies column pointers). The `all_tags` column is used only for that.
     ColumnPtr id_column;
@@ -1191,8 +1244,14 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
 
     /// Step 3. Push the tags block without the time series already written to the "tags" table.
     if (tags_deduplication_cache)
+    {
+        std::optional<TimeSeriesDeduplicationCache::Heartbeat> heartbeat;
+        if (tags_heartbeat_step)
+            heartbeat = TimeSeriesDeduplicationCache::Heartbeat{
+                .column_index = tags_block.getPositionByName(TimeSeriesColumnNames::Heartbeat), .step = *tags_heartbeat_step};
         tags_block = tags_deduplication_cache->filterOutWrittenRows(
-            tags_block, /* key_column_index = */ tags_block.getPositionByName(TimeSeriesColumnNames::ID), pending_tags);
+            tags_block, /* key_column_index = */ tags_block.getPositionByName(TimeSeriesColumnNames::ID), pending_tags, /* filter = */ {}, heartbeat);
+    }
 
     /// Tags are pushed first so that if the samples insert fails,
     /// we don't end up with sample rows referencing IDs that were never written to the tags table.

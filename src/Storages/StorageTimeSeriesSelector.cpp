@@ -82,6 +82,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsUInt64 recent_samples_bucket_step_seconds;
     extern const TimeSeriesSettingsUInt64 recent_samples_ttl_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsUInt64 tags_heartbeat_seconds;
 }
 
 namespace Setting
@@ -185,8 +186,12 @@ struct TableTimeRange
     std::optional<DateTime64> min_time;
     std::optional<DateTime64> max_time;
 
+    /// Set only in a range to filter the identifiers of a table with heartbeats (see `getTimeRangeToFilterIDs`), instead of the bounds above:
+    /// a time series can have samples in the requested range only if it has a heartbeat greater than this one.
+    std::optional<DateTime64> min_heartbeat;
+
     /// Every timestamp of the table is in the range.
-    [[nodiscard]] bool containsAllTimestamps() const { return !min_time && !max_time; }
+    [[nodiscard]] bool containsAllTimestamps() const { return !min_time && !max_time && !min_heartbeat; }
 
     /// No timestamp of the table is in the range.
     [[nodiscard]] bool containsNoTimestamps() const { return min_time && max_time && (*min_time > *max_time); }
@@ -196,7 +201,7 @@ struct TableTimeRange
 };
 
 constexpr TableTimeRange TableTimeRange::ALL_TIMESTAMPS{};
-constexpr TableTimeRange TableTimeRange::NO_TIMESTAMPS{DateTime64{1}, DateTime64{0}};
+constexpr TableTimeRange TableTimeRange::NO_TIMESTAMPS{DateTime64{1}, DateTime64{0}, std::nullopt};
 
 /// Converts a closed time range with the scale `time_scale` to the type of the timestamps in the table: the bounds are rounded
 /// inwards and clipped to the range of the type, which keeps the same samples inside.
@@ -231,11 +236,33 @@ TableTimeRange makeTableTimeRange(
 /// (tables of earlier versions) with the `filter_by_min_time_and_max_time` setting enabled. Otherwise the range with all timestamps:
 /// the identifiers aren't filtered by time, only the samples are filtered by their timestamps.
 /// A `table_time_range` without timestamps is returned as is: no series can have samples in it, whatever the table stores.
+///
+/// A table with heartbeats in the "tags" table gets a range with `min_heartbeat` only. Every sample of a time series is less than
+/// `tags_heartbeat_seconds` later than the latest heartbeat of the series, so a series with a sample at `min_time` or later
+/// has a heartbeat greater than `min_time - tags_heartbeat_seconds`. The heartbeats give no upper bound.
 TableTimeRange getTimeRangeToFilterIDs(
-    const TableTimeRange & table_time_range, const StorageID & time_ranges_table_id, const TimeSeriesSettings & settings)
+    const TableTimeRange & table_time_range,
+    const StorageID & time_ranges_table_id,
+    const TimeSeriesSettings & settings,
+    const DataTypePtr & table_timestamp_type)
 {
     if (table_time_range.containsNoTimestamps() || time_ranges_table_id)
         return table_time_range;
+
+    if (settings.hasTagsHeartbeat())
+    {
+        if (!table_time_range.min_time)
+            return TableTimeRange::ALL_TIMESTAMPS;
+
+        const Int64 step = static_cast<Int64>(settings[TimeSeriesSetting::tags_heartbeat_seconds].value)
+            * DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*table_timestamp_type).value_or(0));
+        if (table_time_range.min_time->value < minRepresentableTime(table_timestamp_type).value + step)
+            return TableTimeRange::ALL_TIMESTAMPS;
+
+        TableTimeRange range;
+        range.min_heartbeat = DateTime64{table_time_range.min_time->value - step};
+        return range;
+    }
 
     if (settings.hasMinTimeAndMaxTimeInTagsTable() && settings[TimeSeriesSetting::filter_by_min_time_and_max_time])
         return table_time_range;
@@ -524,11 +551,21 @@ namespace
     /// intersects the requested one: `max_time >= <requested min_time> AND min_time <= <requested max_time>`.
     /// The conditions hold for the rows of an unmerged aggregating table too: a time series has a sample in the
     /// requested range only if the row written with that sample intersects the range.
+    /// A range with `min_heartbeat` gives the condition `heartbeat > <min_heartbeat>`, which holds for the unmerged rows
+    /// of the tags table the same way: one of the rows of a time series has its latest heartbeat.
     ASTs makeTimeRangeConditions(
         const TableTimeRange & time_range_to_filter_ids,
         const DataTypePtr & table_timestamp_type)
     {
         ASTs conditions;
+
+        if (time_range_to_filter_ids.min_heartbeat)
+        {
+            conditions.push_back(makeASTFunction(
+                "greater",
+                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Heartbeat),
+                timeSeriesTimestampToAST(*time_range_to_filter_ids.min_heartbeat, table_timestamp_type)));
+        }
 
         if (time_range_to_filter_ids.min_time)
         {
@@ -1367,7 +1404,10 @@ namespace
                     series_index.index.name, part->name, tags_table_id.getNameForLogs());
         }
 
-        auto found = series_index.lookup(parts, makeSeriesIndexMatchers(matchers), context);
+        std::optional<Int64> min_heartbeat;
+        if (time_range_to_filter_ids.min_heartbeat)
+            min_heartbeat = time_range_to_filter_ids.min_heartbeat->value;
+        auto found = series_index.lookup(parts, makeSeriesIndexMatchers(matchers), min_heartbeat, context);
         const size_t num_series = found.labels.size();
         ColumnPtr ids = std::move(found.ids);
 
@@ -1449,7 +1489,7 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
         ? time_series_storage.getTargetTableID(ViewTarget::TimeRanges, context)
         : StorageID::createEmpty();
     const auto time_range_to_filter_ids = getTimeRangeToFilterIDs(
-        makeTableTimeRange(table_timestamp_type, min_time, max_time, time_scale), time_ranges_table_id, time_series_settings);
+        makeTableTimeRange(table_timestamp_type, min_time, max_time, time_scale), time_ranges_table_id, time_series_settings, table_timestamp_type);
     ASTPtr select_query;
     if (time_range_to_filter_ids.containsNoTimestamps())
     {
@@ -1532,7 +1572,8 @@ void StorageTimeSeriesSelector::readImpl(
     const StorageID time_ranges_table_id = time_series_storage->hasTarget(ViewTarget::TimeRanges)
         ? time_series_storage->getTargetTableID(ViewTarget::TimeRanges, context)
         : StorageID::createEmpty();
-    const TableTimeRange time_range_to_filter_ids = getTimeRangeToFilterIDs(table_time_range, time_ranges_table_id, *time_series_settings);
+    const TableTimeRange time_range_to_filter_ids
+        = getTimeRangeToFilterIDs(table_time_range, time_ranges_table_id, *time_series_settings, config.table_timestamp_type);
 
     /// The step of the buckets of the table being read at the scale of its timestamp type, zero for a table storing one sample per row.
     const Decimal64 bucket_step{static_cast<Int64>(bucket_step_seconds)

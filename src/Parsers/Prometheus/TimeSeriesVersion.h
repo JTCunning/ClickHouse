@@ -51,6 +51,10 @@ namespace DB
 ///  12 - New inner tags tables with a `MergeTree` family engine get an index of type `time_series` by default
 ///       (`INDEX series_idx (id, tags, metric_name) TYPE time_series(metric_name = '__name__')`). A selector reads the files
 ///       of this index in the parts of the tags table instead of the table.
+///  13 - The "tags" table has the column `heartbeat`: a timestamp of a sample of the time series written with the row.
+///       The row of a time series is written again when its samples are `tags_heartbeat_seconds` later than the heartbeat,
+///       and a selector skips the time series whose heartbeat is older than the time range by that period or more.
+///       The table has no "time ranges" target table. The `tags_heartbeat_seconds` setting was introduced.
 namespace TimeSeriesVersion
 {
     /// The minimum version which can be read with SELECT and whose creation can be replayed on another node.
@@ -113,11 +117,14 @@ namespace TimeSeriesVersion
     /// The first version creating an index of type `time_series` on the tags table by default (see the version history above).
     constexpr UInt64 MIN_WITH_TAGS_SERIES_INDEX = 12;
 
+    /// The first version storing the column `heartbeat` in the "tags" table instead of the "time ranges" table (see the version history above).
+    constexpr UInt64 MIN_WITH_TAGS_HEARTBEAT = 13;
+
     /// The latest version, new tables get it unless the CREATE query specifies another supported version.
     /// Bump it each time the schema of the target tables or the semantics of the stored data changes;
     /// every version in [MIN_SUPPORTED, LATEST] must stay supported, so either make the schema generation
     /// version-aware or bump MIN_SUPPORTED too.
-    constexpr UInt64 LATEST = 12;
+    constexpr UInt64 LATEST = 13;
 
     static_assert(MIN_WITH_ID_TYPE_SETTING <= LATEST);
     static_assert(MIN_WITH_SAMPLES_OUTER_COLUMN <= LATEST);
@@ -130,6 +137,7 @@ namespace TimeSeriesVersion
     static_assert(MIN_WITHOUT_EXTERNAL_TARGETS <= LATEST);
     static_assert(MIN_WITH_BUCKETED_SAMPLES <= LATEST);
     static_assert(MIN_WITH_TAGS_SERIES_INDEX <= LATEST);
+    static_assert(MIN_WITH_TAGS_HEARTBEAT <= LATEST);
     static_assert((MIN_WITH_ID_TYPE_SETTING <= MIN_WITHOUT_ID_SETTINGS) && (MIN_WITHOUT_ID_SETTINGS <= LATEST));
 
     static_assert(MIN_SUPPORTED <= LATEST);

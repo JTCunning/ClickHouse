@@ -176,6 +176,7 @@
     M(TextIndexReadDictionaryBlocks, "Number of times a text index dictionary block has been read from disk.", ValueType::Number) \
     M(TimeSeriesIndexLookupMicroseconds, "Total time spent finding time series in the index of type `time_series` of the tags table.", ValueType::Microseconds) \
     M(TimeSeriesIndexLookupParts, "Number of parts whose index of type `time_series` has been read to find time series.", ValueType::Number) \
+    M(TimeSeriesIndexLookupRowsPrunedByHeartbeat, "Number of rows of the index of type `time_series` which matched a selector and were skipped because their heartbeat is older than the time range.", ValueType::Number) \
     M(TimeSeriesIndexLookupSeries, "Number of time series found in the index of type `time_series` of the tags table.", ValueType::Number) \
     M(TextIndexTokensCacheHits, "Number of times a text index token info has been found in the cache.", ValueType::Number) \
     M(TextIndexTokensCacheMisses, "Number of times a text index token info has not been found in the cache.", ValueType::Number) \

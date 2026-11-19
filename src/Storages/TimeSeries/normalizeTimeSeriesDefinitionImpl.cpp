@@ -65,6 +65,7 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsBool store_min_time_and_max_time;
     extern const TimeSeriesSettingsBool store_time_ranges;
     extern const TimeSeriesSettingsUInt64 tags_index_granularity;
+    extern const TimeSeriesSettingsBool tags_series_index;
     extern const TimeSeriesSettingsMap tags_to_columns;
     extern const TimeSeriesSettingsUInt64 version;
 }
@@ -656,13 +657,20 @@ namespace
     }
 
     /// The index of the time series of a part. A selector reads its files instead of the tags table.
-    ASTPtr getDefaultTagsSeriesIndex()
+    ASTPtr getDefaultTagsSeriesIndex(bool with_heartbeat)
     {
+        ASTs columns{
+            make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID),
+            make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Tags),
+            make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName)};
+        if (with_heartbeat)
+            columns.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Heartbeat));
+
+        auto columns_tuple = makeASTFunction("tuple");
+        columns_tuple->arguments->children = std::move(columns);
+
         auto index = make_intrusive<ASTIndexDeclaration>(
-            makeASTFunction("tuple",
-                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::ID),
-                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Tags),
-                make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName)),
+            std::move(columns_tuple),
             makeASTFunction("time_series", makeASTOperator("equals",
                 make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::MetricName), make_intrusive<ASTLiteral>(TimeSeriesTagNames::MetricName))),
             "series_idx");
@@ -675,7 +683,8 @@ namespace
     bool hasDefaultTagsSeriesIndex(const TimeSeriesSettings & settings, const ColumnsDescription & tags_table_columns)
     {
         const Map & tags_to_columns = settings[TimeSeriesSetting::tags_to_columns];
-        if (settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_TAGS_SERIES_INDEX || !tags_to_columns.empty())
+        if (settings[TimeSeriesSetting::version] < TimeSeriesVersion::MIN_WITH_TAGS_SERIES_INDEX || !tags_to_columns.empty()
+            || !settings[TimeSeriesSetting::tags_series_index])
             return false;
 
         auto id = tags_table_columns.tryGetPhysical(TimeSeriesColumnNames::ID);
@@ -911,6 +920,9 @@ namespace
             remove_column(TimeSeriesColumnNames::MaxTime);
         }
 
+        if (!new_settings.hasTagsHeartbeat())
+            remove_column(TimeSeriesColumnNames::Heartbeat);
+
         /// The ephemeral column "all_tags" was used in version 0 for calculating identifiers: it contained all the tags,
         /// while the "tags" column contained only the tags without dedicated columns.
         if (old_settings[TimeSeriesSetting::version] == 0)
@@ -1099,6 +1111,9 @@ namespace
                     return is_nullable_timestamp(type) || is_min_or_max_simple_aggregate(is_nullable_timestamp);
                 }
 
+                if (name == TimeSeriesColumnNames::Heartbeat)
+                    return settings.hasTagsHeartbeat() && is_timestamp_type(*type);
+
                 /// A tag column from `tags_to_columns`.
                 const Map & tags_to_columns = settings[TimeSeriesSetting::tags_to_columns];
                 for (const auto & tag_name_and_column_name : tags_to_columns)
@@ -1158,12 +1173,13 @@ namespace
             return;
 
         const auto default_index = getDefaultTagsIndex()->formatWithSecretsOneLine();
-        const auto default_series_index = getDefaultTagsSeriesIndex()->formatWithSecretsOneLine();
+        const auto default_series_index = getDefaultTagsSeriesIndex(/* with_heartbeat = */ false)->formatWithSecretsOneLine();
+        const auto default_series_index_with_heartbeat = getDefaultTagsSeriesIndex(/* with_heartbeat = */ true)->formatWithSecretsOneLine();
         auto & indices = inner_columns.indices->children;
         auto is_generated = [&](const ASTPtr & index)
         {
             const auto formatted = index->formatWithSecretsOneLine();
-            return formatted == default_index || formatted == default_series_index;
+            return formatted == default_index || formatted == default_series_index || formatted == default_series_index_with_heartbeat;
         };
         indices.erase(std::remove_if(indices.begin(), indices.end(), is_generated), indices.end());
     }
@@ -1297,7 +1313,16 @@ namespace
         if (inner_engine.engine)
         {
             const auto & engine = *inner_engine.engine;
-            const bool has_arguments = engine.parameters || (engine.arguments && !engine.arguments->children.empty());
+            bool has_arguments = engine.parameters || (engine.arguments && !engine.arguments->children.empty());
+
+            /// The engine of the tags table of a table with heartbeats is generated with the column `heartbeat` as its version.
+            if ((inner_table_kind == ViewTarget::Tags) && settings.hasTagsHeartbeat() && !engine.parameters && engine.arguments
+                && (engine.arguments->children.size() == 1))
+            {
+                const auto * version_column = engine.arguments->children[0]->as<ASTIdentifier>();
+                if (version_column && (version_column->name() == TimeSeriesColumnNames::Heartbeat))
+                    has_arguments = false;
+            }
 
             std::string_view engine_name = engine.name;
             if (engine_name.starts_with("Replicated"))
@@ -1571,6 +1596,9 @@ namespace
                         add_column_if_missing(TimeSeriesColumnNames::MaxTime, dataTypeToAST(min_max_time_type));
                     }
                 }
+
+                if (time_series_settings.hasTagsHeartbeat())
+                    add_column_if_missing(TimeSeriesColumnNames::Heartbeat, dataTypeToAST(resolved_types.timestamp_type));
 
                 break;
             }
@@ -1872,12 +1900,13 @@ namespace
     {
         bool changed = false;
 
-        auto set_engine = [&](std::string_view engine_kind)
+        auto set_engine = [&](std::string_view engine_kind, ASTs engine_arguments = {})
         {
             DefaultTableEngine inner_engine_family = resolved_types.inner_engine_family
                 ? *resolved_types.inner_engine_family
                 : getDefaultInnerEngineFamily(query_settings, table_id);
             auto engine = makeASTFunction(fmt::format("{}{}", getInnerEngineFamilyPrefix(inner_engine_family, inner_table_kind), engine_kind));
+            engine->arguments->children = std::move(engine_arguments);
             /// Formats as `MergeTree` instead of `MergeTree()`, the same way the parser reads an engine without arguments.
             engine->setNoEmptyArgs(true);
             inner_engine.set(inner_engine.engine, engine);
@@ -1960,7 +1989,14 @@ namespace
 
         /// A missing engine is generated; a declared engine is kept and gets the generated keys and settings below.
         if (!inner_engine.engine)
-            set_engine(getDefaultInnerEngineKind(settings, inner_table_kind));
+        {
+            const auto engine_kind = getDefaultInnerEngineKind(settings, inner_table_kind);
+            /// The row with the latest heartbeat of a time series stays after a merge, whatever the order of the inserts was.
+            if ((inner_table_kind == ViewTarget::Tags) && settings.hasTagsHeartbeat() && (engine_kind == "ReplacingMergeTree"))
+                set_engine(engine_kind, {make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Heartbeat)});
+            else
+                set_engine(engine_kind);
+        }
 
         switch (inner_table_kind)
         {
@@ -2110,7 +2146,7 @@ namespace
         auto indices = make_intrusive<ASTExpressionList>();
         indices->children.push_back(getDefaultTagsIndex());
         if (hasDefaultTagsSeriesIndex(settings, inner_columns_description))
-            indices->children.push_back(getDefaultTagsSeriesIndex());
+            indices->children.push_back(getDefaultTagsSeriesIndex(settings.hasTagsHeartbeat()));
         inner_columns.setOrReplace(inner_columns.indices, indices);
         return true;
     }
@@ -2353,6 +2389,9 @@ namespace
                     check_column_min_max_time(TimeSeriesColumnNames::MinTime, "min");
                     check_column_min_max_time(TimeSeriesColumnNames::MaxTime, "max");
                 }
+
+                if (time_series_settings.hasTagsHeartbeat())
+                    check_column_type(TimeSeriesColumnNames::Heartbeat, resolved_types.timestamp_type);
                 break;
             }
 
