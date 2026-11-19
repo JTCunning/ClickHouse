@@ -1,0 +1,49 @@
+-- the default values are not written into the definition of the table
+ts_default	
+ts_off	tags_use_uncompressed_cache = 0
+-- settings of the subquery reading the tags table and of the subquery reading the time ranges table
+ts_default
+use_uncompressed_cache = false
+use_uncompressed_cache = true
+ts_off
+ts_no_ranges_default
+use_uncompressed_cache = true
+ts_no_ranges_off
+ts_columns_cache
+use_columns_cache = false
+use_columns_cache = true
+-- cache events of a selector: uncompressed cache used, columns cache used
+ts_default	2	1	1	0	0
+ts_off	2	0	0	0	0
+ts_no_ranges_default	2	1	1	0	0
+ts_no_ranges_off	2	0	0	0	0
+ts_columns_cache	2	0	0	1	1
+-- selector
+4	113
+ts_default: equal
+ts_no_ranges_default: equal
+ts_no_ranges_off: equal
+ts_columns_cache: equal
+-- instant query
+[('__name__','cpu'),('instance','1'),('job','a')]	2
+[('__name__','cpu'),('instance','3'),('job','b')]	100
+ts_default: equal
+ts_no_ranges_default: equal
+ts_no_ranges_off: equal
+ts_columns_cache: equal
+-- aggregation
+[('job','a')]	18
+[('job','b')]	100
+ts_default: equal
+ts_no_ranges_default: equal
+ts_no_ranges_off: equal
+ts_columns_cache: equal
+-- window without samples
+0
+ts_default: equal
+ts_no_ranges_default: equal
+ts_no_ranges_off: equal
+ts_columns_cache: equal
+-- the settings can be changed after the table is created
+use_columns_cache = false
+use_columns_cache = true

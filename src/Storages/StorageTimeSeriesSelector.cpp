@@ -2,6 +2,7 @@
 
 #include <Common/DateLUTImpl.h>
 #include <Common/Exception.h>
+#include <Common/SettingsChanges.h>
 #include <Common/logger_useful.h>
 #include <Common/quoteString.h>
 #include <Columns/IColumn.h>
@@ -26,6 +27,7 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
+#include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/Prometheus/parseTimeSeriesTypes.h>
@@ -70,6 +72,8 @@ namespace TimeSeriesSetting
     extern const TimeSeriesSettingsUInt64 recent_samples_bucket_step_seconds;
     extern const TimeSeriesSettingsUInt64 recent_samples_ttl_seconds;
     extern const TimeSeriesSettingsUInt64 samples_bucket_step_seconds;
+    extern const TimeSeriesSettingsBool tags_use_columns_cache;
+    extern const TimeSeriesSettingsBool tags_use_uncompressed_cache;
 }
 
 namespace Setting
@@ -583,6 +587,53 @@ namespace
         return id_generator;
     }
 
+    /// The SETTINGS clauses of a query selecting identifiers from the tags table (see makeTagsReadSettings).
+    struct TagsReadSettings
+    {
+        /// The clause of the query reading the tags table, null if the query has no clause.
+        ASTPtr tags_table;
+
+        /// The clause of the subquery reading the time ranges table, null if the subquery has no clause.
+        /// A subquery inherits the settings of the query containing it, so this clause sets back the values
+        /// the settings of `tags_table` have in the context of the query.
+        ASTPtr time_ranges_table;
+    };
+
+    ASTPtr makeSettingsClause(SettingsChanges changes)
+    {
+        auto set_query = make_intrusive<ASTSetQuery>();
+        set_query->is_standalone = false;
+        set_query->changes = std::move(changes);
+        return set_query;
+    }
+
+    /// Makes the SETTINGS clauses with which a query reads the tags table through the uncompressed cache or the columns cache
+    /// (see the settings `tags_use_uncompressed_cache` and `tags_use_columns_cache`).
+    TagsReadSettings makeTagsReadSettings(const TimeSeriesSettings & time_series_settings, const ContextPtr & context)
+    {
+        SettingsChanges tags_table_changes;
+        if (time_series_settings[TimeSeriesSetting::tags_use_uncompressed_cache])
+        {
+            tags_table_changes.setSetting("use_uncompressed_cache", true);
+            /// A query reading more marks than these limits allow doesn't use the uncompressed cache,
+            /// and a selector can match any number of time series.
+            tags_table_changes.setSetting("merge_tree_max_rows_to_use_cache", std::numeric_limits<UInt64>::max());
+            tags_table_changes.setSetting("merge_tree_max_bytes_to_use_cache", std::numeric_limits<UInt64>::max());
+        }
+        if (time_series_settings[TimeSeriesSetting::tags_use_columns_cache])
+            tags_table_changes.setSetting("use_columns_cache", true);
+
+        if (tags_table_changes.empty())
+            return {};
+
+        SettingsChanges time_ranges_table_changes;
+        const auto & settings = context->getSettingsRef();
+        for (const auto & change : tags_table_changes)
+            time_ranges_table_changes.setSetting(change.name, settings.get(change.name));
+
+        return {makeSettingsClause(std::move(tags_table_changes)), makeSettingsClause(std::move(time_ranges_table_changes))};
+    }
+
     /// Adds to a query selecting from the tags table the filter of the time series by their time ranges stored in the time ranges table:
     ///
     ///     SELECT ... FROM tags_table
@@ -599,7 +650,8 @@ namespace
         ASTSelectQuery & select_query,
         const StorageID & time_ranges_table_id,
         ASTs time_range_conditions,
-        const std::optional<TimeSeriesIDRanges> & metric_id_ranges)
+        const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
+        const TagsReadSettings & tags_read_settings)
     {
         const char * subquery_alias = "time_ranges_subquery";
         const char * matched_column = "matched";
@@ -622,6 +674,8 @@ namespace
                 time_range_conditions.push_back(makeASTFunction("not", makeIDOutOfRangesCondition(id, *metric_id_ranges)));
             }
             subquery_select->setExpression(ASTSelectQuery::Expression::WHERE, makeASTForLogicalAnd(std::move(time_range_conditions)));
+            if (tags_read_settings.time_ranges_table)
+                subquery_select->setExpression(ASTSelectQuery::Expression::SETTINGS, tags_read_settings.time_ranges_table->clone());
         }
 
         /// LEFT ANY JOIN (<subquery>) AS time_ranges_subquery USING (id)
@@ -665,17 +719,23 @@ namespace
     /// if the time ranges are stored in the time ranges table, that table is joined (see addTimeRangesTableJoin);
     /// if the tags table stores them itself (tables of earlier versions), the conditions are already in the WHERE clause
     /// of the query (see makeWhereFilterForTagsTable), so the query is left as is.
+    /// Sets the SETTINGS clause of the query as well (see makeTagsReadSettings).
     void applyTimeRangeFilterToSelectIDsQuery(
         ASTSelectQuery & select_query,
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        const TagsReadSettings & tags_read_settings)
     {
+        if (tags_read_settings.tags_table)
+            select_query.setExpression(ASTSelectQuery::Expression::SETTINGS, tags_read_settings.tags_table->clone());
+
         if (!time_ranges_table_id || time_range_to_filter_ids.containsAllTimestamps())
             return;
 
-        addTimeRangesTableJoin(select_query, time_ranges_table_id, makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type), metric_id_ranges);
+        addTimeRangesTableJoin(
+            select_query, time_ranges_table_id, makeTimeRangeConditions(time_range_to_filter_ids, table_timestamp_type), metric_id_ranges, tags_read_settings);
     }
 
     /// Makes the WHERE clause of a query selecting identifiers from the tags table.
@@ -730,7 +790,8 @@ namespace
         const StorageID & time_ranges_table_id,
         const TableTimeRange & time_range_to_filter_ids,
         const std::optional<TimeSeriesIDRanges> & metric_id_ranges,
-        const DataTypePtr & table_timestamp_type)
+        const DataTypePtr & table_timestamp_type,
+        const TagsReadSettings & tags_read_settings)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -777,7 +838,8 @@ namespace
         }
 
         /// If there is a time ranges table: LEFT JOIN it and keep the time series with a matching time range (see addTimeRangesTableJoin).
-        applyTimeRangeFilterToSelectIDsQuery(*select_query, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type);
+        applyTimeRangeFilterToSelectIDsQuery(
+            *select_query, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type, tags_read_settings);
 
         return wrapIntoSelectWithUnionQuery(std::move(select_query));
     }
@@ -1158,6 +1220,7 @@ namespace
         const TableTimeRange & time_range_to_filter_ids,
         const DataTypePtr & table_id_type,
         const DataTypePtr & table_timestamp_type,
+        const TagsReadSettings & tags_read_settings,
         const ContextPtr & context,
         const LoggerPtr & log)
     {
@@ -1222,7 +1285,8 @@ namespace
                 probe_select_ids->setExpression(ASTSelectQuery::Expression::TABLES, makeTablesInSelectQuery(make_intrusive<ASTTableIdentifier>(tags_table_id)));
                 probe_select_ids->setExpression(ASTSelectQuery::Expression::WHERE, std::move(probe_where));
             }
-            applyTimeRangeFilterToSelectIDsQuery(*probe_select_ids, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type);
+            applyTimeRangeFilterToSelectIDsQuery(
+                *probe_select_ids, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges, table_timestamp_type, tags_read_settings);
 
             /// SELECT 1 FROM (<probe_select_ids>) LIMIT 1
             auto probe_select = make_intrusive<ASTSelectQuery>();
@@ -1315,7 +1379,7 @@ ASTPtr StorageTimeSeriesSelector::makeSelectIDsQuery(
             matchers, getIDGenerator(time_series_settings, tags_table_metadata->getColumns(), table_id_type), table_id_type);
         select_query = makeSelectQueryFromTagsTable(
             tags_table_id, matchers, makeColumnNameByTagNameMap(time_series_settings), time_ranges_table_id, time_range_to_filter_ids,
-            metric_id_ranges, table_timestamp_type);
+            metric_id_ranges, table_timestamp_type, makeTagsReadSettings(time_series_settings, context));
     }
 
     /// Alias the returned expression (`timeSeriesStoreTags(...)`, which returns `id`) so callers can reference the column by a fixed name.
@@ -1412,6 +1476,8 @@ void StorageTimeSeriesSelector::readImpl(
     const auto metric_id_ranges = tryGetTimeSeriesIDRanges(
         matchers, getIDGenerator(*time_series_settings, tags_table_metadata->getColumns(), config.table_id_type), config.table_id_type);
 
+    const auto tags_read_settings = makeTagsReadSettings(*time_series_settings, context);
+
     /// A table storing one sample per row (see `TimeSeriesSettings::hasBucketedSamples`) can read the samples table by a primary-key
     /// range of the whole metric instead of the id set, if a probe of the tags table shows that the selector matches the whole metric
     /// (see tryMakeWholeMetricIDRangeConditions). A table with buckets of samples reads the samples table with the id set only:
@@ -1431,13 +1497,14 @@ void StorageTimeSeriesSelector::readImpl(
             time_range_to_filter_ids,
             config.table_id_type,
             config.table_timestamp_type,
+            tags_read_settings,
             interpreter_context,
             log);
     }
 
     ASTPtr select_query_from_tags_table = makeSelectQueryFromTagsTable(
         tags_table_id, matchers, column_name_by_tag_name, time_ranges_table_id, time_range_to_filter_ids, metric_id_ranges,
-        config.table_timestamp_type);
+        config.table_timestamp_type, tags_read_settings);
 
     if (whole_metric_id_range_condition)
     {
