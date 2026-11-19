@@ -63,6 +63,11 @@ struct TimeSeriesSettings
     /// The tables of earlier versions store one sample per row.
     [[nodiscard]] bool hasBucketedSamples() const;
 
+    /// Whether the "tags" table stores a row of a time series for each time bucket with samples of the series
+    /// (tables of version MIN_WITH_BUCKETED_TAGS or later, see TimeSeriesVersion.h).
+    /// The tables of earlier versions store one row per time series.
+    [[nodiscard]] bool hasBucketedTags() const;
+
     /// Whether the "tags" table stores the columns `min_time` and `max_time`: tables of earlier versions
     /// with the `store_min_time_and_max_time` setting enabled (see TimeSeriesVersion.h).
     [[nodiscard]] bool hasMinTimeAndMaxTimeInTagsTable() const;

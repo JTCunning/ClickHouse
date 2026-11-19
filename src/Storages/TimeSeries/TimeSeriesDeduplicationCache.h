@@ -10,6 +10,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -65,7 +66,13 @@ public:
     /// only if all its values are equal. The other rows are added to `pending_rows`, pass them to `markRowsAsWritten`
     /// after they are written.
     /// The rows with `filter[row] == 0` (if `filter` is passed) are removed too, without being looked up.
-    Block filterOutWrittenRows(const Block & block, size_t key_column_index, PendingRows & pending_rows, PaddedPODArray<UInt8> filter = {});
+    /// If `second_key_column_index` is passed, a row is identified by both key columns.
+    Block filterOutWrittenRows(
+        const Block & block,
+        size_t key_column_index,
+        PendingRows & pending_rows,
+        PaddedPODArray<UInt8> filter = {},
+        std::optional<size_t> second_key_column_index = {});
 
     /// Moves the pending rows to the cache, so that `filterOutWrittenRows` skips them next time, and leaves `pending_rows` empty.
     /// Called after the pending rows have been written to the table.
@@ -106,10 +113,15 @@ private:
     /// Resets `filter` for the rows of `block` already written or pending, and adds the other rows passing the filter
     /// to `pending_rows`, which is then trimmed to the capacity of the cache. Returns the number of rows passing the filter.
     size_t excludeWrittenRowsFromFilter(
-        const Block & block, size_t key_column_index, PaddedPODArray<UInt8> & filter, PendingRows & pending_rows);
+        const Block & block,
+        size_t key_column_index,
+        std::optional<size_t> second_key_column_index,
+        PaddedPODArray<UInt8> & filter,
+        PendingRows & pending_rows);
 
     /// Calculates the hashes of the rows of `block` passing `filter`.
-    static HashedRows hashRows(const Block & block, size_t key_column_index, const PaddedPODArray<UInt8> & filter);
+    static HashedRows hashRows(
+        const Block & block, size_t key_column_index, std::optional<size_t> second_key_column_index, const PaddedPODArray<UInt8> & filter);
 
     /// Resets `filter` for the duplicate rows and returns the number of such duplicate rows.
     /// A row is considered a duplicate in one of the following cases:

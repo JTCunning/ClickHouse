@@ -1,0 +1,129 @@
+-- definition of the tags table
+id	Tuple(UInt64, LowCardinality(UUID))
+metric_name	LowCardinality(String)
+tags	Map(LowCardinality(String), String)
+bucket	DateTime64(3)
+ReplacingMergeTree PARTITION BY bucket PRIMARY KEY metric_name ORDER BY (metric_name, id) SETTINGS index_granularity = 8192
+ts_1d	version = 14	tags_bucket_step_seconds = 86400
+ts_4d	version = 14	tags_bucket_step_seconds = 345600
+-- time ranges tables: version 11, version 14
+1
+0
+-- the time ranges table and the step of the buckets for an earlier version are rejected
+INVALID_SETTING_VALUE
+INCORRECT_QUERY
+INVALID_SETTING_VALUE
+INVALID_SETTING_VALUE
+-- rows of the tags table: one row per time series and bucket of one day
+cpu	1	0	1
+cpu	1	86400	1
+cpu	2	0	1
+cpu	3	86400	1
+cpu	3	345600	1
+mem		0	1
+mem		86400	1
+-- rows of the tags table: one row per time series and bucket of four days
+cpu	1	0	1
+cpu	2	0	1
+cpu	3	0	1
+cpu	3	345600	1
+mem		0	1
+-- partitions of the tags table: buckets of one day, buckets of four days
+3
+2
+-- instant query in the first bucket
+[('__name__','cpu'),('instance','1'),('job','a')]	1
+[('__name__','cpu'),('instance','2'),('job','a')]	10
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- instant query in the second bucket
+[('__name__','cpu'),('instance','1'),('job','a')]	3
+[('__name__','cpu'),('instance','3'),('job','b')]	200
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- instant query in the last bucket
+[('__name__','cpu'),('instance','3'),('job','b')]	300
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- aggregation in the second bucket
+[('job','a')]	3
+[('job','b')]	200
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- matchers
+[('__name__','cpu'),('instance','1'),('job','a')]	3
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- window over two buckets
+[('instance','1'),('job','a')]	3
+[('instance','2'),('job','a')]	10
+[('instance','3'),('job','b')]	200
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+[('instance','1'),('job','a')]	3
+[('instance','2'),('job','a')]	1
+[('job','a')]	2
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- window over all buckets
+[('instance','1'),('job','a')]	3
+[('instance','2'),('job','a')]	1
+[('instance','3'),('job','b')]	3
+[('job','a')]	2
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- range query over two buckets
+[('job','a')]	[('1970-01-01 00:16:40.000',2),('1970-01-02 00:16:40.000',1)]
+[('job','b')]	[('1970-01-02 00:16:40.000',1)]
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- window without samples
+0
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- selector
+4	4
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- read of the table
+cpu	{'__name__':'cpu','instance':'1','job':'a'}	[('1970-01-01 00:16:40.000',1)]
+cpu	{'__name__':'cpu','instance':'1','job':'a'}	[('1970-01-02 00:16:40.000',2)]
+cpu	{'__name__':'cpu','instance':'1','job':'a'}	[('1970-01-02 00:17:40.000',3)]
+cpu	{'__name__':'cpu','instance':'2','job':'a'}	[('1970-01-01 00:16:40.000',10)]
+cpu	{'__name__':'cpu','instance':'3','job':'b'}	[('1970-01-02 00:16:40.000',100)]
+cpu	{'__name__':'cpu','instance':'3','job':'b'}	[('1970-01-02 00:17:40.000',200)]
+cpu	{'__name__':'cpu','instance':'3','job':'b'}	[('1970-01-05 15:06:40.000',300)]
+mem	{'__name__':'mem','job':'a'}	[('1970-01-01 00:16:40.000',5)]
+mem	{'__name__':'mem','job':'a'}	[('1970-01-02 00:16:40.000',6)]
+ts_1d: equal to version 11
+ts_4d: equal to version 11
+ts_no_cache: equal to version 11
+-- rows of a time series in one bucket: without the deduplication cache, with it
+cpu	1	86400	2
+cpu	3	86400	2
+mem		86400	1
+cpu	1	86400	1
+cpu	3	86400	1
+mem		86400	1
+-- after a merge: one row per time series and bucket
+cpu	1	0	1
+cpu	1	86400	1
+cpu	2	0	1
+cpu	3	86400	1
+cpu	3	345600	1
+mem		0	1
+mem		86400	1
+-- the same queries after the merge
+36
+0

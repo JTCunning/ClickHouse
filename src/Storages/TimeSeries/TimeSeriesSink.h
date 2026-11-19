@@ -109,6 +109,10 @@ private:
     Decimal64 samples_bucket_step{0};
     std::optional<Decimal64> recent_samples_bucket_step;
 
+    /// The step of the buckets of the tags table with the scale of `timestamp_type`.
+    /// Here zero means a table of an earlier version storing one row per time series.
+    Decimal64 tags_bucket_step{0};
+
     std::unique_ptr<TargetPipeline> tags_pipeline;
     std::unique_ptr<TargetPipeline> time_ranges_pipeline;
     std::unique_ptr<TargetPipeline> samples_pipeline;
