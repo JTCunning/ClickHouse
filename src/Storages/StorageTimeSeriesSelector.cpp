@@ -1393,9 +1393,10 @@ void StorageTimeSeriesSelector::readImpl(
 
     const auto & matchers = typeid_cast<const PrometheusQueryTree::InstantSelector &>(*config.selector.getRoot()).matchers;
 
-    /// A rollup column of the samples table is read when the step allows one, see chooseRollupStep().
-    /// Otherwise the recent samples table is preferred when the whole range fits in its TTL window:
-    /// a rollup column keeps fewer samples per row than the recent samples table, which keeps all of them.
+    /// Prefer the recent samples table when the whole range fits in its TTL window.
+    /// Otherwise a rollup column of the samples table is read when the step allows one, see chooseRollupStep().
+    /// The recent samples table goes first, though it keeps every sample: on a 30-day table a 1-day selector at a 5m or 1h step
+    /// was faster from it than from a rollup column of the samples table.
     ViewTarget::Kind samples_table_kind = ViewTarget::Samples;
     String samples_column_name = TimeSeriesColumnNames::Samples;
 
@@ -1405,19 +1406,8 @@ void StorageTimeSeriesSelector::readImpl(
     if (time_series_settings->hasBucketedSamples())
         bucket_step_seconds = (*time_series_settings)[TimeSeriesSetting::samples_bucket_step_seconds];
 
-    UInt64 rollup_step_seconds = 0;
-    if (bucket_step_seconds && context->getSettingsRef()[Setting::time_series_prefer_rollup_tables])
-        rollup_step_seconds = chooseRollupStep(*time_series_settings, config.step, config.time_scale);
-
-    if (rollup_step_seconds)
-    {
-        samples_column_name = TimeSeriesColumnNames::rollupSamplesColumn(rollup_step_seconds);
-        LOG_DEBUG(log, "Selector {} with step {} reads the rollup column {}",
-                  quoteString(config.selector.toString()), config.step.value, samples_column_name);
-    }
-
     const auto recent_samples_ttl_seconds = (*time_series_settings)[TimeSeriesSetting::recent_samples_ttl_seconds].value;
-    if (!rollup_step_seconds && recent_samples_ttl_seconds && context->getSettingsRef()[Setting::time_series_prefer_recent_samples_table])
+    if (recent_samples_ttl_seconds && context->getSettingsRef()[Setting::time_series_prefer_recent_samples_table])
     {
         /// If the start of the range is within the TTL, the whole range is: the recent samples table keeps everything after that.
         if (isWithinRecentSamplesTTL(recent_samples_ttl_seconds, std::time(nullptr), config.min_time, config.time_scale)
@@ -1428,6 +1418,17 @@ void StorageTimeSeriesSelector::readImpl(
                 bucket_step_seconds = (*time_series_settings)[TimeSeriesSetting::recent_samples_bucket_step_seconds];
             LOG_DEBUG(log, "Selector {} time range [{}, {}] fits in the recent samples TTL window: reading from the recent samples table",
                       quoteString(config.selector.toString()), config.min_time.value, config.max_time.value);
+        }
+    }
+
+    if ((samples_table_kind == ViewTarget::Samples) && bucket_step_seconds
+        && context->getSettingsRef()[Setting::time_series_prefer_rollup_tables])
+    {
+        if (UInt64 rollup_step_seconds = chooseRollupStep(*time_series_settings, config.step, config.time_scale))
+        {
+            samples_column_name = TimeSeriesColumnNames::rollupSamplesColumn(rollup_step_seconds);
+            LOG_DEBUG(log, "Selector {} with step {} reads the rollup column {}",
+                      quoteString(config.selector.toString()), config.step.value, samples_column_name);
         }
     }
 

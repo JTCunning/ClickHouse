@@ -27,7 +27,8 @@ namespace
     }
 
     /// Whether the selector can read a rollup column (see `samples_rollup_steps`): the query step is then passed to timeSeriesSelector(),
-    /// which reads the rollup column with the largest step dividing the query step. A rollup column keeps the last sample of every
+    /// which reads the rollup column with the largest step dividing the query step (or the raw samples of the recent samples table,
+    /// when the whole range fits in its TTL window). A rollup column keeps the last sample of every
     /// interval `(k * rollup_step, (k + 1) * rollup_step]`, so the last sample at or before any multiple of the rollup step is the same
     /// as in the raw samples. That is all an instant selector uses, if every evaluation time is a multiple of the query step, i.e.
     /// `start_time` is (offsets and subqueries are already applied to the range). A range selector is not allowed: the functions

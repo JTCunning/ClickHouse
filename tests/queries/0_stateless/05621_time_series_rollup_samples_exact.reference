@@ -48,6 +48,7 @@ ts_rollup_copy_none	12	0	0	1
 ts_rollup_copy_v11	11	0	0	1
 ts_rollup_src	12	1	1	1
 1
--- a rollup column is preferred to the recent samples table, which keeps every sample
-1	0
+-- the recent samples table is preferred to a rollup column when the whole range fits in its TTL window
 0	1
+1	0
+1	0

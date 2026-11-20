@@ -37,7 +37,8 @@ public:
         DateTime64 max_time{};
 
         /// Optional query step at `time_scale` (the 7th argument). Zero means unset: read raw samples.
-        /// When set, the rollup column of the largest configured rollup step which divides this step is read.
+        /// When set, the rollup column of the largest configured rollup step which divides this step is read,
+        /// unless the recent samples table is read (see readImpl()).
         DateTime64 step{};
 
         /// The columns the table function timeSeriesSelector() returns besides `id`:

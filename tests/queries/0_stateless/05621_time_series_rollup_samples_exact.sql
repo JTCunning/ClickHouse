@@ -305,7 +305,7 @@ DROP TABLE ts_rollup_copy_5m;
 DROP TABLE ts_rollup_copy_none;
 DROP TABLE ts_rollup_copy_v11;
 
-SELECT '-- a rollup column is preferred to the recent samples table, which keeps every sample';
+SELECT '-- the recent samples table is preferred to a rollup column when the whole range fits in its TTL window';
 CREATE TABLE ts_rollup_recent ENGINE = TimeSeries SETTINGS samples_rollup_steps = '1m';
 -- A sample in both tables, so that the plan names the table it reads.
 INSERT INTO ts_rollup_recent (metric_name, tags, samples) VALUES ('m', map('k', 'v'), [(toDateTime64(now() - 60, 3), 1.)]);
@@ -313,5 +313,8 @@ SELECT countIf(position(explain, 'samples_60') > 0) > 0 AS reads_rollup, countIf
 FROM (EXPLAIN SELECT * FROM timeSeriesSelector(currentDatabase(), 'ts_rollup_recent', 'm', now() - 3600, now(), 'samples', 60));
 SELECT countIf(position(explain, 'samples_60') > 0) > 0 AS reads_rollup, countIf(position(explain, '.inner_id.recentsamples.') > 0) > 0 AS reads_recent
 FROM (EXPLAIN SELECT * FROM timeSeriesSelector(currentDatabase(), 'ts_rollup_recent', 'm', now() - 3600, now(), 'samples', 60))
-SETTINGS time_series_prefer_rollup_tables = 0;
+SETTINGS time_series_prefer_recent_samples_table = 0;
+-- A range which starts before the TTL window of the recent samples table reads the rollup column.
+SELECT countIf(position(explain, 'samples_60') > 0) > 0 AS reads_rollup, countIf(position(explain, '.inner_id.recentsamples.') > 0) > 0 AS reads_recent
+FROM (EXPLAIN SELECT * FROM timeSeriesSelector(currentDatabase(), 'ts_rollup_recent', 'm', now() - 5 * 86400, now(), 'samples', 60));
 DROP TABLE ts_rollup_recent;
