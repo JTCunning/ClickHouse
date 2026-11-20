@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-20T10:00:53Z",
+  "updated": "2026-11-20T11:16:48Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -227,12 +227,12 @@
     {
       "slug": "rollup-samples",
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
-      "summary": "instant selectors at 5m/1h steps read rollup columns with the raw result: emulated 7-day selector grid ~29× (1h), ~5× (5m); storage +5.3% (5m), +0.45% (1h)",
-      "decision": "Rename the setting `time_series_prefer_rollup_tables` to `time_series_prefer_rollup_columns` (rollups are columns now; the setting is unreleased)? Recommended: yes, folded into the pre-submit rebase. Answer on #16; it does not block the build.",
-      "status": "results-in",
+      "summary": "run 1: selector 1.8–2.4× at 1h over 7–30d, 1.85× at 5m over 7d; 30d 5m 1.25×, 1m ≤1.2×; the 1d loss (0.72×) is reworked",
+      "decision": "Next build of the reworked branch (run 1 failed; d521a31 reads the recent table first again): A (recommended) lil red rebases onto master, with the rename to time_series_prefer_rollup_columns if you say yes, then one confirm build (the tests + ONLY='^selector_' PROBE=0 run.sh) and submit; B a full run 2 first; C park. Also yes or no to the rename. Answer on #16; it blocks the build.",
+      "status": "needs-work",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",
-      "head": "6a1d8e48fae555231bf29e5571f0d0b4cb696eb3",
+      "head": "d521a31f41544722e38cca26768c2377d9a5a47f",
       "base": "57ca89d382d260477e43c979acab0b66ef76b3d4",
       "issue": 16,
       "pr_text": "prs/rollup-samples.md",
@@ -264,7 +264,7 @@
       ],
       "claim": "An instant selector of a PromQL range query evaluated at a step that a rollup step divides reads samples_<step> with a result identical to the raw samples. Emulated on 2 vCPU (1000 series x 7 days, 15 s scrapes): selector grid at 1h ~29x faster, 5m ~5x, 1m ~2x; columns 25% / 5.3% / 0.45% of the raw samples bytes for 1m / 5m / 1h. Range functions read raw and don't change. Fixed against daa5327: left-closed intervals returned the previous scrape at every evaluation time on exact 15 s scrapes.",
       "pass_if": "05508, 05621, the gtests NormalizeTimeSeriesDefinitionTest.* (ENABLE_TESTS=ON) and the also_run tests pass on B. bench/rollup-samples/ab/run.sh <B> <A> <dir> (the A/B is this harness, not perf.py): equality.tsv has series_differ 0 everywhere; selector at 5m and 1h (1d/7d/30d) >= 2x faster at p50 with >= 4x fewer read_bytes; at 1m >= 1.25x and >= 2x; no guard (range functions, 15s, raw vs master) more than 5% slower; ab_rollup ('1m, 5m, 1h') insert <= 1.25x ab_plain, small inserts <= 1.2x, samples storage <= 1.35x; ab_rollup_coarse ('5m, 1h') <= 1.1x and <= 1.1x; ab_plain on B within 5% of A. Second run SHAPE=aligned DAYS=7: equality still 0. Edge run SCRAPE=60 STEPS='1m' DAYS=7: selector_1d_1m not slower than 0.95x.",
-      "notes": "The branch is James's jtcunning/timeseries-rollup-samples @ daa5327 plus 12 commits; base = its merge base. It merged cleanly into master e8473460558a (11-12), but since 11-16 it conflicts with master 72bf27d8f1b in StorageTimeSeriesSelector.cpp (upstream now converts the bucket step to the timestamp scale once and reads the time arguments as columns) and in the 05140 reference (upstream PR 131678: 256 KiB granules, ALP ZSTD(4) by default). The A/B isn't affected: build A at the base (same base as B), plus master for the insert-cost arm if wanted. lil red rebases onto master after the results and before the submit (a compile and the stateless tests, no new A/B expected); the rename goes in with it if James says yes. Schema version 12 and test numbers 05508/05621 are still free on master (checked 2026-11-17). The perf XML can't run on A (master has no samples_rollup_steps): at submission add do_not_check_in_pr=\"<PR number>\" to its <create_query> and <fill_query> (perf.py needs the number). Decisions: (1) rate-type functions over rollups: James chose A, exact-only (2026-11-13), which is what the branch does. (2) the rename, open. (3) ALTER MODIFY SETTING / backfill: a route via DEFAULT arrayReduce + MATERIALIZE COLUMN is in the report, not built. (4) upstream PR 128889 (samples_downsampling_periods) uses toStartOfInterval, the left-closed convention this branch fixed for rollups. The .mdx pages were reverted to the base: the docs live only in the C++ doc strings (generated regions are read-only for the review bot). Preflight: 3 rounds; R1 4 Majors fixed, R2 1 Major fixed, R3 no code findings (the remaining asks are the build, the A/B numbers and do_not_check_in_pr)."
+      "notes": "Run 1 (James, 2026-11-20, #16 issuecomment-7030381215): fail against the plan, results identical everywhere. Selector rollup vs raw: 30d 1h 2.43x, 7d 1h 1.81x, 7d 5m 1.85x, 30d 5m 1.25x, 7d 1m 1.20x, 1d 1m 1.00x, 1d 5m/1h 0.74x/0.72x (the rollup-before-recent order, withdrawn in d521a31f4154). Storage 1.33x and total insert 1.08x pass; one-sample inserts 1.27x/1.21x vs 1.2x (a design cost: the sample is stored once per rollup column too; the same measure B vs A is 0.92x/1.01x). The 5m-over-30d and 1m gains are small because building the result's points costs the same in both arms. Kit fixed: rotated arm order, floors corrected to 1.63x (1h) / 1.47x (5m) by the floor rule, a 3-day window and a rollup_main arm (rollup forced on 1d/3d) for the TTL-edge trade-off, ONLY= and PROBE=. Preflight of the rework: R4 2 Majors fixed (docs; the 1d/3d evidence goes in the PR text after the build), R5 Approve. The branch conflicts with master since 11-16 (StorageTimeSeriesSelector.cpp, 05140 reference): rebase before the next build if A; A then = master at the new base. Schema version 12 and tests 05508/05621 were free on master on 11-17 (recheck at the rebase). The perf XML needs do_not_check_in_pr=\"<PR number>\" at submission. Settled: rate-type functions exact-only (James A, 2026-11-13). Not built: ALTER MODIFY SETTING / backfill route (report); upstream PR 128889 uses the left-closed convention."
     },
     {
       "slug": "selector-one-tags-row-per-id",

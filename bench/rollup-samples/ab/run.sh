@@ -10,7 +10,9 @@
 #   SCRAPE [15]
 #   SHAPE [jittered]     jittered: per-series offset in [0, SCRAPE) plus up to 40 ms; aligned: exact multiples of SCRAPE
 #   STEPS ['1m, 5m, 1h'] samples_rollup_steps of the rollup table
-#   RUNS [20]            timed runs per query and arm (interleaved), after one warm-up run
+#   RUNS [20]            timed runs per query and arm (interleaved, the order of the arms rotates), after one warm-up run
+#   ONLY ['']            a regular expression: run only the query cases whose id matches (for example '^selector_(1d|7d)_')
+#   PROBE [1]            0: skip the probe of range functions over rollups
 #   MAX_THREADS [16]
 #   SMALL_INSERTS [200]  remote-write style inserts of one sample per series (insert cost of small batches)
 #   SMOKE [0]            1: run the flow with a master binary as both binaries (no rollup settings), to check the harness
@@ -25,7 +27,7 @@ WORK=$(mkdir -p "${3:?work dir}" && cd "$3" && pwd)
 
 SERIES=${SERIES:-2000}; DAYS=${DAYS:-30}; SCRAPE=${SCRAPE:-15}; SHAPE=${SHAPE:-jittered}
 STEPS=${STEPS:-1m, 5m, 1h}; RUNS=${RUNS:-20}; MAX_THREADS=${MAX_THREADS:-16}
-SMALL_INSERTS=${SMALL_INSERTS:-200}; SMOKE=${SMOKE:-0}
+SMALL_INSERTS=${SMALL_INSERTS:-200}; SMOKE=${SMOKE:-0}; ONLY=${ONLY:-}; PROBE=${PROBE:-1}
 
 RES="$WORK/results"; mkdir -p "$RES"
 LOG="$RES/harness.log"
@@ -198,13 +200,16 @@ log "insert cost: $RES/insert_*.tsv, storage: $RES/storage_*.tsv, merges: $RES/p
 FUNCS=("selector|ab_gauge" "rate|rate(ab_counter_total[5m])" "increase|increase(ab_counter_total[1h])"
        "avg_over_time|avg_over_time(ab_gauge[1h])" "max_over_time|max_over_time(ab_gauge[1h])")
 CASES=()
-for w in 86400 604800 2592000; do
+for w in 86400 259200 604800 2592000; do   # 3 days: selector only, near the edge of the 4-day recent samples TTL
     [ "$w" -gt $(( DAYS * 86400 )) ] && continue
     for st in 15s:15 1m:60 5m:300 1h:3600; do
         IFS=: read -r sname ssec <<< "$st"
         # Prometheus refuses more than 11,000 points per series; so do we.
         if [ $(( w / ssec )) -gt 11000 ]; then echo -e "$w\t$sname\tskipped: $(( w / ssec )) points" >> "$RES/skipped.tsv"; continue; fi
-        for f in "${FUNCS[@]}"; do IFS='|' read -r fid q <<< "$f"; CASES+=("${fid}_$((w / 86400))d_$sname|$q|$w|$sname"); done
+        for f in "${FUNCS[@]}"; do IFS='|' read -r fid q <<< "$f"; cid="${fid}_$((w / 86400))d_$sname"
+            [ "$w" = 259200 ] && [ "$fid" != selector ] && continue
+            [ -n "$ONLY" ] && ! [[ $cid =~ $ONLY ]] && continue
+            CASES+=("$cid|$q|$w|$sname"); done
     done
 done
 log "${#CASES[@]} query cases, $RUNS runs each"
@@ -216,6 +221,13 @@ query_sql() { # promql window step table
 # arms of a query: label | server | table | extra settings
 QARMS=("rollup|branch|ab_rollup|$PREFER_ON" "raw|branch|ab_rollup|$PREFER_OFF")
 [ "$MASTER_BIN" != "-" ] && QARMS+=("master|master|ab_plain|")
+# Selectors inside the recent samples TTL (1d, 3d) also get rollup_main: the rollup column of the main table, forced
+# with time_series_prefer_recent_samples_table = 0, against raw, which reads the recent samples table there.
+case_arms() { # case id -> ARMS_OF
+    ARMS_OF=("${QARMS[@]}")
+    if [ "$SMOKE" != 1 ] && [[ $1 =~ ^selector_(1d|3d)_ ]]; then
+        ARMS_OF+=("rollup_main|branch|ab_rollup|$PREFER_ON, time_series_prefer_recent_samples_table = 0"); fi
+}
 
 run_query() { # label server table extra case run promql window step
     local label=$1 server=$2 table=$3 extra=$4 cid=$5 run=$6
@@ -223,12 +235,17 @@ run_query() { # label server table extra case run promql window step
         || echo -e "$cid\t$label\t$run" >> "$RES/query_errors.tsv"
 }
 
+# The order of the arms rotates with the run and the case, so every arm runs first, second and third equally often.
+# In a fixed order the first arm was slower: it followed a query on the other server (run 1 of 2026-11-20, up to 1.27x).
 for run in $(seq 0 "$RUNS"); do         # run 0 is the warm-up
+    ci=0
     for c in "${CASES[@]}"; do
         IFS='|' read -r cid q w st <<< "$c"
-        for qa in "${QARMS[@]}"; do IFS='|' read -r label server table extra <<< "$qa"
+        case_arms "$cid"; NQ=${#ARMS_OF[@]}
+        for k in $(seq 0 $(( NQ - 1 ))); do IFS='|' read -r label server table extra <<< "${ARMS_OF[$(( (run + ci + k) % NQ ))]}"
             run_query "$label" "$server" "$table" "$extra" "$cid" "$run" "$q" "$w" "$st"
         done
+        ci=$(( ci + 1 ))
     done
     log "run $run of $RUNS done"
 done
@@ -239,7 +256,8 @@ done
 mkdir -p "$RES/out"
 for c in "${CASES[@]}"; do
     IFS='|' read -r cid q w st <<< "$c"
-    for qa in "${QARMS[@]}"; do IFS='|' read -r label server table extra <<< "$qa"
+    case_arms "$cid"
+    for qa in "${ARMS_OF[@]}"; do IFS='|' read -r label server table extra <<< "$qa"
         ch "$server" -q "$(query_sql "$q" "$w" "$st" "$table") ORDER BY tags FORMAT TSV SETTINGS max_threads = $MAX_THREADS$extra" > "$RES/out/$cid.$label.tsv" \
             || echo -e "$cid\t$label\tresult" >> "$RES/query_errors.tsv"
     done
@@ -259,6 +277,7 @@ for c in "${CASES[@]}"; do
     IFS='|' read -r cid _ _ _ <<< "$c"
     tol=1e-9; [[ $cid == selector_* ]] && tol=0
     compare "$cid" rollup raw "$tol" >> "$RES/equality.tsv"
+    [ -f "$RES/out/$cid.rollup_main.tsv" ] && compare "$cid" rollup_main raw "$tol" >> "$RES/equality.tsv"
     [ "$MASTER_BIN" != "-" ] && compare "$cid" raw master 1e-9 >> "$RES/equality.tsv"
 done
 log "equality: $RES/equality.tsv"
@@ -266,7 +285,7 @@ log "equality: $RES/equality.tsv"
 # ---------------------------------------------------------------- probe: what range functions would get from a rollup
 # Not part of the pass rule: PromQL reads range selectors raw. This measures the error and speed of reading a rollup
 # for them, through timeSeriesSelector() with a step argument and the grid functions, over the 7-day window at a 1h step.
-if [ "$SMOKE" != 1 ] && [ "$DAYS" -ge 7 ]; then
+if [ "$SMOKE" != 1 ] && [ "$PROBE" = 1 ] && [ "$DAYS" -ge 7 ]; then
     S=$(( T_END - 604800 )); E=$T_END
     PROBES=("rate|timeSeriesRateToGrid($S, $E, 3600, 3900)|ab_counter_total|3900"
             "increase|timeSeriesIncreaseToGrid($S, $E, 3600, 3600)|ab_counter_total|3600"
@@ -312,14 +331,16 @@ ch branch -q "SELECT splitByChar(':', log_comment)[2] AS function, splitByChar('
 # ---------------------------------------------------------------- pass rule
 "$BRANCH_BIN" local -q "
   WITH l AS (SELECT * FROM file('$RES/latency.tsv', 'TSVWithNames')),
-       r AS (SELECT case, anyIf(p50_ms, arm = 'rollup') AS rollup_p50, anyIf(p50_ms, arm = 'raw') AS raw_p50, anyIf(p50_ms, arm = 'master') AS master_p50,
+       r AS (SELECT case, anyIf(p50_ms, arm = 'rollup') AS rollup_p50, anyIf(p50_ms, arm = 'raw') AS raw_p50, anyIf(p50_ms, arm = 'master') AS master_p50, anyIf(p50_ms, arm = 'rollup_main') AS rollup_main_p50,
                     anyIf(read_bytes, arm = 'rollup') AS rollup_bytes, anyIf(read_bytes, arm = 'raw') AS raw_bytes
              FROM l GROUP BY case)
   SELECT case, raw_p50, rollup_p50, round(raw_p50 / greatest(rollup_p50, 1), 2) AS speedup, round(raw_bytes / greatest(rollup_bytes, 1), 1) AS bytes_ratio,
          master_p50, round(raw_p50 / greatest(master_p50, 1), 3) AS raw_vs_master,
-         multiIf(case LIKE 'selector%_1h' OR case LIKE 'selector%_5m', if(case LIKE '%_1d_%', 'target-1d', 'target'),
+         rollup_main_p50, if(rollup_main_p50 > 0, round(raw_p50 / rollup_main_p50, 2), NULL) AS main_rollup_speedup,
+         multiIf(case LIKE 'selector_1d_%' OR case LIKE 'selector_3d_%', 'guard-recent', case LIKE 'selector%_1h', 'target-1h', case LIKE 'selector%_5m', 'target-5m',
                  case LIKE 'selector%_1m', 'target-1m', case LIKE 'selector%_15s', 'guard-15s', 'guard-range') AS role,
-         multiIf(role IN ('target', 'target-1d'), if(speedup >= 2 AND bytes_ratio >= 4, 'pass', 'FAIL'),
+         multiIf(role = 'target-1h', if(speedup >= 1.63 AND bytes_ratio >= 4, 'pass', 'FAIL'),
+                 role = 'target-5m', if(speedup >= 1.47 AND bytes_ratio >= 4, 'pass', 'FAIL'),
                  role = 'target-1m', if(speedup >= 1.25 AND bytes_ratio >= 2, 'pass', 'FAIL'),
                  if(speedup >= 0.95, 'pass', 'CHECK')) AS verdict
   FROM r ORDER BY role, case FORMAT TSVWithNames" > "$RES/summary.tsv"

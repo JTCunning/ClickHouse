@@ -2,13 +2,13 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-20 10:00 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-20 11:16 UTC.
 
 ## For you, in order
 
 | # | your move | item | issue | what it's for |
 |---|---|---|---|---|
-| 1 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rename the setting `time_series_prefer_rollup_tables` to `time_series_prefer_rollup_columns` (rollups are columns now; the setting is unreleased)? Recommended: yes, folded into the pre-submit rebase. Answer on #16; it does not block the build. |
+| 1 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Next build of the reworked branch (run 1 failed; d521a31 reads the recent table first again): A (recommended) lil red rebases onto master, with the rename to time_series_prefer_rollup_columns if you say yes, then one confirm build (the tests + ONLY='^selector_' PROBE=0 run.sh) and submit; B a full run 2 first; C park. Also yes or no to the rename. Answer on #16; it blocks the build. |
 | 2 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.

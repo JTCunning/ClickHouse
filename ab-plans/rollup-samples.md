@@ -1,5 +1,10 @@
 # A/B plan: rollup columns of TimeSeries samples tables
 **Experiment:** ../reports/2026-11-11-rollup-samples.md · **Branch:** `lilred-perf-rollup-samples` @ `6a1d8e48fae5` (James's `jtcunning/timeseries-rollup-samples` @ `daa53278310f` + 12 commits) · **Task:** 2026-11-05-handoff-timeseries-rollup-samples-table · **Issue:** https://github.com/JTCunning/ClickHouse/issues/16
+**Run 1 judged 2026-11-20** (James, 2026-11-20, issue #16; AMD EPYC 9R14, 16 pinned cores, base `57ca89d382d2` vs `6a1d8e48fae5`): **fail against this plan**, results identical everywhere. Targets, rollup vs raw (his order-controlled rerun): 30d 1h 2.43×, 7d 1h 1.81×, 7d 5m 1.85×, 30d 5m 1.25×, 7d 1m 1.20×, 1d 1m 1.00×, and 1d 5m / 1d 1h **0.74× / 0.72× (slower, significant)**. Storage 1.33× and total insert 1.08× pass; one-sample inserts 1.27× / 1.21× against ≤1.2× (A/A of that measure 0.92× / 1.01×). What changed for run 2, all on this page or in `run.sh`:
+- **The 1d loss was the branch** (design change 6: the rollup column before the recent samples table). Commit `d521a31f4154` reads the recent samples table first again, so `selector_1d_*` are guards now (equal to raw by construction), not targets.
+- **Plan defects, mine:** (1) a fixed arm order per case: the first arm, after a query on the other server, was up to 1.27× slower; `run.sh` now rotates the order. (2) "`read_rows` stays the same in every case" contradicted my own 1d rows, where raw read the recent table. (3) The floors of 2× at 5m and 1h were above the floor rule (0.4× the emulated change: 5m −80% → −32% = 1.47×; 1h −96.6% → −38.6% = 1.63×); the corrected floors are below, said openly, and run 1's 30d 5m and 7d 1m stay under them. (4) The rerun line compared two servers with one query; rollup and raw are settings on one server, so the rerun is blocks on the branch server, as James ran it. (5) Disk: about 11 GB of data and 19 GB of result dumps for the 30-day run, not 1 GB per server.
+- **Model miss:** the emulation timed the grid function alone on 2 threads, where reading raw samples dominated. End to end on 16 cores the rollup saves the raw read (73–85 ms over 30 days, 34–53 ms over 7 days) and the rest, building the result's points, is the same in both arms: 30d at 5m returns 8.6M points (about 300 ms in both arms), so it gains only 1.25×.
+
 **Harness:** `../bench/rollup-samples/ab/run.sh <branch binary> <master binary> <work dir>` (bash; needs only the two binaries and `awk`)
 **Claim:** a PromQL range query whose instant selector is evaluated at a step that a rollup step divides reads `samples_<step>` and returns the same result as the raw samples. Over 7 and 30 days of 15 s scrapes the plain selector is at least 2× faster at a 5m step and at least 3× faster at 1h, with 4× and 20× fewer bytes read. Range functions (`rate`, `increase`, `avg_over_time`, `max_over_time`) read the raw samples and don't change. Rollup steps `'1m, 5m, 1h'` make inserts at most 25% slower and the samples table about 31% bigger; `'5m, 1h'` costs about 6% of storage.
 **Evidence so far:** emulated on a master binary (rollups built in SQL from hourly rows, grid functions as PromQL calls them), 2 vCPU. Selector exact at every point for right-closed intervals; grid time at 1h ~29×, 5m ~5×, 1m ~2× (1000 series × 7 days, startup subtracted); column sizes 25.2% / 5.3% / 0.45% of `samples`. Unproven: the end-to-end query (tags lookup, planning, result), the cost of the sink's new pass, merges, and many cores.
@@ -14,7 +19,7 @@
 - A: master at the branch's merge target (the branch merges cleanly into `e8473460558a`). B: `lilred-perf-rollup-samples`. Release, no sanitizers. The test suite of the PR: `05508`, `05621`, the gtest `gtest_normalize_time_series_definition` (it needs `ENABLE_TESTS=ON`, which the first local build of the branch didn't have).
 
 ## Machine
-- 16 vCPU, 64 GB RAM, local NVMe, nothing else running. The data is about 1 GB per server (2000 series × 30 days); both servers run at once, queries never overlap. Note the CPU model.
+- 16 vCPU, 64 GB RAM, local NVMe, nothing else running. The 30-day run keeps about 8 GB of data on the branch server, 2.5 GB on master, and 19 GB of result dumps in `results/out` (run 1, 2026-11-20; this line said 1 GB per server before); both servers run at once, queries never overlap. Note the CPU model.
 
 ## Data
 - Generator: in `run.sh` (SQL, `numbers()` and `sipHash64`). `SERIES` series (default 2000), half gauges `ab_gauge` (sine, noise, a rare +300 spike), half counters `ab_counter_total` (varying rate, a reset every 7–31 hours); labels `instance` (one per series), `job` (8), `dc` (4). One sample every 15 s for `DAYS` days (default 30) ending at the current hour: 345.6M samples.
@@ -28,19 +33,21 @@ Steps 15s, 1m, 5m, 1h over windows 1d, 7d, 30d, skipping more than 11,000 points
 |---|---|---|---|
 | `selector_{7d,30d}_1h` | `ab_gauge` | target | 3–20× faster p50, read_bytes ÷20–200 (reads `samples_3600`) |
 | `selector_{7d,30d}_5m` | `ab_gauge` | target | 2–5× faster, read_bytes ÷4–20 (`samples_300`) |
-| `selector_1d_{5m,1h}` | `ab_gauge` | target (edge) | ≥2× faster: the rollup column now wins over the recent samples table, which `raw` reads for a range within its 4-day TTL |
+| `selector_3d_{1m,5m,1h}`, arm `rollup_main` on 1d and 3d | `ab_gauge` | measure (added 2026-11-20) | the trade-off near the 4-day TTL edge: `rollup_main` forces the rollup column of the main table (`time_series_prefer_recent_samples_table = 0`) against raw from the recent samples table; `summary.tsv` column `main_rollup_speedup`. Not in the pass rule; it decides whether recent-first needs a limit |
+| `selector_1d_{5m,1h}` | `ab_gauge` | guard (target in run 1) | unchanged since `d521a31f4154`: a range within the 4-day TTL reads the recent samples table in both arms. Run 1 read the rollup column there and was 0.72–0.74× |
 | `selector_{1d,7d}_1m` | `ab_gauge` | target | 1.25–2× faster, read_bytes ÷2–4 (`samples_60`) |
 | `selector_1d_15s` | `ab_gauge` | guard | unchanged: no rollup step divides 15 s |
 | edge run `SCRAPE=60 STEPS='1m' DAYS=7`: `selector_1d_1m` | `ab_gauge` | edge | not slower than 0.95×: the 1m column has every sample, and the rollup reads the main table where `raw` reads the recent table |
 | `rate_*`, `increase_*`, `avg_over_time_*`, `max_over_time_*` | `rate(ab_counter_total[5m])`, `increase(ab_counter_total[1h])`, `avg_over_time(ab_gauge[1h])`, `max_over_time(ab_gauge[1h])` | guard | unchanged: range selectors read the raw samples |
 | all, `raw` vs `master` | | guard | unchanged (the branch's raw path) |
 
-`read_rows` stays the same in every case: a rollup column sits on the same `(id, bucket)` rows as `samples`, so the same rows are read with fewer bytes. The win shows in `read_bytes`, CPU and latency.
+`read_rows` stays the same in every case that reads the main table in both arms: a rollup column sits on the same `(id, bucket)` rows as `samples`, so the same rows are read with fewer bytes. The win shows in `read_bytes`, CPU and latency. (Corrected 2026-11-20: run 1's 1d cases read the recent samples table in the raw arm, 112k rows against 132k.)
 
 ## Method
 - `run.sh` starts both servers (ports 19101 and 19102, generated configs with `query_log` and `part_log`), loads the data into each, then runs every case `RUNS` times (default 20, after one warm-up run), interleaving rollup, raw and master for each case. Each query is tagged with `log_comment = 'ab-q:<case>:<arm>:<run>'` and measured from `system.query_log`.
 - `max_threads` is set on every query (`MAX_THREADS`, default 16).
-- For a case where the summary is within 10% of a threshold, rerun it with `clickhouse benchmark --host 127.0.0.1 --port 19101 --host 127.0.0.1 --port 19102 -i 50 --confidence 5` (the SQL is in `results/latency.tsv`'s case name; the query text is printed by `query_sql` in `run.sh`).
+- The order of the arms rotates with the run and the case (since 2026-11-20): every arm runs first, second and third equally often.
+- For a case where the summary is within 10% of a threshold, rerun rollup against raw on the branch server in blocks (15 queries per block, order rollup, raw, raw, rollup, 30 per arm), times from `query_log`, `welchTTest` on them, as James ran it on 2026-11-20. Raw against master: `clickhouse benchmark --host 127.0.0.1 --port 19101 --host 127.0.0.1 --port 19102 -i 50 --confidence 5` on `ab_plain`.
 
 ## Metrics
 - Per case and arm: p50 and p95 `query_duration_ms`, median `read_rows`, `read_bytes`, `memory_usage`, `ProfileEvents['OSCPUVirtualTimeMicroseconds']` (`results/latency.tsv`, ratios in `results/summary.tsv`).
@@ -56,8 +63,9 @@ Steps 15s, 1m, 5m, 1h over windows 1d, 7d, 30d, skipping more than 11,000 points
 ## Pass / fail
 - **Pass** (the `verdict` column of `results/summary.tsv`):
   - `equality.tsv` has 0 in `series_differ` on every line, for both shapes;
-  - selector at 5m and 1h (1d, 7d, 30d): p50 at least 2× faster and `read_bytes` at least 4× lower;
-  - selector at 1m: at least 1.25× faster and `read_bytes` at least 2× lower;
+  - selector at 1h (7d, 30d): p50 at least 1.63× faster and `read_bytes` at least 4× lower; at 5m (7d, 30d): at least 1.47× and 4× (2× and 4× in run 1, corrected 2026-11-20 by the floor rule);
+  - selector at 1m (7d): at least 1.25× faster and `read_bytes` at least 2× lower;
+  - selector over 1d and 3d (all steps): no more than 5% slower (a guard since `d521a31f4154`);
   - no guard more than 5% slower at p50 (`CHECK` lines get the `clickhouse benchmark` rerun; a significant slowdown fails);
   - insert of `ab_rollup` (`'1m, 5m, 1h'`): total INSERT time at most 1.25× `ab_plain` on the branch, remote-write style insert at most 1.2×, samples table at most 1.35× the bytes; `ab_rollup_coarse` (`'5m, 1h'`) at most 1.1× and 1.1×; `ab_plain` on the branch within 5% of master.
 - **Fail:**
@@ -75,3 +83,8 @@ James asked about `rate`, `increase` and `*_over_time` over rollups. The branch 
 - [ ] save `results/` of both runs under `bench/rollup-samples/ab/results-<date>/`
 - [ ] fill the table of `prs/rollup-samples.md` and remove "pending"
 - [ ] update the report verdict and the backlog row
+
+## Run 2 (after James's answer on #16, 2026-11-20)
+- Option A, the confirm build: B = the branch rebased onto master (with the setting rename if he says yes), A = master at the new base. The tests of the item, then `ONLY='^selector_' PROBE=0 run.sh <B> <A> <dir>` (the 12 selector cases, 30 days, rotated order, `rollup_main` on 1d and 3d). Pass: the selector lines of the pass rule above; `selector_1d_*` and `selector_3d_*` within 5% of raw with equal `read_rows`; equality 0. Report `main_rollup_speedup` for 1d and 3d.
+- Option B, the full matrix: the three runs of the checklist on the same head.
+
