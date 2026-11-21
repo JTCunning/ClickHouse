@@ -22,7 +22,8 @@ public:
         size_t buf_size = DBMS_DEFAULT_BUFFER_SIZE,
         char * existing_memory = nullptr,
         size_t alignment = 0,
-        int zstd_window_log_max = 0);
+        int zstd_window_log_max = 0,
+        bool throw_on_incomplete_frame_ = false);
 
 private:
     bool nextImpl() override;
@@ -31,6 +32,7 @@ private:
     ZSTD_inBuffer input{};
     ZSTD_outBuffer output{};
     bool eof_flag = false;
+    const bool throw_on_incomplete_frame;
 };
 
 }

@@ -345,7 +345,13 @@ public:
         if (content_encoding == "snappy")
             decompressing_buf = std::make_unique<SnappyBasicReadBuffer>(wrapReadBufferPointer(request.getStream()));
         else if (content_encoding == "zstd")
-            decompressing_buf = std::make_unique<ZstdInflatingReadBuffer>(wrapReadBufferPointer(request.getStream()));
+            decompressing_buf = std::make_unique<ZstdInflatingReadBuffer>(
+                wrapReadBufferPointer(request.getStream()),
+                DBMS_DEFAULT_BUFFER_SIZE,
+                /* existing_memory= */ nullptr,
+                /* alignment= */ 0,
+                /* zstd_window_log_max= */ 0,
+                /* throw_on_incomplete_frame= */ true);
         else
             throw Exception(ErrorCodes::UNSUPPORTED_MEDIA_TYPE,
                 "HTTP header Content-Encoding has unsupported value '{}' (must be 'snappy' or 'zstd')", content_encoding);

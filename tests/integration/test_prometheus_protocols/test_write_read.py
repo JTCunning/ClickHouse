@@ -7,6 +7,7 @@ from .prometheus_test_utils import (
     convert_time_series_to_protobuf,
     execute_query_via_http_api,
     get_response_to_remote_read,
+    compress_remote_write_request,
     get_response_to_remote_write,
     receive_protobuf_from_remote_read,
     send_protobuf_to_remote_write,
@@ -185,6 +186,39 @@ def test_remote_write_zstd():
     assert len(read_response.results) == 1
     assert len(read_response.results[0].timeseries) == 1
     assert len(read_response.results[0].timeseries[0].samples) == count
+
+
+@pytest.mark.parametrize("kept_fraction", [0, 0.25, 0.5, 0.75, 0.95])
+def test_remote_write_truncated_zstd_body(kept_fraction):
+    """A zstd body that ends before the end of its frame is answered with 400, not with 204:
+    a sender treats a 204 as a stored batch, and nothing of the batch is written."""
+    time_series = [
+        (
+            {"__name__": "truncated_zstd_data", "job": "test", "instance": f"host{i}"},
+            {1724117000: float(i)},
+        )
+        for i in range(200)
+    ]
+    serialized = convert_time_series_to_protobuf(time_series).SerializeToString()
+    compressed = compress_remote_write_request(serialized, "zstd")
+    response = requests.post(
+        f"http://{node.ip_address}:9093/write",
+        data=compressed[: int(len(compressed) * kept_fraction)],
+        headers={
+            "Content-Encoding": "zstd",
+            "Content-Type": "application/x-protobuf",
+            "User-Agent": requests.utils.default_user_agent(),
+            "X-Prometheus-Remote-Write-Version": "0.1.0",
+        },
+    )
+    assert response.status_code == requests.codes.bad_request, response.text
+    assert "Cannot decode the request body" in response.text
+    assert (
+        node.query(
+            "SELECT count() FROM timeSeriesTags(prometheus) WHERE metric_name = 'truncated_zstd_data'"
+        )
+        == "0\n"
+    )
 
 
 def test_remote_write_unsupported_content_encoding():

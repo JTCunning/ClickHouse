@@ -10,8 +10,10 @@ namespace ErrorCodes
     extern const int ZSTD_DECODER_FAILED;
 }
 
-ZstdInflatingReadBuffer::ZstdInflatingReadBuffer(std::unique_ptr<ReadBuffer> in_, size_t buf_size, char * existing_memory, size_t alignment, int zstd_window_log_max)
+ZstdInflatingReadBuffer::ZstdInflatingReadBuffer(
+    std::unique_ptr<ReadBuffer> in_, size_t buf_size, char * existing_memory, size_t alignment, int zstd_window_log_max, bool throw_on_incomplete_frame_)
     : CompressedReadBufferWrapper(std::move(in_), buf_size, existing_memory, alignment)
+    , throw_on_incomplete_frame(throw_on_incomplete_frame_)
 {
     dctx.reset(ZSTD_createDCtx());
     input = {nullptr, 0, 0};
@@ -80,6 +82,14 @@ bool ZstdInflatingReadBuffer::nextImpl()
         /// If end of file is reached, fill eof variable and return true if there is some data in buffer, otherwise return false
         if (in->eof())
         {
+            /// A non-zero result is the decoder's request for more input: the last frame is not complete.
+            if (throw_on_incomplete_frame && ret != 0)
+                throw Exception(
+                    ErrorCodes::ZSTD_DECODER_FAILED,
+                    "ZSTD stream decoding failed: the input ends before the end of a frame; ZSTD version: {}{}",
+                    ZSTD_VERSION_STRING,
+                    getExceptionEntryWithFileName(*in));
+
             eof_flag = true;
             return !working_buffer.empty();
         }
