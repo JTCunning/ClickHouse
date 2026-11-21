@@ -415,7 +415,7 @@
     {
       "slug": "remote-write-arena",
       "priority": 12,
-      "status": "ready-to-build",
+      "status": "results-in",
       "title": "Parse Prometheus remote-write requests into a protobuf arena",
       "branch": "lilred-perf-remote-write-arena",
       "summary": "remote write: parsing and destroying the request on the heap is 8.4% of server CPU (17% outside merges); parse into a protobuf arena; predicted CPU per sample -7..-17% with merges stopped",
