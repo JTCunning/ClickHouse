@@ -266,7 +266,7 @@ void PrometheusHTTPProtocolAPI::executePromQLQuery(
         PullingAsyncPipelineExecutor executor(io.pipeline);
 
         /// Mind using the getResultType() method from PrometheusQueryToSQL::Converter, not from the PrometheusQueryTree.
-        writeQueryResponse(response, executor, converter.getResultType());
+        writeQueryResponse(response, executor, converter.getResultType(), /* series_share_timestamps= */ params.type == Type::Range);
 
         /// Store the buffered result in the query result cache now (no-op if no cache writers exist in the pipeline):
         /// the executor's destructor cancels the pipeline processors, after which the pending write would be discarded.
@@ -284,7 +284,7 @@ void PrometheusHTTPProtocolAPI::executePromQLQuery(
 }
 
 void PrometheusHTTPProtocolAPI::writeQueryResponse(
-    WriteBuffer & response, PullingAsyncPipelineExecutor & pulling_executor, PrometheusQueryResultType result_type)
+    WriteBuffer & response, PullingAsyncPipelineExecutor & pulling_executor, PrometheusQueryResultType result_type, bool series_share_timestamps)
 {
     /// Pull until the first non-empty block is ready before writing the header
     /// because pulling_executor.pull() can throw an exception and it's better to catch it early and write
@@ -304,12 +304,12 @@ void PrometheusHTTPProtocolAPI::writeQueryResponse(
 
     if (has_output)
     {
-        writeQueryResponseBlock(response, result_type, block, /*first=*/ true);
+        writeQueryResponseBlock(response, result_type, block, /*first=*/ true, series_share_timestamps);
 
         while (pulling_executor.pull(block))
         {
             if (block.rows() > 0)
-                writeQueryResponseBlock(response, result_type, block, /*first=*/ false);
+                writeQueryResponseBlock(response, result_type, block, /*first=*/ false, series_share_timestamps);
         }
     }
 
@@ -345,7 +345,8 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseFooter(WriteBuffer & response)
     writeString("]}}", response);
 }
 
-void PrometheusHTTPProtocolAPI::writeQueryResponseBlock(WriteBuffer & response, PrometheusQueryResultType result_type, const Block & result_block, bool first)
+void PrometheusHTTPProtocolAPI::writeQueryResponseBlock(
+    WriteBuffer & response, PrometheusQueryResultType result_type, const Block & result_block, bool first, bool series_share_timestamps)
 {
     LOG_TRACE(log, "Prometheus: Writing {} result ({} rows)", result_type, result_block.rows());
 
@@ -368,7 +369,7 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseBlock(WriteBuffer & response, 
         }
         case PrometheusQueryTree::ResultType::RANGE_VECTOR:
         {
-            writeQueryResponseRangeVectorBlock(response, result_block, first);
+            writeQueryResponseRangeVectorBlock(response, result_block, first, series_share_timestamps);
             return;
         }
     }
@@ -465,7 +466,8 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseInstantVectorBlock(WriteBuffer
     }
 }
 
-void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer & response, const Block & result_block, bool first)
+void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(
+    WriteBuffer & response, const Block & result_block, bool first, bool series_share_timestamps)
 {
     const auto & time_series_column_with_type
         = result_block.getByName(TimeSeriesColumnNames::getOuterSamples(time_series_storage->getVersion()));
@@ -486,31 +488,34 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
     /// The series of a range query are evaluated at the same steps, so they share their timestamps.
     /// The timestamps of the longest series of the block are formatted once here, and every series copies
     /// the text of each timestamp it shares with that series instead of formatting it again.
-    /// Timestamps that series doesn't have (and the samples of a range selector, which differ between series)
-    /// are formatted as before.
-    size_t longest_start = 0;
-    size_t longest_end = 0;
-    for (size_t i = 0; i < result_block.rows(); ++i)
-    {
-        size_t start = (i == 0) ? 0 : offsets[i - 1];
-        if (offsets[i] - start > longest_end - longest_start)
-        {
-            longest_start = start;
-            longest_end = offsets[i];
-        }
-    }
-
+    /// Other timestamps (a step the longest series has no point at) are formatted as before. The cache isn't built
+    /// for a block of one series, nor for other results (the samples of a range selector differ between series).
     std::vector<Int64> cached_timestamps;
     std::vector<size_t> cached_text_ends;
-    cached_timestamps.reserve(longest_end - longest_start);
-    cached_text_ends.reserve(longest_end - longest_start);
     WriteBufferFromOwnString cached_text_buffer;
-    for (size_t j = longest_start; j < longest_end; ++j)
+    if (series_share_timestamps && result_block.rows() > 1)
     {
-        Int64 timestamp = timestamp_column.getInt(j);
-        cached_timestamps.push_back(timestamp);
-        writeTimestamp(cached_text_buffer, DateTime64{timestamp}, timestamp_scale);
-        cached_text_ends.push_back(cached_text_buffer.count());
+        size_t longest_start = 0;
+        size_t longest_end = 0;
+        for (size_t i = 0; i < result_block.rows(); ++i)
+        {
+            size_t start = (i == 0) ? 0 : offsets[i - 1];
+            if (offsets[i] - start > longest_end - longest_start)
+            {
+                longest_start = start;
+                longest_end = offsets[i];
+            }
+        }
+
+        cached_timestamps.reserve(longest_end - longest_start);
+        cached_text_ends.reserve(longest_end - longest_start);
+        for (size_t j = longest_start; j < longest_end; ++j)
+        {
+            Int64 timestamp = timestamp_column.getInt(j);
+            cached_timestamps.push_back(timestamp);
+            writeTimestamp(cached_text_buffer, DateTime64{timestamp}, timestamp_scale);
+            cached_text_ends.push_back(cached_text_buffer.count());
+        }
     }
     const std::string_view cached_text = cached_text_buffer.stringView();
 
@@ -534,7 +539,8 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
         size_t start = (i == 0) ? 0 : offsets[i-1];
         size_t end = offsets[i];
 
-        /// The timestamps of a series are increasing, so one forward pass over the cached timestamps finds them.
+        /// The timestamps of a series are increasing: the next point is usually at the next cached timestamp,
+        /// and a series that starts later or skips steps jumps forward with a binary search.
         size_t cached_index = 0;
 
         for (size_t j = start; j < end; ++j)
@@ -544,8 +550,16 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
 
             writeString("[", response);
             Int64 timestamp = timestamp_column.getInt(j);
-            while (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] < timestamp)
+            if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] < timestamp)
+            {
                 ++cached_index;
+                if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] < timestamp)
+                {
+                    const Int64 * cached_begin = cached_timestamps.data();
+                    const Int64 * cached_end = cached_begin + cached_timestamps.size();
+                    cached_index = static_cast<size_t>(std::lower_bound(cached_begin + cached_index, cached_end, timestamp) - cached_begin);
+                }
+            }
             if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] == timestamp)
             {
                 size_t text_begin = (cached_index == 0) ? 0 : cached_text_ends[cached_index - 1];
