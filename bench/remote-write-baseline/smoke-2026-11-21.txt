@@ -1,0 +1,50 @@
+Dry run of the re-baseline kit for remote-write-baseline (study mode B, 2026-11-21 02:00 PT)
+Host: 2 vCPU / 4 GiB. Master 26.12.1.112, 521c4bcb7b94 (the same sha as A in the remote-write-arena results of
+2026-11-21). It includes #131678 (samples granules 262144 B, `ALP, ZSTD(4)` values) and not upstream PR 131497 (ALP
+search early exit, open).
+
+A. Static checks (kit-dryrun §2)
+- window from the data: scale.sh takes the timestamps from the clock (2 h back, warm pass 10 min later); rw.py's
+  default --ts0 is fixed, but scale.sh always passes --ts0.
+- moved defaults: every cell creates `ENGINE = TimeSeries` with today's defaults on purpose (the plan re-baselines
+  today's schema). The 2026-11-01 variant-*.sql files are frozen copies of that day's SHOW CREATE (524288 B granules,
+  ZSTD(3)); the plan does not use them.
+- one request stream per cell, the same for every round; no B server (one build).
+- cell order rotates per round ((round + k) % cells).
+- kit defects found and fixed before the run:
+  1. run.sh looked up the server as a child of the pid file's process (`pgrep -P`). server.sh --daemon writes the
+     server's own pid (254681 here, no child), so run.sh would have exited under `set -e`. Now it falls back to the
+     pid file's process.
+  2. run.sh read latencies from /tmp/rw_*.log, so a 4-sender run after a 16-sender run would also read the 12 stale
+     logs. Now each run has its own mktemp directory.
+- no stateless or integration test is named (one build, measurement only).
+
+B. Run: DATA=<scratch> SENDERS_LIST="1 4" MERGES_LIST="run stop" ROUNDS=1 REQUESTS=10 scale.sh (raw:
+   smoke-2026-11-21-scale.txt). Server from ../remote-write-arena/server.sh, SERVER_MEM=2500000000,
+   QUERY_MEM=2000000000, CPU profiler at 2 ms. 21 s.
+
+   cell            CPU us/sample   parts/request   p50 latency
+   1 sender run       25.00            3.40           87 ms
+   1 sender stop      15.00            3.20           83 ms
+   4 senders run      22.62            1.48          232 ms
+   4 senders stop     12.12            1.43          237 ms
+   (warm passes; cold: 24.5 / 20.5 / 27.0 / 14.25)
+-> merge share (1 - stop/run): 40% at 1 sender, 46% at 4 (2026-11-01: 52% at 1 sender; arena A on 16 cores
+   2026-11-21: 49%, 14.8 vs 29.1 us). The ~50% claim holds on today's master within one round's noise.
+-> 4 senders vs 1: -9.5% CPU per sample (2026-11-01: about -20%). One round on a host whose 2 vCPU also run the 4
+   senders; the build host must separate the cores before this number means anything (plan, Machine).
+-> CPU per sample at 1 sender, 25.0 us, sits inside the report's 20-26 us.
+
+C. Correctness: the last cell (4 senders, merges stopped) holds 160,000 samples rows (= 4 x 2,000 x 10 cold + the same
+   warm), 160,000 time ranges rows and 80,000 tags rows (= 4 x 20,000 series, so the warm pass wrote no tags rows).
+-> the counts the plan's Correctness section states hold.
+
+D. Profile query (profile.sql, the whole smoke, all 4 cells; raw: smoke-2026-11-21-profile.txt): 956 samples; merges
+   0.286, alp 0.115, low_cardinality 0.124, protobuf 0.160, zstd 0.027, siphash 0.041, dedup cache 0.039, and 0.458
+   under AsynchronousInsertQueue frames.
+-> the query runs and its rows land near the report's shares (ALP 12%, LowCardinality 12%, protobuf 10%). The async
+   row counts the whole flush, because the insert pipeline runs under the queue's frames: renamed async_flush_total
+   after the run, with a comment (edited after the dry run, not re-run: the rename and the comment only).
+-> the shares here mix stopped and running cells; the plan's P cases profile one cell each.
+
+Servers stopped and data removed.

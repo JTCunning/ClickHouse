@@ -1,0 +1,11 @@
+Row 1:
+──────
+samples:         956
+merges:          0.286
+alp:             0.115
+low_cardinality: 0.124
+protobuf:        0.16
+zstd:            0.027
+async_queue:     0.458
+siphash:         0.041
+dedup_cache:     0.039

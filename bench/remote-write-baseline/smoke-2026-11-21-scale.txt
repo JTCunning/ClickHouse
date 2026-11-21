@@ -1,0 +1,10 @@
+# 26.12.1.112	2 nproc=2 cells=1:run 1:stop 4:run 4:stop rounds=1 series=2000 sps=1 universe=20000 requests=10 labels=10
+round=0 merges=run cold: senders=1 series/req=2000 samples/series=1 reqs=10 wall=1.48s samples/s=13,488 cpu=0.49s cpu_us/sample=24.50 cpu_ms/req=49.00 parts=44 parts/req=4.40 inner_rows=100147 async_q=10 p50_lat=94ms peakRSS=711MiB
+round=0 merges=run warm: senders=1 series/req=2000 samples/series=1 reqs=10 wall=1.49s samples/s=13,415 cpu=0.50s cpu_us/sample=25.00 cpu_ms/req=50.00 parts=34 parts/req=3.40 inner_rows=80189 async_q=10 p50_lat=87ms peakRSS=717MiB
+round=0 merges=stop cold: senders=1 series/req=2000 samples/series=1 reqs=10 wall=1.48s samples/s=13,521 cpu=0.41s cpu_us/sample=20.50 cpu_ms/req=41.00 parts=44 parts/req=4.40 inner_rows=100191 async_q=10 p50_lat=90ms peakRSS=728MiB
+round=0 merges=stop warm: senders=1 series/req=2000 samples/series=1 reqs=10 wall=1.48s samples/s=13,521 cpu=0.30s cpu_us/sample=15.00 cpu_ms/req=30.00 parts=32 parts/req=3.20 inner_rows=80084 async_q=10 p50_lat=83ms peakRSS=730MiB
+round=0 merges=run cold: senders=4 series/req=2000 samples/series=1 reqs=40 wall=3.86s samples/s=20,723 cpu=2.16s cpu_us/sample=27.00 cpu_ms/req=54.00 parts=76 parts/req=1.90 inner_rows=400694 async_q=40 p50_lat=171ms peakRSS=772MiB
+round=0 merges=run warm: senders=4 series/req=2000 samples/series=1 reqs=40 wall=3.39s samples/s=23,594 cpu=1.81s cpu_us/sample=22.62 cpu_ms/req=45.25 parts=59 parts/req=1.48 inner_rows=320497 async_q=40 p50_lat=232ms peakRSS=769MiB
+round=0 merges=stop cold: senders=4 series/req=2000 samples/series=1 reqs=40 wall=2.75s samples/s=29,072 cpu=1.14s cpu_us/sample=14.25 cpu_ms/req=28.50 parts=62 parts/req=1.55 inner_rows=400426 async_q=40 p50_lat=154ms peakRSS=764MiB
+round=0 merges=stop warm: senders=4 series/req=2000 samples/series=1 reqs=40 wall=3.17s samples/s=25,244 cpu=0.97s cpu_us/sample=12.12 cpu_ms/req=24.25 parts=57 parts/req=1.43 inner_rows=320356 async_q=40 p50_lat=237ms peakRSS=771MiB
+rc=0

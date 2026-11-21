@@ -2,6 +2,7 @@
 
 **Verdict:** baseline only, no fix in this run. At Prometheus's default batch shape the server spends ~20–26 µs of CPU per sample, and half of that is background merges of the tiny parts each request creates. Two cheap levers stand out: (1) the `ALP` value codec re-runs its full parameter search for every 256-row granule, adding about 16% to ingest CPU; (2) the `LowCardinality(UUID)` half of the series id adds about 7%. The tags dedup cache already saves ~27% and works as intended.
 **Task:** 2026-10-31-baseline-remote-write-ingest-and-the-ded (scout) · **Build:** 26.11.1.974, a7f713612c80 · **Date:** 2026-11-01
+**A/B plan:** [../ab-plans/remote-write-baseline.md](../ab-plans/remote-write-baseline.md) (re-baseline at 16 cores and 1–16 senders, one master build)
 
 ## What happens (plain language)
 

@@ -8,7 +8,9 @@
 set -euo pipefail
 LABEL=$1 P=$2 S=$3 N=$4 SPS=$5 U=$6 R=$7; shift 7
 DIR=$(cd "$(dirname "$0")" && pwd)
-PID=$(pgrep -P $(cat ${PIDFILE:-/root/nerve-workspace/tools/clickhouse/data/remote-write-baseline/server.pid}) -x clickhouse)
+P0=$(cat ${PIDFILE:-/root/nerve-workspace/tools/clickhouse/data/remote-write-baseline/server.pid})
+PID=$(pgrep -P "$P0" -x clickhouse || echo "$P0")   # the server under a watchdog parent, else the pid file's own process
+LOGDIR=$(mktemp -d /tmp/rw.XXXXXX); trap 'rm -rf "$LOGDIR"' EXIT   # per run: a 4-sender run must not read a 16-sender run's logs
 C="${CH:-/root/nerve-workspace/tools/clickhouse/master/clickhouse} client --port ${TCP_PORT:-19000}"
 settle() { [ "${SETTLE:-0}" = 1 ] || return 0; for _ in $(seq 600); do [ "$($C -q "SELECT count() FROM system.merges")" = 0 ] && return 0; sleep 1; done; echo "merges did not settle in 600 s" >&2; }
 settle
@@ -19,22 +21,22 @@ pids=()
 for i in $(seq 0 $((S-1))); do
   # each sender gets its own slice of the series universe
   python3 $DIR/rw.py "http://127.0.0.1:${RW_PORT:-19093}/$P" --series $N --samples-per-series $SPS --universe $U --requests $R --id-offset $((i*U)) "$@" \
-    > /tmp/rw_$i.log 2>&1 &
+    > "$LOGDIR/$i.log" 2>&1 &
   pids+=($!)
 done
 while kill -0 "${pids[@]}" 2>/dev/null; do r=$(awk '/VmRSS/{print $2}' /proc/$PID/status); [ "$r" -gt "$peak" ] && peak=$r; sleep 0.2; done
 rc=0; for p in "${pids[@]}"; do wait $p || rc=1; done
 settle
 t1=$(date +%s.%N); c1=$(cpu); read b1 r1 a1 < <(ev)
-[ $rc = 0 ] || { echo "FAILED"; cat /tmp/rw_*.log | tail -5; exit 1; }
+[ $rc = 0 ] || { echo "FAILED"; cat "$LOGDIR"/*.log | tail -5; exit 1; }
 tick=$(getconf CLK_TCK)
-python3 - "$LABEL" $S $N $SPS $R $t0 $t1 $c0 $c1 $tick $b0 $b1 $r0 $r1 $a0 $a1 $peak <<'PY'
-import sys, statistics, glob
+LOGDIR="$LOGDIR" python3 - "$LABEL" $S $N $SPS $R $t0 $t1 $c0 $c1 $tick $b0 $b1 $r0 $r1 $a0 $a1 $peak <<'PY'
+import sys, statistics, glob, os
 l,S,N,SPS,R,t0,t1,c0,c1,tick,b0,b1,r0,r1,a0,a1,peak=sys.argv[1:]
 S,N,SPS,R=map(int,(S,N,SPS,R)); wall=float(t1)-float(t0); cpu=(int(c1)-int(c0))/int(tick)
 samples=S*N*SPS*R; reqs=S*R
 lat=[]
-for f in glob.glob('/tmp/rw_*.log'):
+for f in glob.glob(os.environ['LOGDIR'] + '/*.log'):
     lat += [float(x.split()[2][:-1]) for x in open(f) if x.startswith('req ')]
 print(f"{l}: senders={S} series/req={N} samples/series={SPS} reqs={reqs} wall={wall:.2f}s "
       f"samples/s={samples/wall:,.0f} cpu={cpu:.2f}s cpu_us/sample={cpu*1e6/samples:.2f} cpu_ms/req={cpu*1e3/reqs:.2f} "
