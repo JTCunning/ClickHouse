@@ -483,6 +483,37 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
 
     UInt32 timestamp_scale = tryGetDecimalScale(*timestamp_data_type).value_or(0);
 
+    /// The series of a range query are evaluated at the same steps, so they share their timestamps.
+    /// The timestamps of the longest series of the block are formatted once here, and every series copies
+    /// the text of each timestamp it shares with that series instead of formatting it again.
+    /// Timestamps that series doesn't have (and the samples of a range selector, which differ between series)
+    /// are formatted as before.
+    size_t longest_start = 0;
+    size_t longest_end = 0;
+    for (size_t i = 0; i < result_block.rows(); ++i)
+    {
+        size_t start = (i == 0) ? 0 : offsets[i - 1];
+        if (offsets[i] - start > longest_end - longest_start)
+        {
+            longest_start = start;
+            longest_end = offsets[i];
+        }
+    }
+
+    std::vector<Int64> cached_timestamps;
+    std::vector<size_t> cached_text_ends;
+    cached_timestamps.reserve(longest_end - longest_start);
+    cached_text_ends.reserve(longest_end - longest_start);
+    WriteBufferFromOwnString cached_text_buffer;
+    for (size_t j = longest_start; j < longest_end; ++j)
+    {
+        Int64 timestamp = timestamp_column.getInt(j);
+        cached_timestamps.push_back(timestamp);
+        writeTimestamp(cached_text_buffer, DateTime64{timestamp}, timestamp_scale);
+        cached_text_ends.push_back(cached_text_buffer.count());
+    }
+    const std::string_view cached_text = cached_text_buffer.stringView();
+
     bool need_comma = !first;
 
     for (size_t i = 0; i < result_block.rows(); ++i)
@@ -503,14 +534,27 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(WriteBuffer &
         size_t start = (i == 0) ? 0 : offsets[i-1];
         size_t end = offsets[i];
 
+        /// The timestamps of a series are increasing, so one forward pass over the cached timestamps finds them.
+        size_t cached_index = 0;
+
         for (size_t j = start; j < end; ++j)
         {
             if (j > start)
                 writeString(",", response);
 
             writeString("[", response);
-            DateTime64 timestamp = timestamp_column.getInt(j);
-            writeTimestamp(response, timestamp, timestamp_scale);
+            Int64 timestamp = timestamp_column.getInt(j);
+            while (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] < timestamp)
+                ++cached_index;
+            if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] == timestamp)
+            {
+                size_t text_begin = (cached_index == 0) ? 0 : cached_text_ends[cached_index - 1];
+                response.write(cached_text.data() + text_begin, cached_text_ends[cached_index] - text_begin);
+            }
+            else
+            {
+                writeTimestamp(response, DateTime64{timestamp}, timestamp_scale);
+            }
             writeString(",\"", response);
             Float64 value = value_column.getFloat64(j);
             writeScalar(response, value);
