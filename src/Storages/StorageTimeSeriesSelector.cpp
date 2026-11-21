@@ -306,13 +306,6 @@ StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfigura
             time_series_storage_id.table_name = getStringConstArgument(args[argument_index++], context, "table_name");
         }
     }
-    else if (has_step_argument)
-    {
-        throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
-                        "Table function '{}' accepts the optional 'step' argument only in the form "
-                        "{}(database, table, selector, min_time, max_time, return_columns, step)",
-                        function_name, function_name);
-    }
 
     time_series_storage_id = context->resolveStorageID(time_series_storage_id);
 
@@ -348,7 +341,7 @@ StorageTimeSeriesSelector::Configuration StorageTimeSeriesSelector::getConfigura
     DateTime64 step{};
     if (step_value)
     {
-        step = parseTimeSeriesTimestamp(resolveActiveAlternative(*step_value), parameters_scale);
+        step = DateTime64{parseTimeSeriesDuration(resolveActiveAlternative(*step_value), parameters_scale).value};
         if (step < 0)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Table function '{}' requires a non-negative 'step' argument", function_name);
     }
