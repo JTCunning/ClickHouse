@@ -52,3 +52,6 @@ ts_rollup_src	12	1	1	1
 0	1
 1	0
 1	0
+-- a rollup column skips a row with no samples in a range longer than a bucket
+0	0
+1	10

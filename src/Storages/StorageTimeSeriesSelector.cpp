@@ -1024,7 +1024,7 @@ namespace
     ///
     /// SELECT _CAST(id, 'UInt64') AS id, _CAST(samples, 'Array(Tuple(DateTime64(3), Float64))') AS samples
     /// FROM (select_query_from_samples_table)
-    /// WHERE notEmpty(samples)    -- if the time range is shorter than a bucket
+    /// WHERE notEmpty(samples)    -- if the time range is shorter than a bucket or a rollup column is read
     ///
     /// For a table of an earlier version storing one sample per row (`bucket_step` is zero):
     ///
@@ -1037,7 +1037,8 @@ namespace
                            const DataTypePtr & table_id_type,
                            const DataTypePtr & table_timestamp_type,
                            const DataTypePtr & table_value_type,
-                           Decimal64 bucket_step)
+                           Decimal64 bucket_step,
+                           bool reads_rollup_column)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -1066,10 +1067,12 @@ namespace
 
             /// WHERE notEmpty(samples)
             /// A row matching `min_time` and `max_time` has no samples in the range only if the range lies strictly between them,
-            /// so only a range shorter than a bucket needs the filter.
+            /// so only a range shorter than a bucket needs the filter. A rollup column doesn't keep every sample of the row:
+            /// its slice is also empty when every sample of the row in the range is followed by a later one in the same rollup interval.
             const auto & range = time_range_to_filter_samples;
-            if (range.min_time && range.max_time
-                && static_cast<Int128>(range.max_time->value) - range.min_time->value < bucket_step.value)
+            if (reads_rollup_column
+                || (range.min_time && range.max_time
+                    && static_cast<Int128>(range.max_time->value) - range.min_time->value < bucket_step.value))
             {
                 select_query->setExpression(ASTSelectQuery::Expression::WHERE,
                     makeASTFunction("notEmpty", make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples)));
@@ -1530,7 +1533,8 @@ void StorageTimeSeriesSelector::readImpl(
         config.table_id_type,
         config.table_timestamp_type,
         config.table_value_type,
-        bucket_step);
+        bucket_step,
+        /* reads_rollup_column = */ samples_column_name != TimeSeriesColumnNames::Samples);
 
     select_query = convertToReturnColumns(
         std::move(select_query), config.table_timestamp_type, config.table_value_type, bucket_step, config.return_columns);

@@ -18,6 +18,7 @@ DROP TABLE IF EXISTS ts_rollup_copy_5m;
 DROP TABLE IF EXISTS ts_rollup_copy_none;
 DROP TABLE IF EXISTS ts_rollup_copy_v11;
 DROP TABLE IF EXISTS ts_rollup_recent;
+DROP TABLE IF EXISTS ts_rollup_gap;
 
 SELECT '-- the intervals are closed on the right: a sample at a multiple of the step ends its interval';
 SELECT timeSeriesGroupArray(60)(timestamps, values)
@@ -318,3 +319,14 @@ SETTINGS time_series_prefer_recent_samples_table = 0;
 SELECT countIf(position(explain, 'samples_60') > 0) > 0 AS reads_rollup, countIf(position(explain, '.inner_id.recentsamples.') > 0) > 0 AS reads_recent
 FROM (EXPLAIN SELECT * FROM timeSeriesSelector(currentDatabase(), 'ts_rollup_recent', 'm', now() - 5 * 86400, now(), 'samples', 60));
 DROP TABLE ts_rollup_recent;
+
+SELECT '-- a rollup column skips a row with no samples in a range longer than a bucket';
+-- The interval (3600, 3900] of the 5m rollup keeps only its last sample at 3890, which is after the range [0, 3700].
+CREATE TABLE ts_rollup_gap ENGINE = TimeSeries
+SETTINGS samples_bucket_step_seconds = 3600, samples_rollup_steps = '5m', recent_samples_ttl_seconds = 0;
+INSERT INTO ts_rollup_gap (metric_name, tags, samples)
+SELECT 'g', map('k', 'v'), arrayMap(j -> (toDateTime64(3600 + j * 10, 3), toFloat64(j)), range(1, 30));
+SELECT count(), sum(length(samples)) FROM timeSeriesSelector(currentDatabase(), 'ts_rollup_gap', 'g', 0, 3700, 'samples', 300);
+SELECT count(), sum(length(samples)) FROM timeSeriesSelector(currentDatabase(), 'ts_rollup_gap', 'g', 0, 3700, 'samples', 300)
+SETTINGS time_series_prefer_rollup_tables = 0;
+DROP TABLE ts_rollup_gap;
