@@ -1528,7 +1528,7 @@ namespace
                             if (add_column_if_missing(column_name, makeSimpleAggregate("timeSeriesGroupArray", samples_type, parameters)))
                             {
                                 add_codec_declaration(column_name + "." + TimeSeriesColumnNames::Timestamp, getDefaultTimestampCodec());
-                                add_codec_declaration(column_name + "." + TimeSeriesColumnNames::Value, getDefaultValueCodec());
+                                add_codec_declaration(column_name + "." + TimeSeriesColumnNames::Value, getDefaultValueCodec(time_series_settings));
                             }
                         }
                     }

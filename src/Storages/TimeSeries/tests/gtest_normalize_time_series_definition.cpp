@@ -204,7 +204,7 @@ namespace
             const String name = "samples_" + std::to_string(step);
             columns += ", `" + name + "` SimpleAggregateFunction(timeSeriesGroupArray(" + std::to_string(step)
                 + "), Array(Tuple(timestamp DateTime64(3), value Float64)))";
-            codecs += ", CODEC `" + name + ".timestamp` (Delta, T64, ZSTD(3)), CODEC `" + name + ".value` (ALP, ZSTD(3))";
+            codecs += ", CODEC `" + name + ".timestamp` (Delta, T64, ZSTD(3)), CODEC `" + name + ".value` (ALP, ZSTD(4))";
         }
         columns += ", `bucket` DateTime64(3)" + DEFAULT_TIMESTAMP_CODEC
             + ", `min_time` SimpleAggregateFunction(min, DateTime64(3))" + DEFAULT_TIMESTAMP_CODEC
@@ -1254,7 +1254,7 @@ TEST_F(NormalizeTimeSeriesDefinitionTest, RollupSamples)
     EXPECT_FALSE(definition.contains("RECENT SAMPLES")) << definition;
     EXPECT_EQ(extractInnerColumns(definition, "SAMPLES"), samplesColumnsWithRollups({3600})) << definition;
     EXPECT_EQ(extractInnerEngine(definition, "SAMPLES"),
-        "AggregatingMergeTree PARTITION BY toStartOfWeek(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 1024, index_granularity_bytes = 524288");
+        "AggregatingMergeTree PARTITION BY toStartOfWeek(bucket) ORDER BY (id, bucket) SETTINGS index_granularity = 1024, index_granularity_bytes = 262144");
 
     /// A declared samples column list keeps its extra columns and gets the generated rollup columns.
     definition = normalizeNewTable(

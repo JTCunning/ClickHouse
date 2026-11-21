@@ -68,10 +68,10 @@ struct TimeSeriesSettings
 
     /// Whether the samples table has rollup columns (`samples_rollup_steps` is non-empty).
     /// Requires version MIN_WITH_ROLLUP_SAMPLES or later.
-    bool hasRollupSamples() const;
+    [[nodiscard]] bool hasRollupSamples() const;
 
     /// Parsed ascending unique rollup steps in seconds from `samples_rollup_steps`.
-    std::vector<UInt64> getRollupStepsSeconds() const;
+    [[nodiscard]] std::vector<UInt64> getRollupStepsSeconds() const;
 
     /// Whether the "tags" table stores the columns `min_time` and `max_time`: tables of earlier versions
     /// with the `store_min_time_and_max_time` setting enabled (see TimeSeriesVersion.h).
