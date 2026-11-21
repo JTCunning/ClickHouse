@@ -1,0 +1,43 @@
+Dry run of the rollup-samples A/B kit (ab/run.sh) before the confirm build (option A on #16)
+Date: 2026-11-21, promql-perf-work (handoff slot). Host: 2 vCPU / 4 GiB.
+Binary: master 26.12.1.112, GIT_HASH 521c4bcb7b94 (16 commits before the rebase base d980cb40217a, none of them
+on the TimeSeries path), as both arms (SMOKE=1). It includes #131678
+(256 KiB samples granules, ALP + ZSTD(4) values on bucketed tables), so the kit's tables get those defaults,
+as the rebased branch and master d980cb40217a will on James's host.
+Kit: research 3582750 (the 2026-11-20 rework: rotated arm order, ONLY=, PROBE=, 3-day window, rollup_main arm).
+It had not been dry-run since that rework.
+
+Command (the confirm build's own flags, scaled down):
+  SMOKE=1 SERIES=100 DAYS=3 RUNS=3 SMALL_INSERTS=5 ONLY='^selector_' PROBE=0 MAX_THREADS=2 \
+    run.sh <master> <master> tools/clickhouse/data/rollup-samples-dryrun
+Scale: 100 series (1/20 of 2000), 3 days (1/10 of 30), 15 s scrapes, one insert per hour and metric.
+
+A. Does the kit run?
+   Both servers up (19101, 19102), load, 7 selector cases x 3 runs + warm-up, equality, summary: rc 0, no
+   query_errors.tsv. ONLY='^selector_' kept only selector cases; 7d/30d skipped because DAYS=3;
+   selector_3d_15s skipped by the 11,000-point rule (17280 points), as on the build host.
+   -> yes.
+
+B. Arm rotation and the rollup_main arm (static, SMOKE skips the rollup settings and rollup_main):
+   the arm index is (run + case + k) % NQ, so each arm runs first, second and third equally often;
+   rollup_main appends ", time_series_prefer_rollup_tables = 1, time_series_prefer_recent_samples_table = 0"
+   after log_comment, valid SETTINGS syntax; it applies to selector_(1d|3d)_ only.
+   -> the code path is right; its first real run is James's (it needs the branch binary).
+
+C. Are the results identical?
+   equality.tsv: every case, rollup vs raw and raw vs master: 50 series each, series_differ 0.
+   read_rows equal across arms per case (1d 5653, 3d 15894: the recent samples table).
+   -> yes.
+
+D. Direction: not testable here (SMOKE has no rollup columns). A/A noise at RUNS=3 on 2 vCPU: arm ratios
+   0.87-1.13 (two cases flagged CHECK by the summary are noise of 3 runs). The build host uses RUNS=20.
+   Storage: system.parts_columns reported 0 bytes for some inner tables at this scale (likely compact parts);
+   storage is not part of the confirm run, and run 1 reported it on full-size data.
+
+E. Static checks (skill section 2): no fixed timestamps in ab/ (T_END from the current hour, kept in meta.env);
+   every test the item names resolves to exactly one file on the branch head e651272cfeb4, including the two
+   added to also_run (05770_time_series_selector_empty_slice_filter, 03999_stateless_settings_history);
+   the 5 perf XMLs exist. Defaults are not pinned on purpose: the confirm run measures the PR as it merges,
+   so its absolute numbers will differ from run 1 (524288-byte granules, ZSTD(3) values).
+
+Servers stopped and data removed.

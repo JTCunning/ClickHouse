@@ -8,6 +8,7 @@
 **Harness:** `../bench/rollup-samples/ab/run.sh <branch binary> <master binary> <work dir>` (bash; needs only the two binaries and `awk`)
 **Claim:** a PromQL range query whose instant selector is evaluated at a step that a rollup step divides reads `samples_<step>` and returns the same result as the raw samples. Over 7 and 30 days of 15 s scrapes the plain selector is at least 2× faster at a 5m step and at least 3× faster at 1h, with 4× and 20× fewer bytes read. Range functions (`rate`, `increase`, `avg_over_time`, `max_over_time`) read the raw samples and don't change. Rollup steps `'1m, 5m, 1h'` make inserts at most 25% slower and the samples table about 31% bigger; `'5m, 1h'` costs about 6% of storage.
 **Evidence so far:** emulated on a master binary (rollups built in SQL from hourly rows, grid functions as PromQL calls them), 2 vCPU. Selector exact at every point for right-closed intervals; grid time at 1h ~29×, 5m ~5×, 1m ~2× (1000 series × 7 days, startup subtracted); column sizes 25.2% / 5.3% / 0.45% of `samples`. Unproven: the end-to-end query (tags lookup, planning, result), the cost of the sink's new pass, merges, and many cores.
+- 2026-11-21 dry run on master `521c4bcb7b94` (`bench/rollup-samples/smoke-2026-11-21.txt`), `SMOKE=1` with the confirm run's `ONLY='^selector_' PROBE=0`, 100 series × 3 days: kit ran end to end; results identical (series_differ 0, equal `read_rows`); the rotated order and the `rollup_main` settings checked in the code (smoke mode can't run rollups). Master's new defaults (256 KiB granules, `ALP, ZSTD(4)` values) are not pinned: the confirm run measures the PR as it merges, so its absolute numbers differ from run 1.
 
 ## Arms (James's request, kept)
 - **rollup:** branch binary, table `ab_rollup` (`samples_rollup_steps = '1m, 5m, 1h'`), `time_series_prefer_rollup_tables = 1`.
@@ -16,7 +17,7 @@
 - Insert cost only: on the branch, `ab_plain` (no rollups) and `ab_rollup_coarse` (`'5m, 1h'`).
 
 ## Builds
-- A: master at the branch's merge target (the branch merges cleanly into `e8473460558a`). B: `lilred-perf-rollup-samples`. Release, no sanitizers. The test suite of the PR: `05508`, `05621`, the gtest `gtest_normalize_time_series_definition` (it needs `ENABLE_TESTS=ON`, which the first local build of the branch didn't have).
+- A: master at the branch's base: `d980cb40217a` since the rebase of 2026-11-21 (run 1 used `57ca89d382d2`). B: `lilred-perf-rollup-samples` @ `04f3d6add910`. Release, no sanitizers. The test suite of the PR: `05508`, `05621`, `05842`, `05843`, the gtest `gtest_normalize_time_series_definition` (it needs `ENABLE_TESTS=ON`, which the first local build of the branch didn't have).
 
 ## Machine
 - 16 vCPU, 64 GB RAM, local NVMe, nothing else running. The 30-day run keeps about 8 GB of data on the branch server, 2.5 GB on master, and 19 GB of result dumps in `results/out` (run 1, 2026-11-20; this line said 1 GB per server before); both servers run at once, queries never overlap. Note the CPU model.
@@ -85,6 +86,6 @@ James asked about `rate`, `increase` and `*_over_time` over rollups. The branch 
 - [ ] update the report verdict and the backlog row
 
 ## Run 2 (after James's answer on #16, 2026-11-20)
-- Option A, the confirm build: B = the branch rebased onto master (with the setting rename if he says yes), A = master at the new base. The tests of the item, then `ONLY='^selector_' PROBE=0 run.sh <B> <A> <dir>` (the 12 selector cases, 30 days, rotated order, `rollup_main` on 1d and 3d). Pass: the selector lines of the pass rule above; `selector_1d_*` and `selector_3d_*` within 5% of raw with equal `read_rows`; equality 0. Report `main_rollup_speedup` for 1d and 3d.
+- Option A, the confirm build (**chosen by James on 2026-11-21**; rebased the same day: B = `04f3d6add910`, A = master `d980cb40217a`; the rename is still unanswered, so the setting keeps the name `time_series_prefer_rollup_tables`): B = the branch rebased onto master (with the setting rename if he says yes), A = master at the new base. The tests of the item, then `ONLY='^selector_' PROBE=0 run.sh <B> <A> <dir>` (the 12 selector cases, 30 days, rotated order, `rollup_main` on 1d and 3d). Pass: the selector lines of the pass rule above; `selector_1d_*` and `selector_3d_*` within 5% of raw with equal `read_rows`; equality 0. Report `main_rollup_speedup` for 1d and 3d.
 - Option B, the full matrix: the three runs of the checklist on the same head.
 
