@@ -563,6 +563,8 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(
                     stride *= 2;
                     above = below + stride;
                 }
+                /// Here above >= size() or cached_timestamps[above] >= timestamp,
+                /// so the first cached timestamp >= timestamp is in [below + 1, above].
                 above = std::min(above, cached_timestamps.size());
                 const Int64 * cached_begin = cached_timestamps.data();
                 cached_index = static_cast<size_t>(std::lower_bound(cached_begin + below + 1, cached_begin + above, timestamp) - cached_begin);
