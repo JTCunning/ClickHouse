@@ -540,7 +540,7 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(
         size_t end = offsets[i];
 
         /// The timestamps of a series are increasing: the next point is usually at the next cached timestamp,
-        /// and a series that starts later or skips steps jumps forward with a binary search.
+        /// and a series that starts later or skips steps jumps forward.
         size_t cached_index = 0;
 
         for (size_t j = start; j < end; ++j)
@@ -552,13 +552,20 @@ void PrometheusHTTPProtocolAPI::writeQueryResponseRangeVectorBlock(
             Int64 timestamp = timestamp_column.getInt(j);
             if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] < timestamp)
             {
-                ++cached_index;
-                if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] < timestamp)
+                /// Gallop forward from the cursor (+1, +2, +4, ...), then bisect the last stride:
+                /// the next point of a series that skips g steps is found in O(log g).
+                size_t below = cached_index; /// cached_timestamps[below] < timestamp
+                size_t stride = 1;
+                size_t above = below + 1;
+                while (above < cached_timestamps.size() && cached_timestamps[above] < timestamp)
                 {
-                    const Int64 * cached_begin = cached_timestamps.data();
-                    const Int64 * cached_end = cached_begin + cached_timestamps.size();
-                    cached_index = static_cast<size_t>(std::lower_bound(cached_begin + cached_index, cached_end, timestamp) - cached_begin);
+                    below = above;
+                    stride *= 2;
+                    above = below + stride;
                 }
+                above = std::min(above, cached_timestamps.size());
+                const Int64 * cached_begin = cached_timestamps.data();
+                cached_index = static_cast<size_t>(std::lower_bound(cached_begin + below + 1, cached_begin + above, timestamp) - cached_begin);
             }
             if (cached_index < cached_timestamps.size() && cached_timestamps[cached_index] == timestamp)
             {
