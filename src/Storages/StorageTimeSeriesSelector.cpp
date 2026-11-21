@@ -140,12 +140,14 @@ StorageTimeSeriesSelector::Configuration::ReturnColumns parseReturnColumns(std::
 }
 
 /// Whether a sample with the specified timestamp is kept in the recent samples table. A safety margin covers the asynchrony of
-/// the TTL and its whole-second precision. Compares in seconds to avoid an overflow for big scales.
+/// the TTL and its whole-second precision. Compares in seconds to avoid an overflow for big scales, and in `Int128` because
+/// the setting `recent_samples_ttl_seconds` has no upper bound.
 bool isWithinRecentSamplesTTL(UInt64 recent_samples_ttl_seconds, Int64 now_seconds, DateTime64 timestamp, UInt32 timestamp_scale)
 {
     static constexpr Int64 safety_margin_seconds = 60;
     const Int64 timestamp_seconds = convertToScale(timestamp, timestamp_scale, /* target_scale = */ 0, /* round_up = */ false).value;
-    return timestamp_seconds >= now_seconds - static_cast<Int64>(recent_samples_ttl_seconds) + safety_margin_seconds;
+    const Int128 threshold_seconds = static_cast<Int128>(now_seconds) - recent_samples_ttl_seconds + safety_margin_seconds;
+    return timestamp_seconds >= threshold_seconds;
 }
 
 /// The rollup step to read for a query step (at `step_scale`): the largest step of the setting `samples_rollup_steps` which divides
