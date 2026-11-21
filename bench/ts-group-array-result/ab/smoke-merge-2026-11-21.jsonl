@@ -1,0 +1,8 @@
+{"port":19201,"round":0,"optimize_wall_ms":908,"merge_ms":447,"merge_cpu_ms":432,"merge_user_ms":244,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19202,"round":0,"optimize_wall_ms":923,"merge_ms":458,"merge_cpu_ms":405,"merge_user_ms":260,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19202,"round":1,"optimize_wall_ms":951,"merge_ms":446,"merge_cpu_ms":427,"merge_user_ms":239,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19201,"round":1,"optimize_wall_ms":853,"merge_ms":431,"merge_cpu_ms":419,"merge_user_ms":253,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19201,"round":2,"optimize_wall_ms":835,"merge_ms":410,"merge_cpu_ms":393,"merge_user_ms":214,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19202,"round":2,"optimize_wall_ms":816,"merge_ms":396,"merge_cpu_ms":377,"merge_user_ms":191,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19202,"round":3,"optimize_wall_ms":830,"merge_ms":400,"merge_cpu_ms":384,"merge_user_ms":239,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}
+{"port":19201,"round":3,"optimize_wall_ms":828,"merge_ms":411,"merge_cpu_ms":396,"merge_user_ms":222,"rows":20000,"samples":4800000,"parts":1,"hash":"12935994545425588370"}

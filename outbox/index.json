@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-20T11:16:48Z",
+  "updated": "2026-11-21T05:57:39Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -373,6 +373,102 @@
       "pass_if": "05768 and 05493 pass on B (= branch + #115482); on master 05768 prints '05768_regex 0' and a last line '0 1'. T1/T3 at least 15% faster at 99.5%, T1 selects at most 2 of ~25 time-ranges granules; G1 (broad regex) at most 10% slower; G2, G3, E2 not significantly slower. Profile G1 with processors_profile_log (A/B plan).",
       "notes": "Not buildable yet: B needs master + upstream #115482 rebased (it conflicts in KeyCondition.cpp/.h; 412 commits to that file since its base). A = master + #115482, B = A + this branch, A2 = plain master. The .reference of 05768 is predicted (master output with its two branch lines changed); take it from the built B if it differs. Side finding for James, not in this branch: regex matchers with '|' are anchored as ^a|b$ (correctness).",
       "decision": "Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then."
+    },
+    {
+      "slug": "ts-group-array-result-copy",
+      "priority": 11,
+      "status": "ready-to-build",
+      "title": "Write the result of timeSeriesGroupArray straight into its typed columns",
+      "branch": "lilred-perf-ts-group-array-result-copy",
+      "summary": "samples-table merges, optimize_on_insert INSERTs and FINAL reads: timeSeriesGroupArray wrote every sample through a Field (~19 ns); predicted FINAL -20..-50%, merge CPU -8..-20%",
+      "claim": "timeseries_group_array.xml: FINAL read of 4 unmerged parts -20..-50%, GROUP BY over 60-sample rows and over one-sample rows -10..-30%, optimize_on_insert INSERT -10..-25%; OPTIMIZE FINAL of 8 default samples-table parts -8..-20% merge CPU; -State and no-FINAL controls flat; merged rows identical. Emulated by subtraction on 2 vCPU (the result step is ~19 ns/sample on master).",
+      "perf_tests": [
+        "tests/performance/timeseries_group_array.xml"
+      ],
+      "guard_perf_tests": [
+        "tests/performance/timeseries_to_grid_aggregation_functions.xml",
+        "tests/performance/promql_selector_pk_range.xml"
+      ],
+      "tests": {
+        "stateless": [
+          "05839_timeseries_group_array_result_columns"
+        ],
+        "also_run": [
+          "03254_timeseries_group_array",
+          "05030_timeseries_group_array_duplicate_timestamps",
+          "05054_timeseries_group_array_simple_aggregate_function",
+          "05056_timeseries_group_array_merge_states",
+          "05816_timeseries_group_array_if_nonzero_condition"
+        ],
+        "integration": [],
+        "gtest_filter": null
+      },
+      "pass_if": "05839 passes on B (on A it differs in exactly the Float32 signaling-NaN line, 7FC00001 vs 7F800001) and the also_run tests pass on B. perf.py --runs 13 on timeseries_group_array.xml: the FINAL query (q4) at least -20%, the two result GROUP BYs (q0, q2) and the INSERT (q6) at least -10%, all significant; the -State controls (q1, q3) and the no-FINAL read (q5) not significantly slower; guards flat. bench/ts-group-array-result/ab/merge_ab.sh N=15 SERIES=80000 (servers from its ab/server.sh, which logs part_log): merge CPU median at least -8%, hashes equal.",
+      "notes": "From the weekend scout (James, chat 2026-11-20). Unbuilt; the change is inside the aggregate function, so the dry run checked the kit, the preconditions and A/A identity, not the direction. Preflight round 1: [Major] the perf test broke the Iceberg perf configuration -> iceberg=\"0\"; Nits taken (Float32 case, OPTIMIZE of the fill tables, a FINAL read with a control, changelog). Test 05839 was free at 521c4bcb7b94; renumber if it collides.",
+      "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
+      "head": "aea89aafdf0b23347e0af14562981d5315ae4bb2",
+      "issue": 23,
+      "pr_text": "prs/ts-group-array-result-copy.md",
+      "ab_plan": "ab-plans/ts-group-array-result-copy.md",
+      "report": "reports/2026-11-21-ts-group-array-result-copy.md"
+    },
+    {
+      "slug": "remote-write-arena",
+      "priority": 12,
+      "status": "ready-to-build",
+      "title": "Parse Prometheus remote-write requests into a protobuf arena",
+      "branch": "lilred-perf-remote-write-arena",
+      "summary": "remote write: parsing and destroying the request on the heap is 8.4% of server CPU (17% outside merges); parse into a protobuf arena; predicted CPU per sample -7..-17% with merges stopped",
+      "decision": "Build and A/B are fine. Before you submit: (1) read my note in the web chat (2026-11-21), one question there about this request path; (2) open the upstream issue drafted on #24 (truncated zstd bodies get 204) and add it as Related: in the PR text.",
+      "claim": "Remote-write server CPU per sample, 2,000 series x 1 sample, warm tags cache: merges stopped -7..-17% (10 labels), at least as much with 20 labels, less with label values over 22 bytes; merges running -3..-8% (observe only); tables identical. Emulated by subtraction from a CPU profile on 2 vCPU.",
+      "perf_tests": [],
+      "guard_perf_tests": [],
+      "tests": {
+        "stateless": [],
+        "also_run": [],
+        "integration": [
+          "test_prometheus_protocols/test_write_read.py",
+          "test_prometheus_protocols/test_query_api.py",
+          "test_prometheus_protocols/test_evaluation.py"
+        ],
+        "gtest_filter": null
+      },
+      "pass_if": "The integration tests pass on B, including the new test_write_read.py::test_remote_write_truncated_request. bench/remote-write-arena/ab/run.py (ROUNDS=15 REQUESTS=50 WARMUP=30), one A/A pass first: T1 (MERGES=stop LABELS=10) median CPU per sample at least -7%; T2 (LABELS=20) at least T1 minus the A/A spread; E1 (SUFFIX=-0123456789abcdefghij) not slower; hashes equal in every case. O1 (MERGES=run) observe only.",
+      "notes": "From the weekend scout (James, chat 2026-11-20). Unbuilt; the A/B is the kit (no perf XML can reach the HTTP handler). rw.py gained --value-suffix for the long-label case. Preflight: the arena change itself reviewed as correct; wording, changelog and the error-path test taken. Hold the submission until you have read the web-chat note.",
+      "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
+      "head": "59469d38b474201d0b48ef95e3c9a258f74e81d0",
+      "issue": 24,
+      "pr_text": "prs/remote-write-arena.md",
+      "ab_plan": "ab-plans/remote-write-arena.md",
+      "report": "reports/2026-11-21-remote-write-arena.md"
+    },
+    {
+      "slug": "range-json-timestamp-text",
+      "priority": 13,
+      "status": "ready-to-build",
+      "title": "Format the timestamps shared by the series of a range vector once per block",
+      "branch": "lilred-perf-range-json-timestamp-text",
+      "summary": "/api/v1/query_range formatted the same step timestamps once per series (40-56 ms of a 700 ms request, 2,000 x 1,441 points, 2 vCPU); now once per block; predicted -5..-20% wall on 16 cores",
+      "claim": "/api/v1/query_range over 2,000 series: m at step 15 s (2.88M points) -5..-20% wall on 16 cores (-2..-8% emulated on 2 vCPU), rate(m[5m]) and g smaller gains, the skewed block (1 long series next to 1,000 short ones) not slower, the one-series control flat; bodies byte-identical.",
+      "perf_tests": [],
+      "guard_perf_tests": [],
+      "tests": {
+        "stateless": [],
+        "also_run": [],
+        "integration": [
+          "test_prometheus_protocols/test_query_api.py",
+          "test_prometheus_protocols/test_evaluation.py"
+        ],
+        "gtest_filter": null
+      },
+      "pass_if": "test_query_api.py (including test_range_vector_timestamps_shared_between_series) and test_evaluation.py pass on B. bench/range-json-timestamps/ab/run.py ROUNDS=40 on gen.sh data (same T_END on both servers), one A/A pass first: T1 (m, step 15) significantly faster, at least -5%; T2 and T3 not slower; E1 (skewed) and G1 (one series) not significantly slower; bodies equal in every case.",
+      "notes": "From the weekend scout (James, chat 2026-11-20). Unbuilt; the A/B is the kit (no perf XML reaches the HTTP writer). Preflight round 1: [Major] the per-series scan was quadratic on skewed blocks -> next-entry fast path + binary search, cache only for query_range and blocks of more than one series; a skewed case and a past-the-end test point added.",
+      "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
+      "head": "ff2ee0f3f03680448b165df94ae3d8df50195999",
+      "issue": 22,
+      "pr_text": "prs/range-json-timestamp-text.md",
+      "ab_plan": "ab-plans/range-json-timestamp-text.md",
+      "report": "reports/2026-11-21-range-json-timestamp-text.md"
     }
   ]
 }

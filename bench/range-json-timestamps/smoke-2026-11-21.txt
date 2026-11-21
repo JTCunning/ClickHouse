@@ -1,0 +1,36 @@
+Dry run of the A/B kit for range-json-timestamp-text (work run, chat 2026-11-20/21, weekend scout)
+Host: 2 vCPU / 4 GiB. Master 26.12.1.112, 521c4bcb7b9441a8f591a80965d9a9714703190e.
+
+A. Static checks (kit-dryrun §2)
+- window from the data: gen.sh writes window.txt (t_start t_end) from T_END (default: the start of the current
+  minute); ab/run.py reads it. The only fixed timestamps are the integration test's own data (2000-2002.5).
+- one query text per case: ab/run.py sends the same POST body to every port.
+- runs per server: ROUNDS per server, each round sends every case to every port.
+- hash: md5 of every response body, compared across ports by ab/summarize.py.
+- arm order rotates (PORTS[(rnd + k + j) % n]).
+- tests named in full: tests/integration/test_prometheus_protocols/test_query_api.py::test_range_vector_timestamps_shared_between_series.
+- overrides: PORTS, ROUNDS, CASES, WINDOW; gen.sh: CH, SERIES, HOURS, CHURN, T_END; server.sh: CH, DATA, SERVER_MEM, QUERY_MEM.
+-> kit consistent.
+
+B. A/A at 1/2 scale: two servers on master, both filled by gen.sh with the same T_END, SERIES=1000 (CHURN not yet in
+   the generator at that point), PORTS="19301 19302" ROUNDS=5 (raw: ab/smoke-2026-11-21.jsonl)
+   T1_m_step15        270.0 vs 277.5 ms  +2.8%  bodies equal  28.5 MB
+   T2_rate_step30     269.7 vs 271.6 ms  +0.7%  bodies equal  25.0 MB
+   T3_g_step60        107.9 vs 111.6 ms  +3.4%  bodies equal   7.9 MB
+   G1_sum_rate_step30 218.7 vs 211.1 ms  -3.5%  bodies equal  24 kB
+-> the kit runs, A and B identical, A/A within +-3.6%.
+
+C. Skewed case E1 (added after the round-1 review), one server, SERIES=1000 CHURN=1000, 3 rounds:
+   E1_skewed_c_step15 58.0 ms, 1,001 series: one with 1,440 points, 1,000 with 72 points at its end; bodies equal.
+-> the generator writes the skewed block as intended.
+
+C2. Every-other-step case E2 (added after the round-2 review), one server, SERIES=1000 HALF=1000, 3 rounds:
+   E2_every_other_h_step15 111.7 ms, 1,001 series: one with 1,440 points, 1,000 with 720; bodies equal.
+-> the generator writes the every-other-step block as intended.
+
+D. Direction: not dry-runnable (code in the writer). Questions 1-3 answered, 4 not.
+
+E. Expected strings of the integration test: produced by master's own HTTP API on the lab table for the test's data,
+   with and without max_block_size=1 (same body) and for the instant query shared_timestamps[2s] at 2002.
+
+Servers stopped and data removed.

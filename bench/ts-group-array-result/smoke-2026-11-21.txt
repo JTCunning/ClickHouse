@@ -1,0 +1,44 @@
+Dry run of the A/B kit for ts-group-array-result-copy (work run, chat 2026-11-20/21, weekend scout)
+Host: 2 vCPU / 4 GiB. Master 26.12.1.112, 521c4bcb7b9441a8f591a80965d9a9714703190e (includes #131678: 256 KiB samples
+granules and ALP, ZSTD(4) values on bucketed tables; gen.sh uses the default TimeSeries table on purpose, that is
+what the merge claim is about).
+
+A. Static checks (kit-dryrun §2)
+- window from the data: gen.sh takes T0 from the clock (start of the previous hour) unless T0 is set; merge_ab.sh
+  sets it once for all servers. No fixed timestamps in the kit (rg of the §2 pattern: none in gen.sh / ab/).
+- moved defaults: the claim is about the default table, so nothing is pinned; the plan names the master sha.
+- one query text per case: merge_ab.sh runs the same gen.sh + OPTIMIZE on every server.
+- runs per server: N rounds per server (not split between servers).
+- hash query: sum(cityHash64(id, bucket, samples)) over the merged samples table, printed per merge.
+- layout: gen.sh prints parts/rows per table; merge_ab.sh records parts after the merge (1).
+- arm order rotates per round (ports[(r + k) % n]).
+- tests named in full: 05839_timeseries_group_array_result_columns (new, branch only), 03254_timeseries_group_array,
+  05030_timeseries_group_array_duplicate_timestamps, 05054_timeseries_group_array_simple_aggregate_function,
+  05056_timeseries_group_array_merge_states, 05816_timeseries_group_array_if_nonzero_condition (each one line in
+  ls-tree origin/master).
+- overrides: CH, PORTS, N, SERIES, ROUNDS, PER_ROUND, T0, DATA, SERVER_MEM, QUERY_MEM.
+-> kit consistent.
+
+B. A/A merge run: PORTS="19201 19202" N=4 SERIES=20000 ab/merge_ab.sh (both servers on master, SERVER_MEM=1.4 GB)
+   gen.sh layout before each merge: samples 8 parts / 160,000 rows / 13.8 MiB, recentsamples the same.
+   port 19201: n=4 merge median 421 ms (410-447), cpu median 408 ms (393-432), rows 20000, samples 4800000, parts {1}
+   port 19202: n=4 merge median 423 ms (396-458), cpu median 394 ms (377-427), rows 20000, samples 4800000, parts {1}
+   hashes equal: True; cpu 19202 vs 19201: -3.2%   (raw: ab/smoke-merge-2026-11-21.jsonl)
+-> the kit runs, preconditions hold (8 parts -> 1), A and B identical, A/A noise about 3%.
+   First version read the OPTIMIZE query's CPU (384-412 ms against 826-884 ms wall): the merge runs in a background
+   thread, so the kit now reads duration and CPU of the MergeParts row of system.part_log (ab/config.xml.in has
+   part_log); after the change, merge duration and CPU agree (421 vs 408 ms).
+
+C. Perf XML on master clickhouse local, max_threads = 1, 7 rounds (median of the last 6):
+   q0 GROUP BY rows 575 ms | q1 -State 434 | q2 GROUP BY one-sample rows 511 | q3 -State 348 |
+   q4 FINAL of 4 parts 321 | q5 same without FINAL 116 | q6 INSERT optimize_on_insert 574
+-> every query under 0.6 s at one thread; the result cost (q0-q1, q2-q3, q4-q5) is 14-21 ns/sample.
+
+D. Direction: not dry-runnable (the change is inside the aggregate function; B can't be emulated in SQL).
+   Questions 1-3 answered, 4 not.
+
+E. Profile on master (merge_profile.sh, CPU profiler in the default profile; 80,000 series, 19.2M samples, 3 runs):
+   insertResultInto 26 / 15 / 17.6% of the merge's profiler samples (219 / 214 / 245 samples), codecs 57-69%.
+   optimize_on_insert INSERT of the perf XML's rows (3 runs): insertResultInto 25.5 / 24.4 / 28.6%.
+
+Servers stopped and data removed.

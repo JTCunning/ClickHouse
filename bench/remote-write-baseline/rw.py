@@ -58,13 +58,16 @@ def snappy_literal(data):
     return bytes(out)
 
 
+VALUE_SUFFIX = ""  # --value-suffix: appended to every label value except the metric name (e.g. to pass 22 bytes)
+
+
 def series_labels(idx, num_labels):
     # metric names: 100 families; per-series labels with mixed cardinality
     labels = [("__name__", f"metric_{idx % 100}"),
-              ("instance", f"host-{idx // 100 % 1000}:9100"),
-              ("job", f"job_{idx % 7}")]
+              ("instance", f"host-{idx // 100 % 1000}:9100{VALUE_SUFFIX}"),
+              ("job", f"job_{idx % 7}{VALUE_SUFFIX}")]
     for k in range(num_labels - 3):
-        labels.append((f"label_{k}", f"value_{(idx * (k + 3)) % (10 ** (1 + k % 4))}"))
+        labels.append((f"label_{k}", f"value_{(idx * (k + 3)) % (10 ** (1 + k % 4))}{VALUE_SUFFIX}"))
     return sorted(labels)
 
 
@@ -92,7 +95,10 @@ def main():
     p.add_argument("--skip", type=int, default=0, help="requests excluded from the summary (warm-up)")
     p.add_argument("--ts0", type=int, default=1793000000000)
     p.add_argument("--id-offset", type=int, default=0, help="first series id (gives parallel senders disjoint series)")
+    p.add_argument("--value-suffix", default="", help="appended to every label value but __name__ (long values: heap strings)")
     a = p.parse_args()
+    global VALUE_SUFFIX
+    VALUE_SUFFIX = a.value_suffix
 
     u = urllib.parse.urlparse(a.url)
     conn = http.client.HTTPConnection(u.hostname, u.port, timeout=600)

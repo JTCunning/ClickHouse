@@ -1,0 +1,10 @@
+{"port": 19401, "round": 0, "cpu_s": 0.35, "wall_s": 2.756, "cpu_us_per_sample": 17.5, "samples": 20000}
+{"port": 19402, "round": 0, "cpu_s": 0.37, "wall_s": 2.751, "cpu_us_per_sample": 18.5, "samples": 20000}
+{"port": 19402, "round": 1, "cpu_s": 0.32, "wall_s": 2.742, "cpu_us_per_sample": 16.0, "samples": 20000}
+{"port": 19401, "round": 1, "cpu_s": 0.35, "wall_s": 2.755, "cpu_us_per_sample": 17.5, "samples": 20000}
+{"port": 19401, "round": 2, "cpu_s": 0.32, "wall_s": 2.738, "cpu_us_per_sample": 16.0, "samples": 20000}
+{"port": 19402, "round": 2, "cpu_s": 0.31, "wall_s": 2.726, "cpu_us_per_sample": 15.5, "samples": 20000}
+{"port": 19402, "round": 3, "cpu_s": 0.33, "wall_s": 2.695, "cpu_us_per_sample": 16.5, "samples": 20000}
+{"port": 19401, "round": 3, "cpu_s": 0.35, "wall_s": 2.79, "cpu_us_per_sample": 17.5, "samples": 20000}
+{"port": 19401, "hash": "15651972251009081472\t7941077302037093562 100000"}
+{"port": 19402, "hash": "15651972251009081472\t7941077302037093562 100000"}
