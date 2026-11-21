@@ -7,6 +7,7 @@ from .prometheus_test_utils import (
     convert_time_series_to_protobuf,
     execute_query_via_http_api,
     get_response_to_remote_read,
+    compress_remote_write_request,
     get_response_to_remote_write,
     receive_protobuf_from_remote_read,
     send_protobuf_to_remote_write,
@@ -230,6 +231,31 @@ def test_remote_write_undecodable_body(content_encoding):
     response = post_undecodable_body("/write", content_encoding)
     assert response.status_code == requests.codes.bad_request, response.text
     assert "Cannot decode the request body" in response.text
+
+
+@pytest.mark.parametrize("content_encoding", ["snappy", "zstd"])
+def test_remote_write_truncated_request(content_encoding):
+    """A body that decompresses but ends in the middle of a label of its second series: the request is
+    parsed into an arena, and the series parsed before the error are freed with it. The server answers
+    400 and keeps serving; nothing of the request is written."""
+    time_series = [
+        ({"__name__": "truncated_data", "job": "first"}, {1724117000: 1.0}),
+        ({"__name__": "truncated_data", "job": "second" * 10}, {1724117000: 2.0}),
+    ]
+    serialized = convert_time_series_to_protobuf(time_series).SerializeToString()
+    response = requests.post(
+        f"http://{node.ip_address}:9093/write",
+        data=compress_remote_write_request(serialized[: len(serialized) - 30], content_encoding),
+        headers={
+            "Content-Encoding": content_encoding,
+            "Content-Type": "application/x-protobuf",
+            "User-Agent": requests.utils.default_user_agent(),
+            "X-Prometheus-Remote-Write-Version": "0.1.0",
+        },
+    )
+    assert response.status_code == requests.codes.bad_request, response.text
+    assert "Cannot parse WriteRequest" in response.text
+    assert node.query("SELECT count() FROM timeSeriesTags(prometheus) WHERE metric_name = 'truncated_data'") == "0\n"
 
 
 def test_remote_read_undecodable_body():
