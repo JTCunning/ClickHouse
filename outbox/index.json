@@ -377,7 +377,7 @@
     {
       "slug": "ts-group-array-result-copy",
       "priority": 11,
-      "status": "ready-to-build",
+      "status": "results-in",
       "title": "Write the result of timeSeriesGroupArray straight into its typed columns",
       "branch": "lilred-perf-ts-group-array-result-copy",
       "summary": "samples-table merges, optimize_on_insert INSERTs and FINAL reads: timeSeriesGroupArray wrote every sample through a Field (~19 ns); predicted FINAL -20..-50%, merge CPU -8..-20%",

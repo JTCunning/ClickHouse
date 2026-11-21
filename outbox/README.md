@@ -11,14 +11,15 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 | 1 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rename the setting to time_series_prefer_rollup_columns: yes or no? (Option A taken on 2026-11-21: lil red rebases onto master, then one confirm build.) Answer on #16. |
 | 2 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 | 3 | **Decide** | [remote-write-arena](../prs/remote-write-arena.md) | [#24](https://github.com/JTCunning/ClickHouse/issues/24) | Build and A/B are fine. Before you submit: (1) read my note in the web chat (2026-11-21), one question there about this request path; (2) open the upstream issue drafted on #24 (truncated zstd bodies get 204) and add it as Related: in the PR text. |
-| 4 | **Build and A/B**: `ab ts-group-array-result-copy` | [ts-group-array-result-copy](../prs/ts-group-array-result-copy.md) | [#23](https://github.com/JTCunning/ClickHouse/issues/23) | samples-table merges, optimize_on_insert INSERTs and FINAL reads: timeSeriesGroupArray wrote every sample through a Field (~19 ns); predicted FINAL -20..-50%, merge CPU -8..-20% |
-| 5 | **Build and A/B**: `ab range-json-timestamp-text` | [range-json-timestamp-text](../prs/range-json-timestamp-text.md) | [#22](https://github.com/JTCunning/ClickHouse/issues/22) | /api/v1/query_range formatted the same step timestamps once per series (40-56 ms of a 700 ms request, 2,000 x 1,441 points, 2 vCPU); now once per block; predicted -5..-20% wall on 16 cores |
+| 4 | **Build and A/B**: `ab range-json-timestamp-text` | [range-json-timestamp-text](../prs/range-json-timestamp-text.md) | [#22](https://github.com/JTCunning/ClickHouse/issues/22) | /api/v1/query_range formatted the same step timestamps once per series (40-56 ms of a 700 ms request, 2,000 x 1,441 points, 2 vCPU); now once per block; predicted -5..-20% wall on 16 cores |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 
 ## With lil red: nothing for you
 
-None.
+| item | issue | lil red is | what it's for |
+|---|---|---|---|
+| [ts-group-array-result-copy](../prs/ts-group-array-result-copy.md) | [#23](https://github.com/JTCunning/ClickHouse/issues/23) | judging your results | samples-table merges, optimize_on_insert INSERTs and FINAL reads: timeSeriesGroupArray wrote every sample through a Field (~19 ns); predicted FINAL -20..-50%, merge CPU -8..-20% |
 
 ## Submitted
 
