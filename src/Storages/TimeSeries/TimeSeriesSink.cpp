@@ -63,28 +63,11 @@ namespace ErrorCodes
     extern const int ILLEGAL_COLUMN;
     extern const int ILLEGAL_TIME_SERIES_TAGS;
     extern const int INCORRECT_DATA;
-    extern const int INVALID_SETTING_VALUE;
 }
 
 
 namespace
 {
-    /// Converts a step in seconds to the scale of the timestamp type. `checkTimeSeriesSettings` checks the steps when a table
-    /// is created or altered, but not when it is attached or restored, so a step of zero or one which doesn't fit `Int64`
-    /// at the scale of the timestamps is rejected here, before anything divides by the step or rounds to it.
-    Decimal64 stepToTimestampScale(UInt64 step_seconds, Int64 scale_multiplier, std::string_view setting_name)
-    {
-        Int64 step = 0;
-        if (!step_seconds || (step_seconds > static_cast<UInt64>(std::numeric_limits<Int64>::max()))
-            || common::mulOverflow(static_cast<Int64>(step_seconds), scale_multiplier, step))
-        {
-            throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
-                "Setting `{}` has the step {} seconds, which is zero or out of range for the timestamp type of the TimeSeries table",
-                setting_name, step_seconds);
-        }
-        return Decimal64{step};
-    }
-
     /// Sorts tags by name, removes exact duplicates and tags with empty values,
     /// and throws if the `__name__` tag is missing or appears with conflicting values.
     void sortTagsAndRemoveDuplicates(std::vector<std::pair<std::string_view, std::string_view>> & tags)
@@ -1162,10 +1145,10 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
 
         /// The steps of the buckets are converted from seconds to the scale of the timestamp type.
         Int64 timestamp_scale_multiplier = DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*timestamp_type).value_or(0));
-        samples_bucket_step = stepToTimestampScale(
+        samples_bucket_step = timeSeriesStepToTimestampScale(
             settings[TimeSeriesSetting::samples_bucket_step_seconds].value, timestamp_scale_multiplier, "samples_bucket_step_seconds");
         if (time_series_storage.hasTarget(ViewTarget::RecentSamples))
-            recent_samples_bucket_step = stepToTimestampScale(
+            recent_samples_bucket_step = timeSeriesStepToTimestampScale(
                 settings[TimeSeriesSetting::recent_samples_bucket_step_seconds].value, timestamp_scale_multiplier, "recent_samples_bucket_step_seconds");
 
         rollup_steps_seconds = settings.getRollupStepsSeconds();
@@ -1173,7 +1156,7 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
         rollup_steps.reserve(rollup_steps_seconds.size());
         for (UInt64 step_seconds : rollup_steps_seconds)
         {
-            rollup_steps.push_back(stepToTimestampScale(step_seconds, timestamp_scale_multiplier, "samples_rollup_steps"));
+            rollup_steps.push_back(timeSeriesStepToTimestampScale(step_seconds, timestamp_scale_multiplier, "samples_rollup_steps"));
             samples_header.insert(ColumnWithTypeAndName{
                 makeSamplesType(timestamp_type, value_type), TimeSeriesColumnNames::rollupSamplesColumn(step_seconds)});
         }

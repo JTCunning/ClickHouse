@@ -4,6 +4,7 @@
 #include <Core/SettingFieldASTFunction.h>
 #include <Core/SettingFieldDataType.h>
 #include <Core/SettingsFields.h>
+#include <base/Decimal.h>
 
 #include <vector>
 
@@ -87,5 +88,11 @@ private:
 
 /// Checks that the combination of settings is consistent.
 void checkTimeSeriesSettings(const TimeSeriesSettings & settings);
+
+/// Converts a step in seconds (`samples_bucket_step_seconds`, `recent_samples_bucket_step_seconds` or a step of `samples_rollup_steps`)
+/// to the scale of the timestamps, given by `scale_multiplier`. `checkTimeSeriesSettings` checks the steps when a table is created
+/// or altered, but not when it is attached or restored, so a step of zero or one which doesn't fit `Int64` at the scale throws here,
+/// before anything divides by the step or rounds to it.
+[[nodiscard]] Decimal64 timeSeriesStepToTimestampScale(UInt64 step_seconds, Int64 scale_multiplier, std::string_view setting_name);
 
 }

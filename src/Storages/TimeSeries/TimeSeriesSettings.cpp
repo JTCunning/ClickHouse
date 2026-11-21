@@ -11,6 +11,7 @@
 #include <Storages/TimeSeries/TimeSeriesColumnNames.h>
 #include <Storages/TimeSeries/TimeSeriesTagNames.h>
 #include <Storages/TimeSeries/checkTimeSeriesVersion.h>
+#include <base/arithmeticOverflow.h>
 
 #include <limits>
 #include <unordered_set>
@@ -346,6 +347,19 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
                     "Setting `tags_to_columns` has duplicate column name `{}`", column_name);
         }
     }
+}
+
+Decimal64 timeSeriesStepToTimestampScale(UInt64 step_seconds, Int64 scale_multiplier, std::string_view setting_name)
+{
+    Int64 step = 0;
+    if (!step_seconds || (step_seconds > static_cast<UInt64>(std::numeric_limits<Int64>::max()))
+        || common::mulOverflow(static_cast<Int64>(step_seconds), scale_multiplier, step))
+    {
+        throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+            "Setting `{}` has the step {} seconds, which is zero or out of range for the timestamp type of the TimeSeries table",
+            setting_name, step_seconds);
+    }
+    return Decimal64{step};
 }
 
 }

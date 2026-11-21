@@ -1450,8 +1450,12 @@ void StorageTimeSeriesSelector::readImpl(
     const TableTimeRange time_range_to_filter_ids = getTimeRangeToFilterIDs(table_time_range, time_ranges_table_id, *time_series_settings);
 
     /// The step of the buckets of the table being read at the scale of its timestamp type, zero for a table storing one sample per row.
-    const Decimal64 bucket_step{static_cast<Int64>(bucket_step_seconds)
-        * DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*config.table_timestamp_type).value_or(0))};
+    const Decimal64 bucket_step = time_series_settings->hasBucketedSamples()
+        ? timeSeriesStepToTimestampScale(
+            bucket_step_seconds,
+            DecimalUtils::scaleMultiplier<Int64>(tryGetDecimalScale(*config.table_timestamp_type).value_or(0)),
+            (samples_table_kind == ViewTarget::RecentSamples) ? "recent_samples_bucket_step_seconds" : "samples_bucket_step_seconds")
+        : Decimal64{0};
 
     auto samples_table_metadata = time_series_storage->getTargetTable(samples_table_kind, context)->getInMemoryMetadataPtr(context, false);
     auto tags_table_metadata = time_series_storage->getTargetTable(ViewTarget::Tags, context)->getInMemoryMetadataPtr(context, false);
