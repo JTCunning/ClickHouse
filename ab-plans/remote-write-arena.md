@@ -1,4 +1,5 @@
 # A/B plan: parse Prometheus remote-write requests into a protobuf arena
+**Results 2026-11-21 (run 1, James, #24):** pass: T1 -9.5%, T2 -9.9%, E1 -9.6%, O1 -3.8% (paired), A/A +2.4% against B, hashes equal, 73 integration tests pass; profile parse + destroy 12.9% → 4.0%. Kit defect, mine: `ab/run.py` passed `--value-suffix` and its value as two arguments, so E1's suffix (starting with `-`) was rejected; James fixed it in his run, the kit now passes `--value-suffix=<value>`. The dry run never ran the E1 env. Ready to submit.
 **Experiment:** ../reports/2026-11-21-remote-write-arena.md · **Branch:** `lilred-perf-remote-write-arena` @ `59469d38b474` (base master `521c4bcb7b94`) · **Task:** 2026-11-20-scout-parse-prometheus-remote-write-req · **Outbox:** issue #24 (`ready-to-build`)
 **Claim:** remote-write server CPU per sample, 2,000 series × 1 sample, warm tags cache: with merges stopped −7..−17% (10 labels), at least as much with 20 labels, less with label values longer than 22 bytes; with merges running −3..−8% (observe only); the tables hold the same rows.
 **Evidence so far:**

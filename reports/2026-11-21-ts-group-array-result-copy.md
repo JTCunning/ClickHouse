@@ -1,5 +1,6 @@
 # `timeSeriesGroupArray` spends about 19 ns per sample writing its result
 **Verdict:** worth fixing: a 15-line change in the aggregate function that every merge of a `TimeSeries` samples table runs; branch `lilred-perf-ts-group-array-result-copy` (unbuilt).
+**Update 2026-11-21: built (James, #23 issuecomment-7059501978): every target significantly faster, but smaller than predicted: `FINAL` -10.8..-14.1% (predicted -20..-50%), `GROUP BY`s -13.0..-15.1% (-10..-30%), `optimize_on_insert` `INSERT` -6.7..-7.6% (-10..-25%), merge CPU -12.1% (-8..-20%); controls and guards flat, hashes equal, tests pass. The saving is 5-7 ns per sample, not the ~17 ns the subtraction emulation implied: the `-State` control skips writing the result into fresh column memory at all, so `result - State` overstated what the `Field` route costs (measured ÷ emulated 0.22-0.37). Judged against the 5% bar instead of my floors: submit.**
 **Task:** 2026-11-21 weekend scout (James, chat 2026-11-20) · **Build:** master 26.12.1.112, `521c4bcb7b94` · **Date:** 2026-11-21
 **A/B plan:** [ab-plans/ts-group-array-result-copy.md](../ab-plans/ts-group-array-result-copy.md)
 

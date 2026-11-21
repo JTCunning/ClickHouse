@@ -1,5 +1,6 @@
 # The range-query JSON writer formats the same step timestamps once per series
 **Verdict:** worth a small fix for wide, non-aggregated range panels: branch `lilred-perf-range-json-timestamp-text` (unbuilt). The size on a 16-core host is the open question.
+**Update 2026-11-21: built (James, #22 issuecomment-7059502143): pass. `m` at step 15 s -10.2% wall (172.0 vs 191.6 ms), `rate()` -5.3%, `g` -3.3%, every-other-step block -8.3%, skewed block and control flat; query CPU -3.1% while its duration drops 159 → 140 ms (the saving is in the writer thread, as predicted). Bodies identical except the `sum()` control, whose last digits differ between two requests to master too. Prediction -5..-20% on 16 cores: hit; 2-vCPU emulation -6..-8%: measured ÷ emulated 1.3-1.7, the writer's share grows with cores as expected.**
 **Task:** 2026-11-21 weekend scout (James, chat 2026-11-20) · **Build:** master 26.12.1.112, `521c4bcb7b94` · **Date:** 2026-11-21
 **A/B plan:** [ab-plans/range-json-timestamp-text.md](../ab-plans/range-json-timestamp-text.md)
 

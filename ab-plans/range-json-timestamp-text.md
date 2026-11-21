@@ -1,4 +1,5 @@
 # A/B plan: format the timestamps shared by the series of a range vector once per block
+**Results 2026-11-21 (run 1, James, #22):** pass: T1 -10.2%, T2 -5.3%, T3 -3.3%, E2 -8.3%, E1 and G1 flat, A/A within ±4% not significant. Plan defect, mine: the md5 check can't hold for G1 (`sum()` differs in its last digits between two requests to master); `ab/run.py` now also records `values_md5` (values rounded to 12 significant digits). Ready to submit.
 **Experiment:** ../reports/2026-11-21-range-json-timestamp-text.md · **Branch:** `lilred-perf-range-json-timestamp-text` @ `ff2ee0f3f036` (base master `521c4bcb7b94`) · **Task:** 2026-11-20-scout-format-the-shared-step-timestamps · **Outbox:** issue #22 (`ready-to-build`)
 **Claim:** `/api/v1/query_range` over 2,000 series: `m` at step 15 s (2.88M points, integer values) −5..−20% wall, `rate(m[5m])` at step 30 s and `g` at step 60 s smaller gains (−2..−8%), the skewed block (one long series next to 1,000 short ones) not slower, the one-series control flat; response bodies byte-identical.
 **Evidence so far:**

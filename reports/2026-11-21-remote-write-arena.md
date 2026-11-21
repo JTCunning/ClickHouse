@@ -1,5 +1,6 @@
 # Remote write spends 8% of the server's CPU allocating and freeing the parsed request
 **Verdict:** worth a 6-line fix: parse the request into a protobuf arena; branch `lilred-perf-remote-write-arena` (unbuilt).
+**Update 2026-11-21: built (James, #24 issuecomment-7059357140): pass. CPU per sample -9.5% (10 labels), -9.9% (20 labels), -9.6% (values over 22 bytes), merges stopped; -3.8% with merges running (lower in 15 of 15 paired rounds); A/A +2.4% against B. His CPU profile: parse + destroy 12.9% → 4.0% of server CPU samples. Predicted -7..-17% with merges stopped: hit (measured ÷ emulated upper bound 0.56; with merges 0.45).**
 **Task:** 2026-11-21 weekend scout (James, chat 2026-11-20) · **Build:** master 26.12.1.112, `521c4bcb7b94` · **Date:** 2026-11-21
 **A/B plan:** [ab-plans/remote-write-arena.md](../ab-plans/remote-write-arena.md)
 

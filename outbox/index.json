@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-21T10:01:09Z",
+  "updated": "2026-11-21T22:27:18Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -377,10 +377,10 @@
     {
       "slug": "ts-group-array-result-copy",
       "priority": 11,
-      "status": "results-in",
+      "status": "ready-to-submit",
       "title": "Write the result of timeSeriesGroupArray straight into its typed columns",
       "branch": "lilred-perf-ts-group-array-result-copy",
-      "summary": "samples-table merges, optimize_on_insert INSERTs and FINAL reads: timeSeriesGroupArray wrote every sample through a Field (~19 ns); predicted FINAL -20..-50%, merge CPU -8..-20%",
+      "summary": "built: samples-table merge CPU -12.1%, FINAL -11..-14%, GROUP BYs -13..-15%, optimize_on_insert INSERT -7%; controls flat, same results (under my predicted floors; judged against the 5% bar)",
       "claim": "timeseries_group_array.xml: FINAL read of 4 unmerged parts -20..-50%, GROUP BY over 60-sample rows and over one-sample rows -10..-30%, optimize_on_insert INSERT -10..-25%; OPTIMIZE FINAL of 8 default samples-table parts -8..-20% merge CPU; -State and no-FINAL controls flat; merged rows identical. Emulated by subtraction on 2 vCPU (the result step is ~19 ns/sample on master).",
       "perf_tests": [
         "tests/performance/timeseries_group_array.xml"
@@ -404,7 +404,7 @@
         "gtest_filter": null
       },
       "pass_if": "05839 passes on B (on A it differs in exactly the Float32 signaling-NaN line, 7FC00001 vs 7F800001) and the also_run tests pass on B. perf.py --runs 13 on timeseries_group_array.xml: the FINAL query (q4) at least -20%, the two result GROUP BYs (q0, q2) and the INSERT (q6) at least -10%, all significant; the -State controls (q1, q3) and the no-FINAL read (q5) not significantly slower; guards flat. bench/ts-group-array-result/ab/merge_ab.sh N=15 SERIES=80000 (servers from its ab/server.sh, which logs part_log): merge CPU median at least -8%, hashes equal.",
-      "notes": "From the weekend scout (James, chat 2026-11-20). Unbuilt; the change is inside the aggregate function, so the dry run checked the kit, the preconditions and A/A identity, not the direction. Preflight round 1: [Major] the perf test broke the Iceberg perf configuration -> iceberg=\"0\"; Nits taken (Float32 case, OPTIMIZE of the fill tables, a FINAL read with a control, changelog). Test 05839 was free at 521c4bcb7b94; renumber if it collides.",
+      "notes": "Run 1 (James 2026-11-21, #23): every target significant, controls and guards flat, hashes equal, tests pass. Under my floors on FINAL and INSERT: the subtraction emulation overstated the saving about 3x (5-7 ns per sample measured). Final preflight: Approve; wording nits taken. Merges cleanly with master a2126dbc146; 05839 still free.",
       "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
       "head": "aea89aafdf0b23347e0af14562981d5315ae4bb2",
       "issue": 23,
@@ -415,11 +415,11 @@
     {
       "slug": "remote-write-arena",
       "priority": 12,
-      "status": "results-in",
+      "status": "ready-to-submit",
       "title": "Parse Prometheus remote-write requests into a protobuf arena",
       "branch": "lilred-perf-remote-write-arena",
-      "summary": "remote write: parsing and destroying the request on the heap is 8.4% of server CPU (17% outside merges); parse into a protobuf arena; predicted CPU per sample -7..-17% with merges stopped",
-      "decision": "Build and A/B are fine. Before you submit: (1) read my note in the web chat (2026-11-21), one question there about this request path; (2) open the upstream issue drafted on #24 (truncated zstd bodies get 204) and add it as Related: in the PR text.",
+      "summary": "built: remote-write CPU per sample -9.5..-9.9% (merges stopped, 10/20 labels, long values too), -3.8% with merges running; parse+destroy 12.9% -> 4.0% of server CPU",
+      "decision": "Before you submit: open the upstream issue drafted on #24 (truncated zstd bodies get 204 and are dropped) and add it as Related: at the top of the PR body. Doesn't block anything else. Answer on #24.",
       "claim": "Remote-write server CPU per sample, 2,000 series x 1 sample, warm tags cache: merges stopped -7..-17% (10 labels), at least as much with 20 labels, less with label values over 22 bytes; merges running -3..-8% (observe only); tables identical. Emulated by subtraction from a CPU profile on 2 vCPU.",
       "perf_tests": [],
       "guard_perf_tests": [],
@@ -434,7 +434,7 @@
         "gtest_filter": null
       },
       "pass_if": "The integration tests pass on B, including the new test_write_read.py::test_remote_write_truncated_request. bench/remote-write-arena/ab/run.py (ROUNDS=15 REQUESTS=50 WARMUP=30), one A/A pass first: T1 (MERGES=stop LABELS=10) median CPU per sample at least -7%; T2 (LABELS=20) at least T1 minus the A/A spread; E1 (SUFFIX=-0123456789abcdefghij) not slower; hashes equal in every case. O1 (MERGES=run) observe only.",
-      "notes": "From the weekend scout (James, chat 2026-11-20). Unbuilt; the A/B is the kit (no perf XML can reach the HTTP handler). rw.py gained --value-suffix for the long-label case. Preflight: the arena change itself reviewed as correct; wording, changelog and the error-path test taken. Hold the submission until you have read the web-chat note.",
+      "notes": "Run 1 (James 2026-11-21, #24): pass, hashes equal, 73 integration tests pass. Kit defect (mine): --value-suffix value as a separate argument; fixed (--value-suffix=<value>). Final preflight: Approve, assuming the Related: line. Merges cleanly with master a2126dbc146.",
       "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
       "head": "59469d38b474201d0b48ef95e3c9a258f74e81d0",
       "issue": 24,
@@ -445,10 +445,10 @@
     {
       "slug": "range-json-timestamp-text",
       "priority": 13,
-      "status": "results-in",
+      "status": "ready-to-submit",
       "title": "Format the timestamps shared by the series of a range vector once per block",
       "branch": "lilred-perf-range-json-timestamp-text",
-      "summary": "/api/v1/query_range formatted the same step timestamps once per series (40-56 ms of a 700 ms request, 2,000 x 1,441 points, 2 vCPU); now once per block; predicted -5..-20% wall on 16 cores",
+      "summary": "built: /api/v1/query_range over 2,000 series -10.2% (m, step 15 s), rate() -5.3%, every-other-step -8.3%; skewed block and control flat; same bytes",
       "claim": "/api/v1/query_range over 2,000 series: m at step 15 s (2.88M points) -5..-20% wall on 16 cores (-2..-8% emulated on 2 vCPU), rate(m[5m]) and g smaller gains, the skewed block (1 long series next to 1,000 short ones) not slower, the one-series control flat; bodies byte-identical.",
       "perf_tests": [],
       "guard_perf_tests": [],
@@ -462,7 +462,7 @@
         "gtest_filter": null
       },
       "pass_if": "test_query_api.py (including test_range_vector_timestamps_shared_between_series) and test_evaluation.py pass on B. bench/range-json-timestamps/ab/run.py ROUNDS=40 on gen.sh data (same T_END on both servers), one A/A pass first: T1 (m, step 15) significantly faster, at least -5%; T2 and T3 not slower; E1 (skewed) and G1 (one series) not significantly slower; bodies equal in every case.",
-      "notes": "From the weekend scout (James, chat 2026-11-20). Unbuilt; the A/B is the kit (no perf XML reaches the HTTP writer). Preflight round 1: [Major] the per-series scan was quadratic on skewed blocks -> next-entry fast path + binary search, cache only for query_range and blocks of more than one series; a skewed case and a past-the-end test point added.",
+      "notes": "Run 1 (James 2026-11-21, #22): pass. The control's bodies differ in the last digits between requests to master too (sum over threads); kit now also hashes rounded values. Final preflight: Approve. Category kept Experimental Feature (the bot prefers Performance Improvement; your call). Merges cleanly with master a2126dbc146.",
       "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
       "head": "ff2ee0f3f03680448b165df94ae3d8df50195999",
       "issue": 22,

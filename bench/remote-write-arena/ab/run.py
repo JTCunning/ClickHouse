@@ -40,9 +40,10 @@ def cpu_s(pid):
 
 
 def send(port, requests, ts0):
+    # --value-suffix=<value> as one argument: argparse rejects a separate value that starts with '-' (2026-11-21 E1)
     subprocess.run([sys.executable, RW, f'http://127.0.0.1:{port + 2000}/write', '--series', str(SERIES),
                     '--samples-per-series', '1', '--labels', str(LABELS), '--universe', str(UNIVERSE),
-                    '--requests', str(requests), '--ts0', str(ts0), '--value-suffix', SUFFIX], check=True, capture_output=True)
+                    '--requests', str(requests), '--ts0', str(ts0), f'--value-suffix={SUFFIX}'], check=True, capture_output=True)
 
 
 for port in PORTS:

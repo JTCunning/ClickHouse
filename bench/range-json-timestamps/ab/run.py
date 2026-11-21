@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """A/B of /api/v1/query_range on two servers started with ../server.sh (Prometheus API on TCP + 2000), each filled by
 ../gen.sh with the same T_END (so both hold the same samples). Per round, every case is sent to every server in an
-order that rotates with the round; the request's wall time, the size and the md5 of the response body are recorded.
+order that rotates with the round; the request's wall time, the size and the md5 of the response body are recorded,
+plus the md5 with values rounded to 12 significant digits (values_md5), which is the check for aggregated cases.
 Prints one JSON line per request; ab/summarize.py gives the medians, the change and whether the bodies are equal.
 
 Env: PORTS="9001 9002" (TCP), ROUNDS=30, CASES (names from CASES below, default all), WINDOW=../window.txt
 Usage: ab/run.py > ab/run-<date>.jsonl
 """
 import hashlib, json, os, time, urllib.parse, urllib.request
+
+
+def values_md5(data):
+    """md5 of the response with every value rounded to 12 significant digits: an aggregate such as sum() over
+    parallel threads can differ in its last digits between two requests to the same server (G1 on 2026-11-21)."""
+    doc = json.loads(data)
+    for s in doc['data']['result']:
+        s['values'] = [[t, v if v in ('NaN', '+Inf', '-Inf') else f'{float(v):.12g}'] for t, v in s['values']]
+    return hashlib.md5(json.dumps(doc, sort_keys=True).encode()).hexdigest()
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORTS = [int(p) for p in os.environ.get('PORTS', '9001 9002').split()]
@@ -41,4 +52,4 @@ for rnd in range(ROUNDS):
             port = PORTS[(rnd + k + j) % len(PORTS)]
             dt, data = api(port, *CASES[name])
             print(json.dumps(dict(case=name, port=port, round=rnd, ms=round(1000 * dt, 2), bytes=len(data),
-                                  md5=hashlib.md5(data).hexdigest())), flush=True)
+                                  md5=hashlib.md5(data).hexdigest(), values_md5=values_md5(data))), flush=True)
