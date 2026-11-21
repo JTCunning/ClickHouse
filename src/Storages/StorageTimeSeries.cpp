@@ -1167,6 +1167,11 @@ This includes an instant selector inside a subquery, for example `max_over_time(
 A range selector, for example in `rate(http_requests_total[5m])` or `max_over_time(cpu_usage[1h])`, uses every sample of its window and always reads the raw `samples` column.
 So does an instant selector of an instant query outside a subquery, and every query with `time_series_prefer_rollup_tables` disabled.
 
+Only an insert into the `TimeSeries` table itself writes the rollup columns. A row written to the samples table directly
+(for example through [timeSeriesSamples](/reference/functions/table-functions/timeSeriesSamples)) must fill every `samples_<step>`
+with `timeSeriesGroupArray(<step>)` of its samples, and a mutation of the `samples` column doesn't update them:
+otherwise the queries reading a rollup column don't see those samples. Disable `time_series_prefer_rollup_tables` to read the raw samples only.
+
 ### Tags table {#tags-table}
 
 The _tags_ table contains identifiers calculated for each combination of a metric name and tags.
