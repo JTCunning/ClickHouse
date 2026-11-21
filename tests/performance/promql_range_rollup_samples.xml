@@ -13,7 +13,7 @@
         `rate()` reads a range selector, which always reads the raw samples: it is the control and must not move.
     -->
 
-    <create_query>CREATE TABLE promql_rollup_ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m, 1h', recent_samples_ttl_seconds = 0</create_query>
+    <create_query do_not_check_in_pr="PR_NUMBER">CREATE TABLE promql_rollup_ts ENGINE = TimeSeries SETTINGS samples_rollup_steps = '5m, 1h', recent_samples_ttl_seconds = 0</create_query>
 
     <!-- 2000 series, one sample every 15 s over one day from 1000800 (a multiple of 1h): 5760 samples per series. -->
     <fill_query>
