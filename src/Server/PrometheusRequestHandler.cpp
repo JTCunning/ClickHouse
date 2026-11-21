@@ -359,7 +359,7 @@ public:
 
         /// The request is parsed into an arena: it has a message for every series and label and two strings per label.
         /// On the heap each of them is a separate allocation and a separate free when the request is destroyed;
-        /// in the arena they are carved out of blocks of up to 32 KiB, which are freed together.
+        /// in the arena they are carved out of blocks that grow to 32 KiB (a larger array gets a block of its own), freed together.
         /// (A string longer than the inline capacity of `std::string` still keeps its characters on the heap.)
         google::protobuf::Arena arena;
         prometheus::WriteRequest & write_request = *google::protobuf::Arena::Create<prometheus::WriteRequest>(&arena);
