@@ -23,7 +23,7 @@ FROM
     SELECT id, timeSeriesGroupArray(t, v) AS s, arraySort(x -> x.1, groupArray((t, v))) AS r
     FROM
     (
-        SELECT number % 700 AS id, toDateTime(1700000000 + (30000 - number) * 15, 'UTC') AS t, toFloat32(number) / 8 AS v
+        SELECT number % 700 AS id, toDateTime(1700000000 + (30000 - number) * 15, 'UTC') AS t, toFloat32(number / 8) AS v
         FROM numbers(30000)
     )
     GROUP BY id
