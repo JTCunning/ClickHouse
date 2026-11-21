@@ -31,7 +31,12 @@
     </fill_query>
 
     <!-- One part, so that no background merge runs during the queries (the INSERT query below keeps merges running). -->
-    <fill_query>OPTIMIZE TABLE ts_group_array_rows FINAL</fill_query>
+    <fill_query>OPTIMIZE TABLE ts_group_array_rows FINAL SETTINGS optimize_throw_if_noop = 1</fill_query>
+    <fill_query>
+        SELECT throwIf(count() != 1, 'timeseries_group_array: expected 1 active part in ts_group_array_rows')
+        FROM system.parts
+        WHERE database = currentDatabase() AND table = 'ts_group_array_rows' AND active
+    </fill_query>
 
     <!-- 10000 series, 1000 samples per series, one sample per row: like the samples table of an earlier version. -->
     <create_query>
@@ -51,7 +56,12 @@
         FROM numbers(10000 * 1000)
     </fill_query>
 
-    <fill_query>OPTIMIZE TABLE ts_group_array_samples FINAL</fill_query>
+    <fill_query>OPTIMIZE TABLE ts_group_array_samples FINAL SETTINGS optimize_throw_if_noop = 1</fill_query>
+    <fill_query>
+        SELECT throwIf(count() != 1, 'timeseries_group_array: expected 1 active part in ts_group_array_samples')
+        FROM system.parts
+        WHERE database = currentDatabase() AND table = 'ts_group_array_samples' AND active
+    </fill_query>
 
     <!-- The 9.6M samples of ts_group_array_rows as 4 unmerged parts of an AggregatingMergeTree table, one part per row of
          each series: SELECT ... FINAL merges them with AggregatingSortedAlgorithm, as a merge of a samples table does. -->
@@ -70,6 +80,11 @@
     <fill_query>INSERT INTO ts_group_array_parts SELECT number % 40000, arrayMap(k -> (toDateTime64(1700000000 + (intDiv(number, 40000) * 60 + k) * 15, 3, 'UTC'), toFloat64(number * 60 + k) / 4), range(60)) FROM numbers(40000, 40000)</fill_query>
     <fill_query>INSERT INTO ts_group_array_parts SELECT number % 40000, arrayMap(k -> (toDateTime64(1700000000 + (intDiv(number, 40000) * 60 + k) * 15, 3, 'UTC'), toFloat64(number * 60 + k) / 4), range(60)) FROM numbers(80000, 40000)</fill_query>
     <fill_query>INSERT INTO ts_group_array_parts SELECT number % 40000, arrayMap(k -> (toDateTime64(1700000000 + (intDiv(number, 40000) * 60 + k) * 15, 3, 'UTC'), toFloat64(number * 60 + k) / 4), range(60)) FROM numbers(120000, 40000)</fill_query>
+    <fill_query>
+        SELECT throwIf(count() != 4, 'timeseries_group_array: expected 4 active parts in ts_group_array_parts')
+        FROM system.parts
+        WHERE database = currentDatabase() AND table = 'ts_group_array_parts' AND active
+    </fill_query>
 
     <!-- The target of the INSERT query below. Merges are stopped so that every run measures the insert alone. -->
     <create_query>

@@ -15,7 +15,7 @@ FROM
     GROUP BY id
 );
 
--- Out-of-order samples: every row holds two samples in descending order, so each state is sorted before its result is written.
+-- Out-of-order samples: the rows of each group arrive in descending timestamp order, so each state is sorted before its result is written.
 SELECT 'two arguments, DateTime and Float32, out of order';
 SELECT count(), countIf(s != r), sum(length(s))
 FROM
