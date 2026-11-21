@@ -43,6 +43,10 @@
 #include <Storages/TimeSeries/PrometheusRemoteWriteProtocol.h>
 #include <Storages/TimeSeries/PrometheusHTTPProtocolAPI.h>
 
+#if USE_PROMETHEUS_PROTOBUFS
+#include <google/protobuf/arena.h>
+#endif
+
 
 namespace DB
 {
@@ -353,7 +357,11 @@ public:
         auto table = DatabaseCatalog::instance().getTable(getTimeSeriesTableID(), context);
         PrometheusRemoteWriteProtocol protocol{table, context};
 
-        prometheus::WriteRequest write_request;
+        /// The request is parsed into an arena: it has a message for every series, label and sample, and two strings per label.
+        /// On the heap each of them is a separate allocation and a separate free when the request is destroyed;
+        /// in the arena they are carved out of a few blocks, which are freed together.
+        google::protobuf::Arena arena;
+        prometheus::WriteRequest & write_request = *google::protobuf::Arena::Create<prometheus::WriteRequest>(&arena);
 
         {
             ProtobufZeroCopyInputStreamFromReadBuffer zero_copy_input_stream{std::move(decompressing_buf)};
