@@ -445,7 +445,7 @@
     {
       "slug": "range-json-timestamp-text",
       "priority": 13,
-      "status": "ready-to-build",
+      "status": "results-in",
       "title": "Format the timestamps shared by the series of a range vector once per block",
       "branch": "lilred-perf-range-json-timestamp-text",
       "summary": "/api/v1/query_range formatted the same step timestamps once per series (40-56 ms of a 700 ms request, 2,000 x 1,441 points, 2 vCPU); now once per block; predicted -5..-20% wall on 16 cores",
