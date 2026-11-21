@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-21T05:57:39Z",
+  "updated": "2026-11-21T10:01:09Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -228,7 +228,7 @@
       "slug": "rollup-samples",
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
       "summary": "run 1: selector 1.8–2.4× at 1h over 7–30d, 1.85× at 5m over 7d; 30d 5m 1.25×, 1m ≤1.2×; the 1d loss (0.72×) is reworked",
-      "decision": "Next build of the reworked branch (run 1 failed; d521a31 reads the recent table first again): A (recommended) lil red rebases onto master, with the rename to time_series_prefer_rollup_columns if you say yes, then one confirm build (the tests + ONLY='^selector_' PROBE=0 run.sh) and submit; B a full run 2 first; C park. Also yes or no to the rename. Answer on #16; it blocks the build.",
+      "decision": "Rename the setting to time_series_prefer_rollup_columns: yes or no? (Option A taken on 2026-11-21: lil red rebases onto master, then one confirm build.) Answer on #16.",
       "status": "needs-work",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",

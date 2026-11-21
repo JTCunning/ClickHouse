@@ -2,13 +2,13 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-21 05:57 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-21 10:01 UTC.
 
 ## For you, in order
 
 | # | your move | item | issue | what it's for |
 |---|---|---|---|---|
-| 1 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Next build of the reworked branch (run 1 failed; d521a31 reads the recent table first again): A (recommended) lil red rebases onto master, with the rename to time_series_prefer_rollup_columns if you say yes, then one confirm build (the tests + ONLY='^selector_' PROBE=0 run.sh) and submit; B a full run 2 first; C park. Also yes or no to the rename. Answer on #16; it blocks the build. |
+| 1 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rename the setting to time_series_prefer_rollup_columns: yes or no? (Option A taken on 2026-11-21: lil red rebases onto master, then one confirm build.) Answer on #16. |
 | 2 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 | 3 | **Decide** | [remote-write-arena](../prs/remote-write-arena.md) | [#24](https://github.com/JTCunning/ClickHouse/issues/24) | Build and A/B are fine. Before you submit: (1) read my note in the web chat (2026-11-21), one question there about this request path; (2) open the upstream issue drafted on #24 (truncated zstd bodies get 204) and add it as Related: in the PR text. |
 | 4 | **Build and A/B**: `ab ts-group-array-result-copy` | [ts-group-array-result-copy](../prs/ts-group-array-result-copy.md) | [#23](https://github.com/JTCunning/ClickHouse/issues/23) | samples-table merges, optimize_on_insert INSERTs and FINAL reads: timeSeriesGroupArray wrote every sample through a Field (~19 ns); predicted FINAL -20..-50%, merge CPU -8..-20% |
