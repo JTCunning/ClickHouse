@@ -2,6 +2,9 @@
 # Tags: no-fasttest
 # Tag no-fasttest: PromQL needs ANTLR4, which is disabled in the fast-test build.
 
+# CREATE DATABASE ... ENGINE = Ordinary and ATTACH TABLE with a full definition log warnings, which would reach the stderr of the test.
+CLICKHOUSE_CLIENT_SERVER_LOGS_LEVEL=fatal
+
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CUR_DIR"/../shell_config.sh
