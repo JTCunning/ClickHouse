@@ -421,7 +421,7 @@
     {
       "slug": "remote-write-arena",
       "priority": 12,
-      "status": "ready-to-submit",
+      "status": "submitted",
       "title": "Parse Prometheus remote-write requests into a protobuf arena",
       "branch": "lilred-perf-remote-write-arena",
       "summary": "built: remote-write CPU per sample -9.5..-9.9% (merges stopped, 10/20 labels, long values too), -3.8% with merges running; parse+destroy 12.9% -> 4.0% of server CPU",
@@ -446,7 +446,9 @@
       "issue": 24,
       "pr_text": "prs/remote-write-arena.md",
       "ab_plan": "ab-plans/remote-write-arena.md",
-      "report": "reports/2026-11-21-remote-write-arena.md"
+      "report": "reports/2026-11-21-remote-write-arena.md",
+      "upstream_pr": 133485,
+      "submitted_head": "59469d38b474201d0b48ef95e3c9a258f74e81d0"
     },
     {
       "slug": "range-json-timestamp-text",

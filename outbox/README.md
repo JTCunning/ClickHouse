@@ -8,12 +8,10 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 
 | # | your move | item | issue | what it's for |
 |---|---|---|---|---|
-| 1 | **Decide** | [remote-write-arena](../prs/remote-write-arena.md) | [#24](https://github.com/JTCunning/ClickHouse/issues/24) | Before you submit: open the upstream issue drafted on #24 (truncated zstd bodies get 204 and are dropped) and add it as Related: at the top of the PR body. Doesn't block anything else. Answer on #24. |
-| 2 | **Submit**: `submit remote-write-arena` | [remote-write-arena](../prs/remote-write-arena.md) | [#24](https://github.com/JTCunning/ClickHouse/issues/24) | built: remote-write CPU per sample -9.5..-9.9% (merges stopped, 10/20 labels, long values too), -3.8% with merges running; parse+destroy 12.9% -> 4.0% of server CPU |
-| 3 | **Submit**: `submit range-json-timestamp-text` | [range-json-timestamp-text](../prs/range-json-timestamp-text.md) | [#22](https://github.com/JTCunning/ClickHouse/issues/22) | built: /api/v1/query_range over 2,000 series -10.2% (m, step 15 s), rate() -5.3%, every-other-step -8.3%; skewed block and control flat; same bytes |
-| 4 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rename the setting to time_series_prefer_rollup_columns? Recommended yes. Say it before you build if you want it (after the build it needs another build); no answer = build with the current name. Answer on #16. |
-| 5 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
-| 6 | **Build and A/B**: `ab rollup-samples` | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | run 1: selector 1.8–2.4× at 1h over 7–30d, 1.85× at 5m over 7d; 1d loss reworked; rebased 11-21, confirm build next |
+| 1 | **Submit**: `submit range-json-timestamp-text` | [range-json-timestamp-text](../prs/range-json-timestamp-text.md) | [#22](https://github.com/JTCunning/ClickHouse/issues/22) | built: /api/v1/query_range over 2,000 series -10.2% (m, step 15 s), rate() -5.3%, every-other-step -8.3%; skewed block and control flat; same bytes |
+| 2 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rename the setting to time_series_prefer_rollup_columns? Recommended yes. Say it before you build if you want it (after the build it needs another build); no answer = build with the current name. Answer on #16. |
+| 3 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
+| 4 | **Build and A/B**: `ab rollup-samples` | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | run 1: selector 1.8–2.4× at 1h over 7–30d, 1.85× at 5m over 7d; 1d loss reworked; rebased 11-21, confirm build next |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 
@@ -30,6 +28,7 @@ None.
 | [time-ranges-id-ranges-index-hint](../prs/time-ranges-id-ranges-index-hint.md) | PR 129064 | [#6](https://github.com/JTCunning/ClickHouse/issues/6) | 100-name selector −19.9% (176 → 141 ms); 50–300 names −35–39% (build, 2026-11-01) |
 | [alp-search-early-exit](../prs/alp-search-early-exit.md) | PR 131497 | [#11](https://github.com/JTCunning/ClickHouse/issues/11) | run 2 passed: small-block INSERT of decimal-like values 2.2x faster (-54.6%), codecs_float_insert ALP rtn -9.9%, nothing slower; same bytes |
 | [ts-group-array-result-copy](../prs/ts-group-array-result-copy.md) | PR 133502 | [#23](https://github.com/JTCunning/ClickHouse/issues/23) | built: samples-table merge CPU -12.1%, FINAL -11..-14%, GROUP BYs -13..-15%, optimize_on_insert INSERT -7%; controls flat, same results (under my predicted floors; judged against the 5% bar) |
+| [remote-write-arena](../prs/remote-write-arena.md) | PR 133485 | [#24](https://github.com/JTCunning/ClickHouse/issues/24) | built: remote-write CPU per sample -9.5..-9.9% (merges stopped, 10/20 labels, long values too), -3.8% with merges running; parse+destroy 12.9% -> 4.0% of server CPU |
 
 ## Dropped
 
