@@ -4,7 +4,7 @@ Which upstream Prometheus engine tests ClickHouse still gets wrong, and how to c
 
 **Source:** CI job `PromQL Compliance`, suite `extended_support` (the pinned upstream Prometheus `promqltest` files in `tests/integration/test_prometheus_protocols/promqltest/`). Result JSON: `https://clickhouse-builds.s3.amazonaws.com/REFs/master/<sha>/promql_compliance/promql_compliance_result.json`.
 
-**Latest:** master `6ea176fa3035` (2026-11-15) · upstream Prometheus `3da2514eff5c` · compliance suite 539/539 · extended support 681/732 passed (93.0%), **17 behavioral failures**, 34 unsupported · excluded: 149 native-histogram, 248 assertion evals. Same groups as `7b5f2bf328f9` (2026-11-07). (Before: `958c7e7b54ef`, 2026-11-01: 682 passed, 16 behavioral; row 9 appeared at `7b5f2bf`.)
+**Latest:** master `903285ff6155` (2026-11-22) · upstream Prometheus `3da2514eff5c` · compliance suite 539/539 · extended support 681/732 passed (93.0%), **17 behavioral failures**, 34 unsupported · excluded: 149 native-histogram, 248 assertion evals. Same groups as `6ea176fa3035` (2026-11-15) and `7b5f2bf328f9` (2026-11-07); #132947 (merged 2026-11-22, `removeBefore` before `add` in the grid aggregates) is in this sha and moved no count. (Before: `958c7e7b54ef`, 2026-11-01: 682 passed, 16 behavioral; row 9 appeared at `7b5f2bf`.)
 
 "Behavioral" follows CI's own split (`compare_eval` in `promqltest_loader.py`): an error that says not implemented / not supported, code 48 or HTTP 501 is "unsupported" (a dialect gap) and is out of scope here. Everything else counts: a wrong value, a wrong series set or order, or an error where Prometheus returns a result.
 
@@ -20,7 +20,11 @@ Exact evals come from `research/bench/compliance/run_extended.py`, which runs th
 | 6 | value mismatch for {'test': 'NaN sample'}: 0.19999999999999996 vs nan | 1 | aggregators.test:513 | in PR #122914 | [quantile-nan-ordering](quantile-nan-ordering.md) |
 | 7 | value mismatch for {}: inf vs nan | 1 | aggregators.test:636 | analysed (test loader, not engine) | [avg-overflow-and-duplicate-load](avg-overflow-and-duplicate-load.md) |
 | 8 | series set mismatch: 1 vs 1 | 1 | name_label_dropping.test:115 | in PR #123419 | [delayed-name-removal](delayed-name-removal.md) |
-| 9 | value mismatch for {'l': 'NaN'}: -1.0 vs nan (new at `7b5f2bf`) | 1 | trig_functions.test:48 (`tanh`) | analysed (SQL `tanh`, fastops kernel) | [tanh-nan](tanh-nan.md) |
+| 9 | value mismatch for {'l': 'NaN'}: -1.0 vs nan (new at `7b5f2bf`) | 1 | trig_functions.test:48 (`tanh`) | in PR #133324 (fastops kernel fix, found 2026-11-22) | [tanh-nan](tanh-nan.md) |
+
+**Overlap re-check 2026-11-22:** #123419, #122914 and #122974 are still open. #122974 changes only the `avg` operator (new `timeSeriesAvgOverGroup`), so the `avg_over_time` half of rows 3–4 stays parked. Row 7 (the loader keeps both duplicate `load` lines): no PR touches it. Row 9: new PR #133324.
+
+**Harness PRs to watch** (open; they change the denominator, not the engine): #125227 scores the classic-histogram and stale-marker evals (its own measurement: 758 scored, 707 passed, 17 failed; the one new failure, `histograms.test:1146`, 0 vs NaN for a histogram with no observations, is fixed by #122779). #125231 runs the compliance suite at 61 steps instead of 3 (still 539/539 in its measurement). #125234 doubles backslashes in the loader's SQL literal (`functions.test:523` still fails as expected).
 
 **Unsupported (out of scope):** Function end is not implemented. (NOT_IMPLEMENTED) ×10; Function sort_by_label is not implemented. (NOT_IMPLEMENTED) ×8; Function start is not implemented. (NOT_IMPLEMENTED) ×8; Function sort_by_label_desc is not implemented. (NOT_IMPLEMENTED) ×3; Aggregation operator 'quantile' with a non-constant scalar parameter is not supported. (NOT_IM ×1; Function 'quantile_over_time' does not support a time-varying first argument (the quantile) to ×1; Function 'quantile_over_time' does not support a time-varying first argument (the quantile) to ×1; Function double_exponential_smoothing is not implemented. (NOT_IMPLEMENTED) ×1; Aggregation operator 'limit_ratio' is not implemented. (CANNOT_EXECUTE_PROMQL_QUERY) ×1.
 

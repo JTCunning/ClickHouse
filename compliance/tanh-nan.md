@@ -1,6 +1,6 @@
 # `tanh(NaN)` returns -1 (1 eval)
 
-**Status:** analysed 2026-11-15 at master `6ea176fa3035`, upstream Prometheus `3da2514eff5c`. The cause is in the SQL function `tanh`, not in the PromQL layer. Nobody is working on it.
+**Status:** in PR [#133324](https://github.com/ClickHouse/ClickHouse/pull/133324) (open, found 2026-11-22; see Overlap). Analysed 2026-11-15 at master `6ea176fa3035`, upstream Prometheus `3da2514eff5c`. The cause is in the SQL function `tanh`, not in the PromQL layer.
 
 ## Failing eval
 
@@ -53,3 +53,5 @@ Other options, and why not:
 ## Overlap
 
 None found (2026-11-15): no issue or PR about `tanh` or NaN in `fastops`. The nearest work is [#109717](https://github.com/ClickHouse/ClickHouse/pull/109717) (open, "Always use vectorized kernels for exp2/exp10/log2/log10/pow/sin/cos/tan"), which touches other math functions, not `tanh` or `sigmoid`.
+
+**Re-checked 2026-11-22 (master `903285ff6155`): now in PR [#133324](https://github.com/ClickHouse/ClickHouse/pull/133324)** (open, `pr-bugfix`, opened 2026-11-20; the review bot approved it). It takes the third option above, the fix in `fastops` itself, through [ClickHouse/fastops#9](https://github.com/ClickHouse/fastops/pull/9) and a submodule bump, plus a stateless test `05839_tanh_sigmoid_nan`. The kernel already had a NaN restore after the approximation (`CmpF<_CMP_EQ_OQ>(x, x)` and a blend that puts the original NaN back), but it ran only in exact mode. The PR runs it always on x86, where min/max return the clamp bound for a NaN, and keeps it exact-mode-only on AArch64, where min/max propagate NaN. That is the cause found here, and it fixes every `fastops` caller (`exp`, `log`, `sigmoid`, `tanh`) at the shared kernel, which is a better place than the per-function guard planned above. Nothing left to do here; `trig_functions.test:48` should pass once it merges.
