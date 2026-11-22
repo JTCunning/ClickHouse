@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-22T11:07:16Z",
+  "updated": "2026-11-22T20:59:22Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -477,6 +477,32 @@
       "pr_text": "prs/range-json-timestamp-text.md",
       "ab_plan": "ab-plans/range-json-timestamp-text.md",
       "report": "reports/2026-11-21-range-json-timestamp-text.md"
+    },
+    {
+      "slug": "recent-samples-merge",
+      "priority": 14,
+      "status": "needs-work",
+      "title": "One samples table instead of samples + recent samples (labelled tiers)",
+      "branch": "",
+      "base": "521c4bcb7b94",
+      "head": null,
+      "summary": "Report, no branch yet. Recent table's speed = its 5 h partitions only (wide alert rule 726 -> 61 ms; buckets/granules/TTL add 0). One table partitioned by a `tier` column (young 1 d in 5 h partitions, a mover folds them into months) matches it on short shapes (0.93-1.05x), insert CPU -24..-34%, storage -19%; costs up to 1.8x on narrow 7-14 d, 1.7x on wide 1-4 d",
+      "claim": "Measured on master 521c4bcb (2000 series x 14 d, 2 threads, DDL only): L4 labelled tiers vs master's two tables: short shapes 0.93-1.05x, insert wall 0.64-0.81x / CPU 0.66-0.76x, storage 0.81x, narrow 7 d 1.77x / 14 d 1.57x, wide 3.5 d 1.70x, narrow 3.5 d 0.53x; results identical on 15 shapes, also mid-move.",
+      "perf_tests": [],
+      "guard_perf_tests": [],
+      "tests": {
+        "stateless": [],
+        "also_run": [],
+        "integration": [],
+        "gtest_filter": null
+      },
+      "pass_if": "See ab-plans/recent-samples-merge.md (row 23): no build; two table definitions on one master build plus a steady state with ingest, merges and the mover.",
+      "ab_plan": "ab-plans/recent-samples-merge.md",
+      "report": "reports/2026-11-22-recent-samples-merge.md",
+      "pr_text": null,
+      "issue": null,
+      "decision": "A (recommended): run the A/B plan at scale (no build: two table definitions on one master build + a steady state with the mover); if it passes I branch a version-12 default (`tier` column, recent off) and an engine-side mover. B: keep both tables and only cut the duplicate's cost (shorter recent TTL, pick the table by query shape). C: drop it. Answer on the issue.",
+      "notes": "Weekend batch 2026-11-22 target 1 (James's chat request). Also seen on master: the selector reads the recent table whenever the range starts inside its TTL; narrow selectors over >= 1 d are 1.6-3.9x slower there than on the samples table. Lab data 6.2 GB in tools/clickhouse/data/recent-samples-merge (gen.sh rebuilds it)."
     }
   ]
 }
