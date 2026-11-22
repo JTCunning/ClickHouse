@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-22T20:59:22Z",
+  "updated": "2026-11-22T21:29:00Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -503,6 +503,45 @@
       "issue": null,
       "decision": "A (recommended): run the A/B plan at scale (no build: two table definitions on one master build + a steady state with the mover); if it passes I branch a version-12 default (`tier` column, recent off) and an engine-side mover. B: keep both tables and only cut the duplicate's cost (shorter recent TTL, pick the table by query shape). C: drop it. Answer on the issue.",
       "notes": "Weekend batch 2026-11-22 target 1 (James's chat request). Also seen on master: the selector reads the recent table whenever the range starts inside its TTL; narrow selectors over >= 1 d are 1.6-3.9x slower there than on the samples table. Lab data 6.2 GB in tools/clickhouse/data/recent-samples-merge (gen.sh rebuilds it)."
+    },
+    {
+      "slug": "ts-from-grid-typed-write",
+      "priority": 15,
+      "status": "ready-to-build",
+      "title": "Write the timestamps of timeSeriesFromGrid and timeSeriesRange straight into the typed column",
+      "branch": "lilred-perf-ts-from-grid-typed-write",
+      "summary": "unbuilt: timeSeriesFromGrid/timeSeriesRange timestamps without Field (5.0-6.2 ns per point here): the function alone -20..-62% emulated; PromQL range queries over 4000 series only ~1-4% (measured, not judged); aggregated query must not slow down",
+      "claim": "timeSeriesFromGrid over 8000 x 300 dense points (kit T3) and promql_set_operator_presence_mask.xml q7 (100000 x 300): -20..-62%; timeSeriesRange 8000 x 300 (T5): -23..-60%; rows with NULL values (T4, q8) faster, size unproven; PromQL last_over_time(foo[10]) over 4000 series x 300 steps -1..-4% (emulated -3.1..-3.6%), -2..-6% at step 5 (emulated -5.0..-5.8%), and/or -1..-2%: measured, not judged; sum(...) (one series) unchanged; results identical. Emulated by subtraction on 2 vCPU (timeSeriesRange - range, timeSeriesFromGrid - (range + arrayFilter copy)).",
+      "perf_tests": [
+        "tests/performance/promql_set_operator_presence_mask.xml"
+      ],
+      "guard_perf_tests": [],
+      "tests": {
+        "stateless": [
+          "05850_time_series_from_grid_typed_write"
+        ],
+        "also_run": [
+          "03254_timeseries_functions",
+          "03254_timeseries_functions_with_resets",
+          "03254_timeseries_range",
+          "04042_time_series_range_overflow",
+          "04628_timeseries_sum_avg_count_over_time",
+          "05242_time_series_range_max_elements"
+        ],
+        "integration": [
+          "test_prometheus_protocols/test_evaluation.py"
+        ],
+        "gtest_filter": null
+      },
+      "pass_if": "05850 passes on A and B (its reference is master's output) and the also_run and integration tests pass on B. bench/ts-from-grid-typed-write/ab/ab.sh: gen on both servers, layout equal, hashes equal; one A/A pass, then N=100 bench: T3 at least -20%, T5 at least -23%, T4 significantly faster; perf.py --runs 13 on promql_set_operator_presence_mask.xml from B's tree: q7 at least -20%, q8 significantly faster, q0-q6 and q9 (sum, one series) not significantly slower; T1, T1x8, T2, M1, M2 reported (not judged) and not significantly slower; G1 (sum, one series) and G2 not significantly slower.",
+      "notes": "Preflight: 2 rounds (independent reviewer), no finding in the changed code; round 1 nits taken (q9 control, changelog wording); round 2 [Major] pre-existing NULL-argument defect -> tracking issue drafted for James (decision), Related: placeholder in the PR text. The query-level gain is under CI's 5% bar by the emulation (0.4x rule), so the PR's evidence is the function-level queries q7/q8; if the built query-level gain is under 5%, drop it from the changelog entry (note in prs/). Test number 05850 free on master e4f82e0c28b and on every lilred-perf-* branch. The unsigned wrap in start + j * step (a start before 1970) is pre-existing and unchanged. Kit dry run 2026-11-22 on master 521c4bcb (A/A): hashes equal on 10 cases, none significant.",
+      "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
+      "head": "a25c640b65b357950c65bedcf01134568b9fc948",
+      "issue": null,
+      "decision": "Before you submit: James opens the drafted NULL-argument issue and adds Related: (drafted on the results issue: NULL start/end/step of timeSeriesRange/timeSeriesFromGrid computed as 0, pre-existing, preflight round 2 [Major]; replace the placeholder Related: line at the top of the PR body). Doesn't block the build.",
+      "pr_text": "prs/ts-from-grid-typed-write.md",
+      "ab_plan": "ab-plans/ts-from-grid-typed-write.md",
+      "report": "reports/2026-11-22-ts-from-grid-typed-write.md"
     }
   ]
 }
