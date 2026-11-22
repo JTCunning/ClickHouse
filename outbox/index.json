@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-22T10:00:36Z",
+  "updated": "2026-11-22T10:01:20Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -229,7 +229,7 @@
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
       "summary": "run 1: selector 1.8–2.4× at 1h over 7–30d, 1.85× at 5m over 7d; 1d loss reworked; rebased 11-21, confirm build next",
       "decision": "Rename the setting to time_series_prefer_rollup_columns? Recommended yes. Say it before you build if you want it (after the build it needs another build); no answer = build with the current name. Answer on #16.",
-      "status": "ready-to-build",
+      "status": "results-in",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",
       "head": "04f3d6add91062b4e21da0e80665034111d39d94",
