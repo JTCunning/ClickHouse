@@ -2,14 +2,14 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-22 10:01 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-22 11:07 UTC.
 
 ## For you, in order
 
 | # | your move | item | issue | what it's for |
 |---|---|---|---|---|
 | 1 | **Submit**: `submit range-json-timestamp-text` | [range-json-timestamp-text](../prs/range-json-timestamp-text.md) | [#22](https://github.com/JTCunning/ClickHouse/issues/22) | built: /api/v1/query_range over 2,000 series -10.2% (m, step 15 s), rate() -5.3%, every-other-step -8.3%; skewed block and control flat; same bytes |
-| 2 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Rename the setting to time_series_prefer_rollup_columns? Recommended yes. Say it before you build if you want it (after the build it needs another build); no answer = build with the current name. Answer on #16. |
+| 2 | **Decide** | [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | Run 2 met 1 of 5 floors (my predictions); results equal, setting off = master. A (rec.): submit with run 2's numbers, no A/B rerun: you re-run only 05842 (test fix 520aade, binary unchanged), or one tests-only build if you also want the rename (rec. yes). B: park. C: one more rework + full A/B build. Answer on #16. |
 | 3 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.

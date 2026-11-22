@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-22T10:01:20Z",
+  "updated": "2026-11-22T11:07:16Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -227,12 +227,12 @@
     {
       "slug": "rollup-samples",
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
-      "summary": "run 1: selector 1.8–2.4× at 1h over 7–30d, 1.85× at 5m over 7d; 1d loss reworked; rebased 11-21, confirm build next",
-      "decision": "Rename the setting to time_series_prefer_rollup_columns? Recommended yes. Say it before you build if you want it (after the build it needs another build); no answer = build with the current name. Answer on #16.",
-      "status": "results-in",
+      "summary": "run 2: 30d 1h 2.2–2.3×, 7d 1h 1.5×, 7d 5m 1.3–1.4×, 30d 5m 1.2–1.3×; 1 of 5 floors met; setting off = master",
+      "decision": "Run 2 met 1 of 5 floors (my predictions); results equal, setting off = master. A (rec.): submit with run 2's numbers, no A/B rerun: you re-run only 05842 (test fix 520aade, binary unchanged), or one tests-only build if you also want the rename (rec. yes). B: park. C: one more rework + full A/B build. Answer on #16.",
+      "status": "needs-work",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",
-      "head": "04f3d6add91062b4e21da0e80665034111d39d94",
+      "head": "520aadef965e786b72efef59db66e4ecbd88c2c2",
       "base": "d980cb40217a12d41f898f91f9cc5e30c0d88603",
       "issue": 16,
       "pr_text": "prs/rollup-samples.md",
@@ -268,7 +268,7 @@
       ],
       "claim": "An instant selector of a PromQL range query evaluated at a step that a rollup step divides reads samples_<step> with a result identical to the raw samples. Emulated on 2 vCPU (1000 series x 7 days, 15 s scrapes): selector grid at 1h ~29x faster, 5m ~5x, 1m ~2x; columns 25% / 5.3% / 0.45% of the raw samples bytes for 1m / 5m / 1h. Range functions read raw and don't change. Fixed against daa5327: left-closed intervals returned the previous scrape at every evaluation time on exact 15 s scrapes.",
       "pass_if": "05508, 05621, 05842, 05843, the gtests NormalizeTimeSeriesDefinitionTest.* (ENABLE_TESTS=ON) and the also_run tests pass on B. bench/rollup-samples/ab/run.sh <B> <A> <dir> (the A/B is this harness, not perf.py): equality.tsv has series_differ 0 everywhere; selector at 5m and 1h (1d/7d/30d) >= 2x faster at p50 with >= 4x fewer read_bytes; at 1m >= 1.25x and >= 2x; no guard (range functions, 15s, raw vs master) more than 5% slower; ab_rollup ('1m, 5m, 1h') insert <= 1.25x ab_plain, small inserts <= 1.2x, samples storage <= 1.35x; ab_rollup_coarse ('5m, 1h') <= 1.1x and <= 1.1x; ab_plain on B within 5% of A. Second run SHAPE=aligned DAYS=7: equality still 0. Edge run SCRAPE=60 STEPS='1m' DAYS=7: selector_1d_1m not slower than 0.95x.",
-      "notes": "Run 1 (James, 2026-11-20, #16 issuecomment-7030381215): fail against the plan, results identical everywhere; selector rollup vs raw 30d 1h 2.43x, 7d 1h 1.81x, 7d 5m 1.85x, 30d 5m 1.25x, 7d 1m 1.20x; the 1d 5m/1h loss (0.74x/0.72x) came from the rollup-before-recent order, withdrawn in d521a31f4154. One-sample inserts 1.27x/1.21x vs 1.2x are a design cost. Option A (James, 2026-11-21): rebased onto master d980cb40217a on 2026-11-21; merges cleanly into master 790ef4520183. Preflight R6-R8 added step checks for attached or restored definitions (sink and selector) and an overflow-free recent-TTL threshold, tests 05842 and 05843. On A, 05842 fails as intended (master's INSERT raises LOGICAL_ERROR; a release server keeps running) and 05843 passes (its overflow shows only under UBSan). Kit dry run on master 521c4bcb passed (bench/rollup-samples/smoke-2026-11-21.txt). At submit: replace PR_NUMBER in tests/performance/promql_range_rollup_samples.xml with the PR's number right after opening it. Settled: rate-type functions exact-only (James A, 2026-11-13). Not built: ALTER MODIFY SETTING / backfill route (report); upstream PR 128889 uses the left-closed convention."
+      "notes": "Run 2 (James, 2026-11-22, #16 issuecomment-7076922484; A d980cb40217a, B 04f3d6add910): fail against the plan, results equal 31/31. Rollup vs raw (harness/rerun): 30d 1h 2.21x/2.30x (pass), 7d 1h 1.52x, 7d 5m 1.31x/1.44x, 30d 5m 1.16x/1.27x, 7d 1m 1.11x (rerun); 1d/3d guards flat; setting off = master (12/12 no difference, plain insert 0.99x). Costs with rollups on: storage 1.24x, bulk insert 1.11x, one-sample insert 1.22x (limit 1.2x). 05842 failed on stderr at the runner's log level: test-only fix 520aadef965e. Guard timeSeriesResetsToGrid(..., 1000) +2.6-5.3% in 4/4 passes: untouched code and headers, likely binary layout (UNCONFIRMED). Rollup arm 10-20% slower than in run 1 (the notEmpty filter on rollup reads or master's new defaults; UNCONFIRMED). Run 1: 30d 1h 2.43x, 7d 1h 1.81x, 7d 5m 1.85x, 30d 5m 1.25x, 7d 1m 1.20x. At submit: replace PR_NUMBER in the perf XML right after opening the PR; check merge-tree against a fresh master (base d980cb40217a)."
     },
     {
       "slug": "selector-one-tags-row-per-id",
