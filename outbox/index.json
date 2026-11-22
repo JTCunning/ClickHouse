@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-22T21:29:00Z",
+  "updated": "2026-11-22T21:30:43Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -500,7 +500,7 @@
       "ab_plan": "ab-plans/recent-samples-merge.md",
       "report": "reports/2026-11-22-recent-samples-merge.md",
       "pr_text": null,
-      "issue": null,
+      "issue": 25,
       "decision": "A (recommended): run the A/B plan at scale (no build: two table definitions on one master build + a steady state with the mover); if it passes I branch a version-12 default (`tier` column, recent off) and an engine-side mover. B: keep both tables and only cut the duplicate's cost (shorter recent TTL, pick the table by query shape). C: drop it. Answer on the issue.",
       "notes": "Weekend batch 2026-11-22 target 1 (James's chat request). Also seen on master: the selector reads the recent table whenever the range starts inside its TTL; narrow selectors over >= 1 d are 1.6-3.9x slower there than on the samples table. Lab data 6.2 GB in tools/clickhouse/data/recent-samples-merge (gen.sh rebuilds it)."
     },
@@ -537,7 +537,7 @@
       "notes": "Preflight: 2 rounds (independent reviewer), no finding in the changed code; round 1 nits taken (q9 control, changelog wording); round 2 [Major] pre-existing NULL-argument defect -> tracking issue drafted for James (decision), Related: placeholder in the PR text. The query-level gain is under CI's 5% bar by the emulation (0.4x rule), so the PR's evidence is the function-level queries q7/q8; if the built query-level gain is under 5%, drop it from the changelog entry (note in prs/). Test number 05850 free on master e4f82e0c28b and on every lilred-perf-* branch. The unsigned wrap in start + j * step (a start before 1970) is pre-existing and unchanged. Kit dry run 2026-11-22 on master 521c4bcb (A/A): hashes equal on 10 cases, none significant.",
       "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
       "head": "a25c640b65b357950c65bedcf01134568b9fc948",
-      "issue": null,
+      "issue": 26,
       "decision": "Before you submit: James opens the drafted NULL-argument issue and adds Related: (drafted on the results issue: NULL start/end/step of timeSeriesRange/timeSeriesFromGrid computed as 0, pre-existing, preflight round 2 [Major]; replace the placeholder Related: line at the top of the PR body). Doesn't block the build.",
       "pr_text": "prs/ts-from-grid-typed-write.md",
       "ab_plan": "ab-plans/ts-from-grid-typed-write.md",
