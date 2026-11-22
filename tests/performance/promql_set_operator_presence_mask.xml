@@ -36,5 +36,13 @@
     <query>SELECT * FROM prometheusQueryRange('promql_set_operator_presence_mask_ts', 'last_over_time(foo_sparse[10]) or on(instance) last_over_time(bar_sparse[10])', 100, 3090, 10) FORMAT Null</query>
     <query>SELECT * FROM prometheusQueryRange('promql_set_operator_presence_mask_ts', 'last_over_time(foo_sparse[10]) unless on(instance) last_over_time(bar_sparse[10])', 100, 3090, 10) FORMAT Null</query>
 
+    <!-- A plain range query, 4000 series x 300 steps: the last step, timeSeriesFromGrid, turns the 1.2M grid values into output points. -->
+    <query>SELECT * FROM prometheusQueryRange('promql_set_operator_presence_mask_ts', 'last_over_time(foo[10])', 100, 3090, 10) FORMAT Null</query>
+    <!-- timeSeriesFromGrid alone, 100000 rows x 300 points, without and with NULL values (every second one). -->
+    <query>SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM (SELECT materialize(CAST(arrayResize([], 300, 1.5), 'Array(Nullable(Float64))')) AS v FROM numbers(100000)) SETTINGS max_block_size = 8192 FORMAT Null</query>
+    <query>SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM (SELECT materialize(CAST(arrayMap(j -&gt; if(j % 2 = 0, NULL, 1.5), range(300)), 'Array(Nullable(Float64))')) AS v FROM numbers(100000)) SETTINGS max_block_size = 8192 FORMAT Null</query>
+    <!-- Control: the same selector aggregated to one output series, so timeSeriesFromGrid writes only 300 points. -->
+    <query>SELECT * FROM prometheusQueryRange('promql_set_operator_presence_mask_ts', 'sum(last_over_time(foo[10]))', 100, 3090, 10) FORMAT Null</query>
+
     <drop_query>DROP TABLE IF EXISTS promql_set_operator_presence_mask_ts</drop_query>
 </test>

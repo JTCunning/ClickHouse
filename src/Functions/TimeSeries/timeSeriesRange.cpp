@@ -6,6 +6,7 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/TimezoneMixin.h>
 #include <Columns/ColumnArray.h>
+#include <Columns/ColumnDecimal.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
@@ -293,6 +294,7 @@ public:
         }
 
         auto res_timestamps = result_timestamp_type->createColumn();
+        auto & res_timestamps_data = typeid_cast<ColumnVectorOrDecimal<TimestampType> &>(*res_timestamps).getData();
 
         MutableColumnPtr res_values;
         if constexpr (with_values)
@@ -303,7 +305,8 @@ public:
         }
 
         auto res_offsets = ColumnArray::ColumnOffsets::create();
-        res_offsets->reserve(num_rows);
+        auto & res_offsets_data = res_offsets->getData();
+        res_offsets_data.reserve(num_rows);
         size_t total_points = 0;
 
         for (size_t i = 0; i != num_rows; ++i)
@@ -385,41 +388,39 @@ public:
                     "(setting 'function_range_max_elements_in_block')",
                     name, total_points, max_elements);
 
-            if constexpr (with_values)
+            /// `j * step` can be greater than the maximum of Int64 when the duration is,
+            /// but the sum is between `start_timestamp` and `end_timestamp`, so it fits in Int64.
+            auto timestamp_at = [&](size_t j)
             {
+                return static_cast<TimestampType>(static_cast<Int64>(static_cast<UInt64>(start_timestamp) + j * step));
+            };
 
-                if (row_has_no_nulls)
-                {
+            if (row_has_no_nulls)
+            {
+                if constexpr (with_values)
                     res_values->insertRangeFrom(*values, values_base_offset, num_steps);
-                    for (size_t j = 0; j != num_steps; ++j)
-                    {
-                        TimestampType timestamp = static_cast<TimestampType>(static_cast<Int64>(static_cast<UInt64>(start_timestamp) + j * step));
-                        res_timestamps->insert(timestamp);
-                    }
 
-                    res_offsets->insert(res_timestamps->size());
-                    continue;
-                }
+                /// The timestamps column holds the points of the rows before this one, so the new size is
+                /// `total_points`, which is checked for overflow and against `max_elements` above.
+                const size_t timestamps_offset = res_timestamps_data.size();
+                res_timestamps_data.resize(timestamps_offset + num_steps);
+                for (size_t j = 0; j != num_steps; ++j)
+                    res_timestamps_data[timestamps_offset + j] = timestamp_at(j);
             }
-
-            for (size_t j = 0; j != num_steps; ++j)
+            else if constexpr (with_values)
             {
-                size_t offset = 0;
-                if constexpr (with_values)
+                /// `row_has_no_nulls` is false only when there is a null map.
+                for (size_t j = 0; j != num_steps; ++j)
                 {
-                    offset = j + values_base_offset;
-                    if (null_map && (*null_map)[offset])
+                    const size_t offset = values_base_offset + j;
+                    if ((*null_map)[offset])
                         continue;
-                }
-                /// `j * step` can be greater than the maximum of Int64 when the duration is,
-                /// but the sum is between `start_timestamp` and `end_timestamp`, so it fits in Int64.
-                TimestampType timestamp = static_cast<TimestampType>(static_cast<Int64>(static_cast<UInt64>(start_timestamp) + j * step));
-                res_timestamps->insert(timestamp);
-                if constexpr (with_values)
+                    res_timestamps_data.push_back(timestamp_at(j));
                     res_values->insertFrom(*values, offset);
+                }
             }
 
-            res_offsets->insert(res_timestamps->size());
+            res_offsets_data.push_back(res_timestamps_data.size());
         }
 
         if constexpr (with_values)
