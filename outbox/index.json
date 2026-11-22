@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-21T23:24:34Z",
+  "updated": "2026-11-22T10:00:36Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -381,7 +381,7 @@
     {
       "slug": "ts-group-array-result-copy",
       "priority": 11,
-      "status": "ready-to-submit",
+      "status": "submitted",
       "title": "Write the result of timeSeriesGroupArray straight into its typed columns",
       "branch": "lilred-perf-ts-group-array-result-copy",
       "summary": "built: samples-table merge CPU -12.1%, FINAL -11..-14%, GROUP BYs -13..-15%, optimize_on_insert INSERT -7%; controls flat, same results (under my predicted floors; judged against the 5% bar)",
@@ -414,7 +414,9 @@
       "issue": 23,
       "pr_text": "prs/ts-group-array-result-copy.md",
       "ab_plan": "ab-plans/ts-group-array-result-copy.md",
-      "report": "reports/2026-11-21-ts-group-array-result-copy.md"
+      "report": "reports/2026-11-21-ts-group-array-result-copy.md",
+      "upstream_pr": 133502,
+      "submitted_head": "aea89aafdf0b23347e0af14562981d5315ae4bb2"
     },
     {
       "slug": "remote-write-arena",
