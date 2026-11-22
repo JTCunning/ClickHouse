@@ -1,0 +1,89 @@
+Kit dry run, 2026-11-22 (chat batch, weekend perf pass, target 2), host 2 vCPU / 4 GiB.
+Master 26.12.1.112, GIT_HASH 521c4bcb7b9441a8f591a80965d9a9714703190e (= the branch's base; origin/master
+e4f82e0c28b has no change under src/Functions/TimeSeries/). Both servers on the master binary (A/A):
+bench/ts-from-grid-typed-write/server.sh, ports 19001 / 19002, SERVER_MEM=1400000000 QUERY_MEM=1200000000,
+DATA=/root/nerve-workspace/tools/clickhouse/data/ts-from-grid-typed-write-dryrun (fresh, empty).
+B~ (the emulated branch) can't be run: the change is inside a function. Direction comes from the emulation
+(emulate-2026-11-22-pass*.txt, promql-2026-11-22.txt), not from this run.
+
+A. Static checks (clickhouse-ab-kit-dryrun §2)
+- fixed timestamps: none in the kit's timed queries; 100..3090 are the timestamps gen.sql writes (from the
+  perf XML's fill: toDateTime64(100 + step * 10, 3)), so they can't go stale.
+- moved defaults: the TimeSeries table uses the engine defaults on purpose, as the perf XML does (CI runs it so).
+- one query text per case: cases.tsv, column 4, sent to both servers by one clickhouse benchmark call.
+- runs per server: -i 2N with N=100 by default (cases T3-T5 run in ~25 ms).
+- exact hash query: cases.tsv column 5 (G1 rounds its values to 6 digits: sum over threads).
+- order: no case relies on a subquery ORDER BY.
+- layout: ab.sh gen merges the inner tables to one part; ab.sh layout PA PB stops with "layout differs".
+- arm order: clickhouse benchmark interleaves the two servers at random; warm-ups are 3 per server.
+- tests named in full: 05850_time_series_from_grid_typed_write matches exactly one .sql on the branch, none on master.
+- overrides: CH, N, OUT, CASES; ports as arguments; server.sh takes CH, DATA, SERVER_MEM, QUERY_MEM.
+- new .sh tests: none.
+
+B. Data: ab.sh gen 19001; ab.sh gen 19002 (gen.sql at full size, scale 1/1: it is small)
+- layout (ab.sh layout 19001 19002):
+  .inner_id.recentsamples 0 rows 1 part, .inner_id.samples 16000 rows 1 part, .inner_id.tags 16000 rows 1 part,
+  .inner_id.timeranges 16000 rows 1 part, fg_dense 8000 rows (34.35 MiB), fg_null 8000 rows (22.37 MiB); inner tables 11.38 MiB on disk.
+  -> layout equal on both servers.
+- preconditions: T1, M1, M2 return 4000 series x 300 points = 1,200,000 points; T2 4000 x 599 = 2,396,000; T3 and
+  T5 2,400,000 points; T4 1,200,493 points out of 2,400,000 grid positions (50% NULL); G1 1 series x 300; G2 4000 series.
+  -> as the plan states.
+
+C. Results (ab.sh hash 19001 19002)
+  T1 | 19001: 4000 15558791480632491934 | 19002: 4000 15558791480632491934
+  T1x8 | 19001: 4000 15558791480632491934 | 19002: 4000 15558791480632491934
+  T2 | 19001: 4000 3234535739049927752 | 19002: 4000 3234535739049927752
+  T3 | 19001: 8000 16754876117826158314 | 19002: 8000 16754876117826158314
+  T4 | 19001: 8000 12223210904932699867 | 19002: 8000 12223210904932699867
+  T5 | 19001: 8000 6380652327048963584 | 19002: 8000 6380652327048963584
+  M1 | 19001: 4000 15558791480632491934 | 19002: 4000 15558791480632491934
+  M2 | 19001: 4000 15558791480632491934 | 19002: 4000 15558791480632491934
+  G1 | 19001: 1 8567748170839425729 | 19002: 1 8567748170839425729
+  G2 | 19001: 4000 13657110911591974791 | 19002: 4000 13657110911591974791
+  hashes equal
+  -> identical, none empty (M1 and M2 hash like T1: on this data both operators return the foo series).
+
+D. A/A timing (N=20 OUT=... ab.sh bench 19001 19002; ab.sh summary 19001 19002); clickhouse benchmark verdicts:
+  == T1 (target, max_threads 2)	No difference proven at 99.5% confidence
+  == T1x8 (target, max_threads 8)	No difference proven at 99.5% confidence
+  == T2 (target, max_threads 2)	No difference proven at 99.5% confidence
+  == T3 (target, max_threads 1)	No difference proven at 99.5% confidence
+  == T4 (target, max_threads 1)	No difference proven at 99.5% confidence
+  == T5 (target, max_threads 1)	No difference proven at 99.5% confidence
+  == M1 (measured, max_threads 2)	No difference proven at 99.5% confidence
+  == M2 (measured, max_threads 2)	No difference proven at 99.5% confidence
+  == G1 (guard, max_threads 2)	No difference proven at 99.5% confidence
+  == G2 (guard, max_threads 2)	No difference proven at 99.5% confidence
+  == 19001
+      ┌─case─┬──n─┬─wall_med_ms─┬─wall_p95_ms─┬─cpu_med_ms─┬───────mem─┐
+   1. │ G1   │ 21 │       160.4 │         196 │      147.8 │  73531115 │ -- 73.53 million
+   2. │ G2   │ 14 │       302.7 │         332 │      278.9 │  60791174 │ -- 60.79 million
+   3. │ M1   │ 18 │       364.9 │       409.5 │      341.9 │  81118552 │ -- 81.12 million
+   4. │ M2   │ 18 │       408.6 │       451.7 │      375.8 │ 101550019 │ -- 101.55 million
+   5. │ T1   │ 21 │       218.2 │       253.7 │      192.4 │  73440460 │ -- 73.44 million
+   6. │ T1x8 │ 21 │         204 │       241.5 │      185.9 │  73441348 │ -- 73.44 million
+   7. │ T2   │ 24 │       260.2 │       286.3 │      235.9 │ 127977264 │ -- 127.98 million
+   8. │ T3   │ 21 │        21.9 │        24.6 │       20.8 │  38593090 │ -- 38.59 million
+   9. │ T4   │ 24 │        25.4 │        31.2 │       24.3 │  38593090 │ -- 38.59 million
+  10. │ T5   │ 16 │        22.7 │        24.4 │       21.8 │  50589074 │ -- 50.59 million
+      └──────┴────┴─────────────┴─────────────┴────────────┴───────────┘
+  == 19002
+      ┌─case─┬──n─┬─wall_med_ms─┬─wall_p95_ms─┬─cpu_med_ms─┬───────mem─┐
+   1. │ G1   │ 19 │       155.4 │       175.4 │      144.5 │  73531147 │ -- 73.53 million
+   2. │ G2   │ 26 │         302 │       315.1 │      275.9 │  60791206 │ -- 60.79 million
+   3. │ M1   │ 22 │       367.7 │       392.9 │      341.5 │  81118712 │ -- 81.12 million
+   4. │ M2   │ 22 │       401.6 │       455.3 │      374.2 │ 101549795 │ -- 101.55 million
+   5. │ T1   │ 19 │       202.7 │         294 │      184.2 │  73440492 │ -- 73.44 million
+   6. │ T1x8 │ 19 │       199.9 │       212.8 │      184.2 │  73440492 │ -- 73.44 million
+   7. │ T2   │ 16 │       253.1 │       291.3 │      235.1 │ 127977232 │ -- 127.98 million
+   8. │ T3   │ 19 │        21.6 │        22.9 │         21 │  38593090 │ -- 38.59 million
+   9. │ T4   │ 16 │        25.3 │        28.1 │       24.5 │  38593090 │ -- 38.59 million
+  10. │ T5   │ 24 │        21.2 │        24.6 │       19.7 │  50589074 │ -- 50.59 million
+      └──────┴────┴─────────────┴─────────────┴────────────┴───────────┘
+  -> no case differs at 99.5%; with 16-24 runs per server the A/A medians differ by up to 7.1% wall (T1) and
+     9.6% CPU (T5) on this host, so this host can't size a 3-6% query-level effect. -i 40 split 21/19 .. 24/16.
+
+E. Direction (from the emulation, not this run): T3 -51..-62%, T5 -58..-60%, T4 -9..-29% (bounds, see the plan),
+   T1 -3.1..-3.6% wall, T2 -5.0..-5.8% wall, G1 0 (300 points). The kit's question 4 stays open until a build.
+
+Servers stopped and data removed.

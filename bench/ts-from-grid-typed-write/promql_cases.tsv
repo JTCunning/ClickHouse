@@ -1,0 +1,4 @@
+lot	last_over_time(foo[10])
+and	last_over_time(foo[10]) and on(instance) last_over_time(bar[10])
+or	last_over_time(foo[10]) or on(instance) last_over_time(bar[10])
+sum	sum(last_over_time(foo[10]))

@@ -1,0 +1,7 @@
+A	SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM {T} FORMAT Null
+F0	SELECT range(materialize(toUInt64(100000)), toUInt64(3090001), toUInt64(10000)), v FROM {T} FORMAT Null
+F1	SELECT range(materialize(toUInt64(100000)), toUInt64(3090001), toUInt64(10000)), arrayFilter(x -> x IS NOT NULL, v) FROM {T} FORMAT Null
+F2	SELECT arrayFilter((t, x) -> x IS NOT NULL, range(materialize(toUInt64(100000)), toUInt64(3090001), toUInt64(10000)), v), arrayFilter(x -> x IS NOT NULL, v) FROM {T} FORMAT Null
+R	SELECT timeSeriesRange(materialize(toDateTime64(100, 3)), toDateTime64(3090, 3), 10) FROM {T} FORMAT Null
+G	SELECT range(materialize(toUInt64(100000)), toUInt64(3090001), toUInt64(10000)) FROM {T} FORMAT Null
+E	SELECT v FROM {T} FORMAT Null
