@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-22 21:30 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-23 10:00 UTC.
 
 ## For you, in order
 
@@ -13,7 +13,6 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 | 3 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 | 4 | **Decide** | recent-samples-merge | [#25](https://github.com/JTCunning/ClickHouse/issues/25) | A (recommended): run the A/B plan at scale (no build: two table definitions on one master build + a steady state with the mover); if it passes I branch a version-12 default (`tier` column, recent off) and an engine-side mover. B: keep both tables and only cut the duplicate's cost (shorter recent TTL, pick the table by query shape). C: drop it. Answer on the issue. |
 | 5 | **Decide** | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | Before you submit: James opens the drafted NULL-argument issue and adds Related: (drafted on the results issue: NULL start/end/step of timeSeriesRange/timeSeriesFromGrid computed as 0, pre-existing, preflight round 2 [Major]; replace the placeholder Related: line at the top of the PR body). Doesn't block the build. |
-| 6 | **Build and A/B**: `ab ts-from-grid-typed-write` | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | unbuilt: timeSeriesFromGrid/timeSeriesRange timestamps without Field (5.0-6.2 ns per point here): the function alone -20..-62% emulated; PromQL range queries over 4000 series only ~1-4% (measured, not judged); aggregated query must not slow down |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 

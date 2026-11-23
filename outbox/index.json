@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-22T21:30:43Z",
+  "updated": "2026-11-23T10:00:46Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -507,7 +507,7 @@
     {
       "slug": "ts-from-grid-typed-write",
       "priority": 15,
-      "status": "ready-to-build",
+      "status": "results-in",
       "title": "Write the timestamps of timeSeriesFromGrid and timeSeriesRange straight into the typed column",
       "branch": "lilred-perf-ts-from-grid-typed-write",
       "summary": "unbuilt: timeSeriesFromGrid/timeSeriesRange timestamps without Field (5.0-6.2 ns per point here): the function alone -20..-62% emulated; PromQL range queries over 4000 series only ~1-4% (measured, not judged); aggregated query must not slow down",
