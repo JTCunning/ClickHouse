@@ -1,6 +1,6 @@
 # Write the timestamps of `timeSeriesFromGrid` and `timeSeriesRange` straight into their typed column
 
-**Branch:** [`lilred-perf-ts-from-grid-typed-write`](https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-ts-from-grid-typed-write) @ `92789976f58` (base master `521c4bcb7b94`) · **Status:** built and A/B tested by James on `a25c640b65b3` (2026-11-23, #26: pass); `92789976f58` on top needs a tests-only run · **Report:** [reports/2026-11-22-ts-from-grid-typed-write.md](../reports/2026-11-22-ts-from-grid-typed-write.md) · **A/B plan:** [ab-plans/ts-from-grid-typed-write.md](../ab-plans/ts-from-grid-typed-write.md)
+**Branch:** [`lilred-perf-ts-from-grid-typed-write`](https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-ts-from-grid-typed-write) @ `92789976f58` (base master `521c4bcb7b94`) · **Status:** run 1 (function level, `a25c640b65b3`) passed 2026-11-23; run 2 (dashboard queries through the HTTP API, head `92789976f58`) pending, A/B plan section "Run 2" · **Report:** [reports/2026-11-22-ts-from-grid-typed-write.md](../reports/2026-11-22-ts-from-grid-typed-write.md) · **A/B plan:** [ab-plans/ts-from-grid-typed-write.md](../ab-plans/ts-from-grid-typed-write.md)
 
 <!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->
 Related: https://github.com/ClickHouse/ClickHouse/pull/133502
@@ -10,7 +10,7 @@ Related: (tracking issue for the NULL-argument and 32-bit wrap defects, James to
 - Experimental Feature
 
 ### Changelog entry (a [user-readable short description](https://github.com/ClickHouse/ClickHouse/blob/master/docs/changelog_entry_guidelines.md) of the changes that goes into CHANGELOG.md):
-`timeSeriesFromGrid` and `timeSeriesRange`, which build the samples of PromQL query results over `TimeSeries` tables, write their timestamps straight into the result column: `timeSeriesFromGrid` is 2x faster on 100000 rows of 300 points, and 1.45x when every second value is NULL.
+`timeSeriesFromGrid` and `timeSeriesRange`, which build the samples of PromQL query results over `TimeSeries` tables, write their timestamps straight into the result column. (Entry after run 2: the dashboard-query change leads; the function-level 2x only as the mechanism.)
 
 ### Description
 
@@ -18,16 +18,30 @@ Related: (tracking issue for the NULL-argument and 32-bit wrap defects, James to
 
 Now the timestamps column's container is taken once. A row without NULL values resizes it by the row's number of steps and fills it in a loop; a row with NULL values appends the timestamps of its non-NULL values. The new size is the block's point count, which was already checked for overflow and against `function_range_max_elements_in_block` before anything is written. Unchanged: the timestamp arithmetic, the values (copied as one range, or one by one in rows with NULL values), the result types, the errors and their order.
 
-Release build (clang 21, `RelWithDebInfo`), AMD EPYC 9R14 with servers and clients pinned to 16 cores, master `521c4bcb7b94` and this PR; `perf.py --runs 13` per query per server, three passes on fresh servers (one with the ports swapped):
+Dashboard queries through the Prometheus HTTP API (`/api/v1/query_range`, JSON) on a `TimeSeries` table with 2,000 series of a counter `m` and 2,000 of a gauge `g` (labels `job` with 10 values, `instance`, `pod`), one sample every 15 s over 6 h. Release build (clang 21, `RelWithDebInfo`), AMD EPYC 9R14 with servers and clients pinned to 16 cores, master `521c4bcb7b94` and this PR, median of 100 rounds, the two requests of a round sent next to each other:
 
-| case | master | this PR | change (passes 1, 2, 3) |
+| Label | Query | Base | This PR |
 |---|---|---|---|
-| `promql_set_operator_presence_mask` q7: `timeSeriesFromGrid` alone, 100000 rows × 300 points | 210.5 ms | 102.9 ms | −51.1%, −51.3%, −52.5% |
-| same test, q8: the same with every second value NULL | 146.1 ms | 100.5 ms | −31.2%, −32.4%, −33.1% |
-| same test, q6: `last_over_time(foo[10])`, 4000 series × 300 steps | 69.3 ms | 67.7 ms | −2.4%, −2.1%, −0.6% (not significant) |
-| same test, q9: `sum(last_over_time(foo[10]))`, one output series (control) | 36.9 ms | 36.6 ms | −1.1%, −1.5%, −0.5% (not significant) |
+| R1 | `rate(m{job="job3"}[5m])`, last 1 h, step 15 s (200 series) | pending | pending |
+| R2 | `rate(m[5m])`, last 1 h, step 15 s (2,000 series) | pending | pending |
+| R3 | `sum by (job) (rate(m[5m]))`, last 1 h, step 15 s (10 series, control) | pending | pending |
+| R4 | `g{job="job3"}`, last 1 h, step 15 s (200 series) | pending | pending |
+| R5 | `g`, last 1 h, step 15 s (2,000 series) | pending | pending |
+| R6 | `rate(m[5m])`, last 6 h, step 30 s (2,000 series) | pending | pending |
 
-`clickhouse benchmark` at `max_threads = 1`, 200 queries per case split at random between the servers, over `CREATE TABLE fg_dense (v Array(Nullable(Float64))) ENGINE = Memory` filled with 8000 rows of 300 values: `SELECT timeSeriesRange(materialize(toDateTime64(100, 3)), toDateTime64(3090, 3), 10) FROM fg_dense FORMAT Null` 10.7 → 2.1 ms (−80.7%); `SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM fg_dense FORMAT Null` 12.8 → 4.5 ms (−65.0%), and 19.1 → 15.2 ms (−20.6%) on the same table with half the values NULL; each a difference at 99.5% confidence. The saving is about 3.5 ns per point, so a whole range query gains little: in `last_over_time(foo[10])` at `max_threads = 1`, the `FilterTransform` that computes `timeSeriesFromGrid` takes 2.3 ms instead of 6.6 ms of an 84 ms query.
+The function alone, where the change is: the queries of `promql_set_operator_presence_mask.xml` (`perf.py --runs 13`, three passes on fresh servers, one with the ports swapped), and `clickhouse benchmark` at `max_threads = 1` over `fg_dense (v Array(Nullable(Float64))) ENGINE = Memory`, 8000 rows of 300 values, and `fg_null`, the same with half the values NULL (200 queries per case split at random between the servers):
+
+| Label | Query | Base | This PR |
+|---|---|---|---|
+| q7 | `SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM (SELECT materialize(CAST(arrayResize([], 300, 1.5), 'Array(Nullable(Float64))')) AS v FROM numbers(100000)) SETTINGS max_block_size = 8192 FORMAT Null` | 210.5 ms | 102.9 ms |
+| q8 | `SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM (SELECT materialize(CAST(arrayMap(j -> if(j % 2 = 0, NULL, 1.5), range(300)), 'Array(Nullable(Float64))')) AS v FROM numbers(100000)) SETTINGS max_block_size = 8192 FORMAT Null` | 146.1 ms | 100.5 ms |
+| T3 | `SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM fg_dense FORMAT Null` | 12.8 ms | 4.5 ms |
+| T4 | `SELECT timeSeriesFromGrid(toDateTime64(100, 3), toDateTime64(3090, 3), 10, v) FROM fg_null FORMAT Null` | 19.1 ms | 15.2 ms |
+| T5 | `SELECT timeSeriesRange(materialize(toDateTime64(100, 3)), toDateTime64(3090, 3), 10) FROM fg_dense FORMAT Null` | 10.7 ms | 2.1 ms |
+| q6 | `SELECT * FROM prometheusQueryRange('promql_set_operator_presence_mask_ts', 'last_over_time(foo[10])', 100, 3090, 10) FORMAT Null` | 69.3 ms | 67.7 ms |
+| q9 | `SELECT * FROM prometheusQueryRange('promql_set_operator_presence_mask_ts', 'sum(last_over_time(foo[10]))', 100, 3090, 10) FORMAT Null` | 36.9 ms | 36.6 ms |
+
+q7, q8, T3, T4 and T5 are differences (p < 0.001 and at 99.5% confidence); q6 and q9 are not. The saving is about 3.5 ns per output point. q6 has one sample per series per window and no output formatting, the shape where building the output points is the largest share of a range query, and still moves only 0.6–2.4%.
 
 Controls: q9 and the set-operator queries q0–q5 (−3.1% to +0.2%) don't get slower. Master against master in the same harnesses differs by at most 1.6% (`perf.py`) and 1.7% (the benchmark cases).
 
@@ -37,8 +51,8 @@ The same change as #133502, which writes the result of `timeSeriesGroupArray` in
 <!-- upstream:end -->
 
 **Note for James (not part of the PR):**
-- The numbers are from your run on `a25c640b65b3` (#26). `92789976f58` on top moves the timestamp expression out of a helper lambda back into the two loops, as master writes it. Reason: upstream PR 120906 (open, "Enable the UBSan check for unsigned integer overflows") puts `NO_SANITIZE_UNSIGNED_OVERFLOW` on this function's `doExecute`, and a lambda doesn't inherit that attribute (checked with clang 20 in trap mode), so 05850's range across 1970, whose unsigned sum wraps, would fail the UBSan job once it lands. The release code is the same (identical assembly for both forms in a clang 20 `-O3 -march=x86-64-v3` harness), so the A/B stands: a tests-only run of `92789976f58` (05850 and the also-run tests) is enough.
-- The query-level gain (q6 −2.4%, not significant; the kit's T1 −6.7%, not proven at 99.5%) is under CI's 5% bar, so the entry names only the function-level numbers. It names only `timeSeriesFromGrid`, which the perf XML measures (q7, q8); `timeSeriesRange`'s 5x stays in the description with its query, because no CI perf query calls it (preflight round 3).
+- Run 2 (your call on 2026-11-23, option B): the first table is the headline and comes from dashboard queries through `/api/v1/query_range`, A/B plan section "Run 2". The changelog entry gets written from it: if those rows show a change, it leads with that number; if none does, we talk about parking or dropping this PR before you submit. Run 1's function-level numbers (second table, `a25c640b65b3`) stand: `92789976f58` only moves the timestamp expression out of a helper lambda back into the two loops, as master writes it (identical assembly for both forms in a clang 20 `-O3 -march=x86-64-v3` harness).
+- Why that commit: upstream PR 120906 ("Enable the UBSan check for unsigned integer overflows") merged on 2026-11-23 and put `NO_SANITIZE_UNSIGNED_OVERFLOW` on this function's `doExecute`. A lambda doesn't inherit that attribute (checked with clang 20 in trap mode), so with the lambda, 05850's range across 1970, whose unsigned sum wraps, would fail the UBSan job.
 - Before you submit: open the drafted issue in #26's description (now two pre-existing defects: NULL arguments, and the 32-bit wrap after 2106 that round 3 found; both reproduced on master) and put its link in place of the second `Related:` line; the reviewer asks for it because both are on this function's path, though not in the changed lines. #133502 merged on 2026-11-23.
 - The category follows your habit for TimeSeries work (`Performance Improvement` is defensible too: the two functions aren't gated by a setting). Add the `pr-performance` label if you want the AMD perf comparison. 05850 is still free on master `9cbdad9a7e3c`, and the branch merges into it without conflicts.
 

@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-23 11:20 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-23 15:39 UTC.
 
 ## For you, in order
 
@@ -13,7 +13,7 @@ Generated from [`index.json`](index.json) by `render.py`; don't edit this file b
 | 3 | **Decide** | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then. |
 | 4 | **Decide** | recent-samples-merge | [#25](https://github.com/JTCunning/ClickHouse/issues/25) | A (recommended): run the A/B plan at scale (no build: two table definitions on one master build + a steady state with the mover); if it passes I branch a version-12 default (`tier` column, recent off) and an engine-side mover. B: keep both tables and only cut the duplicate's cost (shorter recent TTL, pick the table by query shape). C: drop it. Answer on the issue. |
 | 5 | **Decide** | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | Before you submit: open the upstream issue drafted in #26's description (two pre-existing defects on this path: NULL start/end/step computed as 0, and a DateTime/UInt32 start with a DateTime64 end after 2106 wrapping to 1970; both reproduced on master) and put its link in the placeholder Related: line. Doesn't block the build. Answer on #26. |
-| 6 | **Build and A/B**: `ab ts-from-grid-typed-write` | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | built: timeSeriesFromGrid 2x (q7 -51%), timeSeriesRange 5x (T5 -81%); PromQL range query -2% (not significant). Tests-only run needed on the new head |
+| 6 | **Build and A/B**: `ab ts-from-grid-typed-write` | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | run 2 needed: dashboard PromQL queries via /api/v1/query_range (run 1: function 2x/5x, but PromQL range query only -0.6..-2.4%, not significant) |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 

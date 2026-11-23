@@ -10,6 +10,38 @@
 - 2026-11-22 dry run on master `521c4bcb7b94` (`bench/ts-from-grid-typed-write/smoke-2026-11-22.txt`): kit ran end to end as A/A (ports 19001/19002, N=20); preconditions as below; hashes identical on all 10 cases, none empty; no case differs at 99.5%, A/A medians up to 7.1% apart on wall (T1) and 9.6% on CPU (T5) at 16–24 runs per server. B~ can't be run, so question 4 (direction) rests on the emulation. Edited after the dry run, not re-run: the role column of `cases.tsv` (T1, T1x8, T2 → `measured`, T4 → `target-direction`; printed only).
 - Unproven: the size on the build host (#23 measured 5–7 ns per sample for two `Field` writes there, so one may cost 2.5–3.5 ns); the NULL-row path; whether the fill loop vectorizes (not needed for the claim).
 
+## Run 2: dashboard-shaped queries (James, 2026-11-23: "go with B")
+
+**Why.** Run 1 judged the function alone (T3, T5, q7: −51..−81%). Its PromQL queries were the best case for this change: one sample per series per window (a sample every 10 s, step 10 s, `[10]`) and `FORMAT Null`, so building the output points was as large a share as it can be, and still they moved only −0.6..−2.4% (q6, not significant). Run 2 measures what a user sees: dashboard queries through `/api/v1/query_range` with JSON output, on data scraped every 15 s, so a `[5m]` window holds 20 samples. Its table is the headline of the PR; run 1's function-level rows stay as mechanism evidence only.
+
+**Builds.** A = master `521c4bcb7b94` (as run 1), B = the branch head `92789976f58` (run 1's commit plus the inline timestamp expression). Release, no sanitizer, same host and pinning as run 1. Don't run `ab/ab.sh` or `perf.py` again: run 1's numbers stand.
+
+**Data.** `bench/range-json-timestamps/gen.sh` (#22's kit), `SERIES=2000 HOURS=6`: a default `TimeSeries` table `ts` with 2,000 series of the counter `m` and 2,000 of the gauge `g` (labels `job` with 10 values, `instance`, `pod`), one sample every 15 s over 6 h, plus #22's `c` and `h` series (not queried here). Both servers get the same `T_END`; `gen.sh` writes `window.txt` in the working directory.
+
+**Cases** (`bench/ts-from-grid-typed-write/realistic/run.py`; each window ends at `T_END`):
+
+| Label | Query (`/api/v1/query_range`) | Output | Predicted change |
+|---|---|---|---|
+| R1 | `rate(m{job="job3"}[5m])`, 1 h, step 15 s | 200 series × 241 points | 0..−1% |
+| R2 | `rate(m[5m])`, 1 h, step 15 s | 2,000 × 241 | −0.5..−2% |
+| R3 | `sum by (job) (rate(m[5m]))`, 1 h, step 15 s | 10 × 241 | 0 (control) |
+| R4 | `g{job="job3"}`, 1 h, step 15 s | 200 × 241 | 0..−1.5% |
+| R5 | `g`, 1 h, step 15 s | 2,000 × 241 | −1..−3% |
+| R6 | `rate(m[5m])`, 6 h, step 30 s | 2,000 × 721 | −0.5..−2% |
+
+Prediction basis: run 1 saved 3.0–3.6 ns per output point of CPU; spread over the query's parallel streams (q6: 4.2 ms of CPU at one thread became about 1.5 ms of wall at 16 cores) and set against about 60 ns per output point for a plain selector through the JSON API on that host (#22 run 1: `m`, 2.88M points in 172–192 ms), a plain gauge panel (R5) can gain up to about 3%; `rate` does more work per point, and the HTTP round trip and planning dilute the small panels (R1, R4). **If no case shows a difference, the honest result is "no measurable change in normal PromQL use"**, and the next step is to talk about parking or dropping the PR (James, 2026-11-23 chat), not to look for a shape where it shows.
+
+**Method.**
+1. Start the servers with #22's script: `CH=<A binary> DATA=<dir> SERVER_MEM=48000000000 QUERY_MEM=24000000000 bench/range-json-timestamps/server.sh start a 9001`, and the same for `b` on 9002 with B's binary (the Prometheus API listens on the TCP port + 2000).
+2. In one working directory: `T=$(( $(date +%s) / 60 * 60 ))`, then `T_END=$T SERIES=2000 bench/range-json-timestamps/gen.sh 9001 > gen-9001.log` and the same for 9002. `diff gen-9001.log gen-9002.log` prints nothing (same parts and rows on both).
+3. A/A first, on fresh servers that both run A's binary: `PORTS="9001 9002" ROUNDS=100 bench/ts-from-grid-typed-write/realistic/run.py > aa.jsonl 2> aa.err` and `PORTS="9001 9002" bench/ts-from-grid-typed-write/realistic/summarize.py aa.jsonl`: every row says `no difference` and `equal`.
+4. A/B on fresh servers (A on 9001, B on 9002), the same commands with `ab.jsonl`. Post the table exactly as `summarize.py` prints it: the `Query` column holds each query, `Base` is A's median, `This PR` is B's. `Change` is the median of the per-round B/A ratios (the two requests of a round run next to each other); `p` is a paired Wilcoxon signed-rank test, and a difference counts at p < 0.005.
+5. Tests: `05850_time_series_from_grid_typed_write` on A and B; the `also_run` tests and `test_prometheus_protocols/test_evaluation.py` on B.
+
+**Pass.** The tests pass; every row is `equal` (R3 may be `equal (rounded)`: `sum` over threads); no row is significantly slower; the A/A pass shows no difference. The realistic rows have no floor: they decide how the PR is framed, and whether it is worth submitting.
+
+**Dry run 2026-11-23** (this host, 2 vCPU, master `521c4bcb7b94` on both servers, `SERIES=500`, 12 rounds; `realistic/smoke-2026-11-23.jsonl`): the kit ran end to end; the two layouts were equal; every row `no difference` (p 0.08–0.88) and `equal`; no retries. At `SERIES=1000` a 1.12 GiB server memory cap failed R6 with `MEMORY_LIMIT_EXCEEDED`, so `run.py` now prints the error body and counts retries (`summarize.py` reports them); the build host's 48 GB cap is far from that.
+
 ## Builds
 - A: master at `521c4bcb7b94`. B: the branch (one commit on the same base). Release build, no sanitizers, as in the CI performance job.
 
