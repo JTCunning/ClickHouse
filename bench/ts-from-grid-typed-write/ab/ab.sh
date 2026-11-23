@@ -9,7 +9,7 @@
 set -euo pipefail
 CH=${CH:-/root/nerve-workspace/tools/clickhouse/master/clickhouse}; N=${N:-100}; DIR=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT:-$DIR/out}; cmd=$1; shift
-cases() { rg -v '^#' "$DIR/cases.tsv" | while IFS=$'\t' read -r id role mt q h; do
+cases() { grep -v '^#' "$DIR/cases.tsv" | while IFS=$'\t' read -r id role mt q h; do
   if [ -z "${CASES:-}" ] || [[ " $CASES " == *" $id "* ]]; then printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$role" "$mt" "$q" "$h"; fi; done; }
 cl() { local port=$1; shift; "$CH" client --port "$port" "$@" < /dev/null; }
 case $cmd in
