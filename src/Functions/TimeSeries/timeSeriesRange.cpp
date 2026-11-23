@@ -388,13 +388,8 @@ public:
                     "(setting 'function_range_max_elements_in_block')",
                     name, total_points, max_elements);
 
-            /// `j * step` can be greater than the maximum of Int64 when the duration is,
+            /// In both loops below, `j * step` can be greater than the maximum of Int64 when the duration is,
             /// but the sum is between `start_timestamp` and `end_timestamp`, so it fits in Int64.
-            auto timestamp_at = [&](size_t j)
-            {
-                return static_cast<TimestampType>(static_cast<Int64>(static_cast<UInt64>(start_timestamp) + j * step));
-            };
-
             if (row_has_no_nulls)
             {
                 if constexpr (with_values)
@@ -405,7 +400,8 @@ public:
                 const size_t timestamps_offset = res_timestamps_data.size();
                 res_timestamps_data.resize(timestamps_offset + num_steps);
                 for (size_t j = 0; j != num_steps; ++j)
-                    res_timestamps_data[timestamps_offset + j] = timestamp_at(j);
+                    res_timestamps_data[timestamps_offset + j]
+                        = static_cast<TimestampType>(static_cast<Int64>(static_cast<UInt64>(start_timestamp) + j * step));
             }
             else if constexpr (with_values)
             {
@@ -415,7 +411,8 @@ public:
                     const size_t offset = values_base_offset + j;
                     if ((*null_map)[offset])
                         continue;
-                    res_timestamps_data.push_back(timestamp_at(j));
+                    res_timestamps_data.push_back(
+                        static_cast<TimestampType>(static_cast<Int64>(static_cast<UInt64>(start_timestamp) + j * step)));
                     res_values->insertFrom(*values, offset);
                 }
             }
