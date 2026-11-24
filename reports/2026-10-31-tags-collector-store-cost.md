@@ -1,7 +1,9 @@
 # Label registration (`timeSeriesStoreTags`) costs ~1 µs and ~590 bytes per matched series
 
 **Verdict:** worth fixing, but not with a small patch. The 2× goal needs one storage redesign of the per-query tags collector (flat, arena-backed label storage). The small steps (pre-sizing, hashing outside the lock, skipping the sort) are together worth only about 10–12 %. Report only; no branch.
+**Update 2026-11-24 (study smoke on master `521c4bcb7b94`, `bench/tags-collector-store-cost/smoke-2026-11-24.txt`):** on normal queries the collector matters for rule evaluation, not dashboards: 15–20% of the CPU samples of an instant `rate()` / `sum by` rule over 25k series (the store alone: 5%), 2–4% of a 1 h panel at 15 s. So steps 1+3 would give about −3..−10% on instant rule queries and at most −2% on dashboard panels. Open upstream PR 132565 (RFC issue 132485) drops `timeSeriesStoreTags` from the PromQL selector and passes tags as a column, which would remove this cost from PromQL altogether; the A/B plan measures that PR first and writes a branch only if it doesn't land.
 **Task:** `2026-10-31-handoff-cut-per-row-cpu-of-contexttimes`, handoff https://github.com/JTCunning/ClickHouse/issues/3 · **Build:** 26.11.1.974, `a7f713612c8` (code read at upstream master `802411f22ae`, no changes to these files in 60 days) · **Date:** 2026-10-31
+**A/B plan:** [ab-plans/tags-collector-store-cost.md](../ab-plans/tags-collector-store-cost.md)
 
 ## What happens (plain language)
 

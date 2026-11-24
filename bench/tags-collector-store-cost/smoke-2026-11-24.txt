@@ -1,0 +1,70 @@
+# Smoke 2026-11-24 (study mode B, row 10 tags-collector-store-cost): 2 vCPU / 4 GiB, master 26.12.1.112, GIT_HASH 521c4bcb7b94 (2026-11-21).
+# No branch exists; B for the plan is upstream PR 132565 (open), which can't be emulated: this smoke covers the collector's share
+# on master (A), the kit's mechanics (A/A), and identical results. It doesn't measure B.
+
+## A. Data for the share measurement
+# SERIES=25000 HOURS=1 CHURN=0 HALF=0 ../range-json-timestamps/gen.sh 19601   (1/4 of the plan's M size in series, 1/6 in hours)
+# table          parts  rows     size
+# recentsamples	2	250010	22.97 MiB
+# samples	1	100004	21.67 MiB
+# tags	1	50002	1.91 MiB
+# timeranges	1	50002	889.43 KiB
+
+## B. Collector share of dashboard range queries (share.sh, CASES="R1 R2 R3 R4 R5" RUNS=5 THREADS=2)
+   ┌─case─┬─runs─┬─wall_ms─┬─cpu_ms─┬─read_rows─┬─mem────────┬─trace_samples─┬─teardown_pct─┬─store_pct─┬─collector_other_pct─┬─collector_pct─┐
+1. │ R1   │    5 │     200 │    330 │    180385 │ 56.49 MiB  │           130 │          0.8 │       1.5 │                 0.8 │           3.1 │
+2. │ R2   │    5 │    1225 │   2033 │    183377 │ 495.53 MiB │           716 │            1 │         1 │                 0.7 │           2.7 │
+3. │ R3   │    5 │    1067 │   1873 │    183377 │ 501.26 MiB │           670 │          1.6 │       0.4 │                 1.8 │           3.9 │
+4. │ R4   │    5 │     207 │    322 │    180693 │ 46.41 MiB  │           130 │            0 │       1.5 │                 0.8 │           2.3 │
+5. │ R5   │    5 │     941 │   1607 │    183413 │ 406.61 MiB │           570 │          0.9 │       0.7 │                 0.4 │           1.9 │
+   └──────┴──────┴─────────┴────────┴───────────┴────────────┴───────────────┴──────────────┴───────────┴─────────────────────┴───────────────┘
+-> 1 h at 15 s over 2,500-25,000 series: the collector (store + teardown + id/group lookups) is 1.9-3.9% of CPU samples.
+   A 2x cut of it saves at most ~1-2% of a dashboard query.
+
+## C. Collector share of rule-evaluation instant queries (share.sh, CASES="I1 I2 I3 I4" RUNS=10 TAG=smokei)
+# I3 ran as `sum(rate(m[5m]))`; share.sh and ab/run.py now send `sum(rate(m[5m])) > 0` (the alerting form), edited after this run.
+   ┌─case─┬─runs─┬─wall_ms─┬─cpu_ms─┬─read_rows─┬─mem───────┬─trace_samples─┬─teardown_pct─┬─store_pct─┬─collector_other_pct─┬─collector_pct─┐
+1. │ I1   │   10 │     207 │    324 │    183377 │ 53.03 MiB │           254 │          7.1 │       4.3 │                 8.3 │          19.7 │
+2. │ I2   │   10 │     207 │    324 │    183377 │ 52.84 MiB │           266 │            6 │         6 │                 3.4 │          15.4 │
+3. │ I3   │   10 │     197 │    309 │    183377 │ 53.01 MiB │           244 │          9.8 │       4.5 │                 2.9 │          17.2 │
+4. │ I4   │   10 │   221.5 │    345 │    183413 │ 40.63 MiB │           260 │          2.3 │       3.5 │                   0 │           5.8 │
+   └──────┴──────┴─────────┴────────┴───────────┴───────────┴───────────────┴──────────────┴───────────┴─────────────────────┴───────────────┘
+-> instant rate()/sum() over 25,000 series: 15-20% of CPU samples (I4, a plain gauge read: 5.8%).
+   Caveat: the profiler at 1 ms fired with ~12 signal overruns per sample (QueryProfilerRuns 24 vs QueryProfilerSignalOverruns 293
+   for one I2 run), so ~250 samples per case: +-2-3 points on a 15-20% share.
+
+## D. The store alone (the report's method: tags table read with and without timeSeriesStoreTags, metric m, max_threads=2, 6 runs)
+   ┌─log_comment───┬─n─┬─wall_ms─┬─cpu_ms─┬──rows─┬─mem───────┐
+1. │ tcs-iso-base  │ 6 │       8 │    7.6 │ 25425 │ 4.68 MiB  │
+2. │ tcs-iso-store │ 6 │      24 │   23.6 │ 25425 │ 18.58 MiB │
+   └───────────────┴───┴─────────┴────────┴───────┴───────────┘
+-> +16 ms CPU and +14 MiB for 25,425 rows: ~0.64 us and ~560 B per series (report, 400k series on a7f713612c8: ~1.07 us, ~590 B).
+   16 ms is 5% of I2's 324 ms CPU, a third of the trace share in C: the plan carries both (5-20%) until a 16 vCPU run pins it.
+
+## E. Kit dry run: ab/run.py A/A on two master servers (SERVER_MEM=1400000000 QUERY_MEM=1200000000, ports 19001/19002)
+# Data: SERIES=2000 HOURS=6 CHURN=0 HALF=0 gen.sh on each server, B with A's T_END (1/50 of M: 14.4M samples didn't fit
+# the 1.3 GiB per-server cap of two servers on 4 GiB). Layout identical on both:
+# recentsamples	3	100050	10.56 MiB	recentsamples	3	100050	10.56 MiB
+# samples	1	28014	10.30 MiB	samples	1	28014	10.30 MiB
+# tags	1	4002	147.62 KiB	tags	1	4002	147.62 KiB
+# timeranges	1	4002	72.32 KiB	timeranges	1	4002	72.32 KiB
+# PORTS="19001 19002" ROUNDS=12 ab/run.py > ab/dryrun-2026-11-24.jsonl ; ab/summarize.py ab/dryrun-2026-11-24.jsonl
+| Label | Query | Output | Base | This PR | Change | p | Results |
+|---|---|---|---|---|---|---|---|
+| R1 | `rate(m{job="job3"}[5m])`, 1 h, step 15 s | 200 series, 48200 points, 1.7 MB | 60.89 ms | 59.85 ms | -2.0% | 1 (no difference) | equal |
+| R2 | `rate(m[5m])`, 1 h, step 15 s | 2000 series, 482000 points, 16.9 MB | 196.32 ms | 192.03 ms | -1.1% | 0.158 (no difference) | equal |
+| R3 | `sum by (job) (rate(m[5m]))`, 1 h, step 15 s | 10 series, 2410 points, 0.1 MB | 166.27 ms | 164.95 ms | -1.0% | 0.638 (no difference) | equal |
+| R4 | `g{job="job3"}`, 1 h, step 15 s | 200 series, 48200 points, 1.1 MB | 60.53 ms | 60.55 ms | +1.0% | 0.937 (no difference) | equal |
+| R5 | `g`, 1 h, step 15 s | 2000 series, 482000 points, 10.7 MB | 157.95 ms | 157.64 ms | -0.9% | 0.875 (no difference) | equal |
+| R6 | `rate(m[5m])`, 6 h, step 30 s | 2000 series, 1440000 points, 50.1 MB | 594.37 ms | 578.77 ms | -3.6% | 0.0281 (no difference) | equal |
+| R7 | `topk(10, rate(m[5m]))`, 1 h, step 15 s | 10 series, 2410 points, 0.1 MB | 167.57 ms | 167.39 ms | -0.2% | 0.695 (no difference) | equal |
+| I1 | `sum by (job) (rate(m[5m]))`, instant | 10 series, 10 points, 0.0 MB | 28.97 ms | 28.95 ms | +2.3% | 0.754 (no difference) | equal |
+| I2 | `rate(m[5m])`, instant | 2000 series, 2000 points, 0.2 MB | 27.95 ms | 28.88 ms | +3.1% | 0.433 (no difference) | equal |
+| I3 | `sum(rate(m[5m])) > 0`, instant | 1 series, 1 points, 0.0 MB | 26.82 ms | 26.74 ms | -0.8% | 0.308 (no difference) | equal |
+| I4 | `g`, instant | 2000 series, 2000 points, 0.3 MB | 27.00 ms | 27.30 ms | +1.2% | 0.583 (no difference) | equal |
+| S1 | `g{job="job3"}`, 1 h (series API) | 200 series, 0 points, 0.0 MB | 8.68 ms | 8.74 ms | -2.4% | 0.308 (no difference) | equal |
+
+n = 12 rounds per case; Base = port 19001, This PR = port 19002. Retried requests (HTTP errors, see stderr): none.
+-> all 12 cases ran (range, instant, series API), no HTTP errors, A/A within -3.6..+3.1%, none significant; every body identical.
+
+Servers stopped and data removed.
