@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-23T15:39:39Z",
+  "updated": "2026-11-24T10:00:32Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -453,7 +453,7 @@
     {
       "slug": "range-json-timestamp-text",
       "priority": 13,
-      "status": "ready-to-submit",
+      "status": "submitted",
       "title": "Format the timestamps shared by the series of a range vector once per block",
       "branch": "lilred-perf-range-json-timestamp-text",
       "summary": "built: /api/v1/query_range over 2,000 series -10.2% (m, step 15 s), rate() -5.3%, every-other-step -8.3%; skewed block and control flat; same bytes",
@@ -476,7 +476,9 @@
       "issue": 22,
       "pr_text": "prs/range-json-timestamp-text.md",
       "ab_plan": "ab-plans/range-json-timestamp-text.md",
-      "report": "reports/2026-11-21-range-json-timestamp-text.md"
+      "report": "reports/2026-11-21-range-json-timestamp-text.md",
+      "upstream_pr": 133886,
+      "submitted_head": "ff2ee0f3f03680448b165df94ae3d8df50195999"
     },
     {
       "slug": "recent-samples-merge",
