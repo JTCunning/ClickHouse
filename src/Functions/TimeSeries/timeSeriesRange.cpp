@@ -1,11 +1,14 @@
 #include <Functions/FunctionFactory.h>
+#include <Functions/FunctionHelpers.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeNothing.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/TimezoneMixin.h>
 #include <Columns/ColumnArray.h>
+#include <Columns/ColumnConst.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
@@ -60,6 +63,7 @@ public:
     [[nodiscard]] String getName() const override { return name; }
     [[nodiscard]] size_t getNumberOfArguments() const override { return with_values ? 4 : 3; }
     [[nodiscard]] bool isDeterministic() const override { return true; }
+    [[nodiscard]] bool useDefaultImplementationForNulls() const override { return false; }
     [[nodiscard]] bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return true; }
 
     /// Documentation-only — both variants produce a timestamp array tagged
@@ -96,11 +100,18 @@ public:
 
     [[nodiscard]] DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
     {
+        constexpr size_t expected_num_ars = with_values ? 4 : 3;
+        if (arguments.size() != expected_num_ars)
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Function {} must be called with {} arguments", name, expected_num_ars);
+
+        if (getNullPresense(arguments).has_null_constant)
+            return makeNullable(std::make_shared<DataTypeNothing>());
+
         checkDataTypes(arguments);
 
-        const auto & start_timestamp_type = arguments[0].type;
-        const auto & end_timestamp_type = arguments[1].type;
-        const auto & step_type = arguments[2].type;
+        const auto start_timestamp_type = removeNullable(arguments[0].type);
+        const auto end_timestamp_type = removeNullable(arguments[1].type);
+        const auto step_type = removeNullable(arguments[2].type);
 
         UInt32 timestamp_scale = 0;
         if (isDateTime64(start_timestamp_type))
@@ -111,7 +122,7 @@ public:
             timestamp_scale = std::max(timestamp_scale, getDecimalScale(*step_type));
 
         DataTypePtr timestamp_type;
-        if (timestamp_scale > 0)
+        if (timestamp_scale > 0 || isDateTime64(end_timestamp_type))
         {
             if (const auto * timezone = dynamic_cast<const TimezoneMixin *>(start_timestamp_type.get()))
                 timestamp_type = std::make_shared<DataTypeDateTime64>(timestamp_scale, *timezone);
@@ -139,21 +150,21 @@ public:
         if (arguments.size() != expected_num_ars)
             throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Function {} must be called with {} arguments", name, expected_num_ars);
 
-        const auto & start_timestamp_type = arguments[0].type;
-        const auto & end_timestamp_type = arguments[1].type;
-        const auto & step_type = arguments[2].type;
+        const auto start_timestamp_type = removeNullable(arguments[0].type);
+        const auto end_timestamp_type = removeNullable(arguments[1].type);
+        const auto step_type = removeNullable(arguments[2].type);
 
         if (!(isDateTimeOrDateTime64(start_timestamp_type) || isUInt32(start_timestamp_type)))
             throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Argument #{} (start_timestamp) of function {} has wrong type {}, it must be {}",
-                            1, name, start_timestamp_type, "DateTime64 or DateTime or UInt32");
+                            1, name, arguments[0].type, "DateTime64 or DateTime or UInt32");
 
         if (!(isDateTimeOrDateTime64(end_timestamp_type) || isUInt32(end_timestamp_type)))
             throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Argument #{} (end_timestamp) of function {} has wrong type {}, it must be {}",
-                            2, name, end_timestamp_type, "DateTime64 or DateTime or UInt32");
+                            2, name, arguments[1].type, "DateTime64 or DateTime or UInt32");
 
         if (!(WhichDataType(step_type).isDecimal32() || WhichDataType(step_type).isDecimal64() || isNativeInteger(step_type)))
             throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Argument #{} (step) of function {} has wrong type {}, it must be {}",
-                            3, name, step_type, "a number");
+                            3, name, arguments[2].type, "a number");
 
         if constexpr (with_values)
         {
@@ -169,9 +180,12 @@ public:
         constexpr size_t expected_num_ars = with_values ? 4 : 3;
         chassert(arguments.size() == expected_num_ars);
 
-        const auto & start_timestamp_type = arguments[0].type;
-        const auto & end_timestamp_type = arguments[1].type;
-        const auto & step_type = arguments[2].type;
+        if (getNullPresense(arguments).has_null_constant)
+            return result_type->createColumnConstWithDefaultValue(input_rows_count);
+
+        const auto start_timestamp_type = removeNullable(arguments[0].type);
+        const auto end_timestamp_type = removeNullable(arguments[1].type);
+        const auto step_type = removeNullable(arguments[2].type);
 
         DataTypePtr result_timestamp_type;
         if constexpr (with_values)
@@ -198,9 +212,41 @@ public:
         chassert(step_scale <= result_timestamp_scale);
         Int64 step_multiplier = (step_scale < result_timestamp_scale) ? DecimalUtils::scaleMultiplier<Int64>(result_timestamp_scale - step_scale) : 1;
 
-        const auto & start_timestamp_column = *arguments[0].column;
-        const auto & end_timestamp_column = *arguments[1].column;
-        const auto & step_column = *arguments[2].column;
+        auto unwrap_non_null = [&](const ColumnWithTypeAndName & arg, size_t arg_idx, std::string_view arg_name) -> ColumnPtr
+        {
+            if (!arg.type->isNullable())
+                return arg.column;
+
+            if (const auto * nullable_col = checkAndGetColumn<ColumnNullable>(arg.column.get()))
+            {
+                const auto & null_map = nullable_col->getNullMapData();
+                if (!memoryIsZero(null_map.data(), 0, null_map.size()))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Illegal (null) value in argument #{} ({}) of function {}",
+                        arg_idx + 1, arg_name, name);
+                return nullable_col->getNestedColumnPtr();
+            }
+
+            if (const auto * nullable_col = checkAndGetColumnConstData<ColumnNullable>(arg.column.get()))
+            {
+                if (input_rows_count > 0 && nullable_col->isNullAt(0))
+                    throw Exception(
+                        ErrorCodes::BAD_ARGUMENTS,
+                        "Illegal (null) value in argument #{} ({}) of function {}",
+                        arg_idx + 1, arg_name, name);
+                return ColumnConst::create(nullable_col->getNestedColumnPtr(), input_rows_count);
+            }
+
+            throw Exception(
+                ErrorCodes::ILLEGAL_COLUMN,
+                "Illegal column {} of argument #{} ({}) of function {}",
+                arg.column->getName(), arg_idx + 1, arg_name, name);
+        };
+
+        ColumnPtr start_timestamp_column = unwrap_non_null(arguments[0], 0, "start_timestamp");
+        ColumnPtr end_timestamp_column = unwrap_non_null(arguments[1], 1, "end_timestamp");
+        ColumnPtr step_column = unwrap_non_null(arguments[2], 2, "step");
 
         /// Only a UInt64 step can exceed the range of Int64 (the timestamp types are narrower).
         bool step_is_uint64 = isUInt64(step_type);
@@ -219,17 +265,17 @@ public:
 
         if (isDateTime64(result_timestamp_type))
         {
-            return doExecute<DateTime64>(start_timestamp_column, start_timestamp_multiplier,
-                                         end_timestamp_column, end_timestamp_multiplier,
-                                         step_column, step_multiplier, step_is_uint64,
+            return doExecute<DateTime64>(*start_timestamp_column, start_timestamp_multiplier,
+                                         *end_timestamp_column, end_timestamp_multiplier,
+                                         *step_column, step_multiplier, step_is_uint64,
                                          values_column, values_are_nullable,
                                          result_type, input_rows_count);
         }
         else if (isDateTime(result_timestamp_type) || isUInt32(result_timestamp_type))
         {
-            return doExecute<UInt32>(start_timestamp_column, start_timestamp_multiplier,
-                                     end_timestamp_column, end_timestamp_multiplier,
-                                     step_column, step_multiplier, step_is_uint64,
+            return doExecute<UInt32>(*start_timestamp_column, start_timestamp_multiplier,
+                                     *end_timestamp_column, end_timestamp_multiplier,
+                                     *step_column, step_multiplier, step_is_uint64,
                                      values_column, values_are_nullable,
                                      result_type, input_rows_count);
         }
@@ -440,6 +486,7 @@ Generates a range of timestamps [start_timestamp, start_timestamp + step, start_
 If `start_timestamp` is equal to `end_timestamp`, the function returns a 1-element array containing `[start_timestamp]`.
 
 Function `timeSeriesRange()` is similar to function [range](/reference/functions/regular-functions/array-functions#range).
+Returns `NULL` if any argument has `Nullable(Nothing)` type. Throws an exception if any `Nullable` argument contains a `NULL` value.
 )";
     FunctionDocumentation::Syntax syntax = "timeSeriesRange(start_timestamp, end_timestamp, step)";
     FunctionDocumentation::Arguments arguments = {{"start_timestamp", "Start of the range.", {"DateTime64", "DateTime", "UInt32"}},
@@ -477,6 +524,8 @@ If the number of the values doesn't match the number of the timestamps, the func
 
 NULL values in `[x1, x2, x3, ...]` are skipped but the current timestamp is still incremented.
 For example, for `[value1, NULL, x2]` the function returns `[(start_timestamp, x1), (start_timestamp + 2 * step, x2)]`.
+
+Returns `NULL` if any argument has `Nullable(Nothing)` type. Throws an exception if `start_timestamp`, `end_timestamp`, or `step` contains a `NULL` value.
     )";
     FunctionDocumentation::Syntax syntax = "timeSeriesFromGrid(start_timestamp, end_timestamp, step, values)";
     FunctionDocumentation::Arguments arguments = {
