@@ -3,6 +3,7 @@
 #include <Columns/ColumnDecimal.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
+#include <Common/VectorWithMemoryTracking.h>
 #include <Common/assert_cast.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -14,6 +15,8 @@
 #include <Interpreters/castColumn.h>
 
 #include <algorithm>
+#include <cstring>
+#include <utility>
 
 
 namespace DB
@@ -148,11 +151,7 @@ private:
         const auto & max_time_data = typed_max_time->getData();
 
         const auto & source_tuples = samples_column.getData();
-
-        auto res_tuples = source_tuples.cloneEmpty();
-        auto res_offsets = ColumnArray::ColumnOffsets::create();
-        auto & res_offsets_data = res_offsets->getData();
-        res_offsets_data.reserve(input_rows_count);
+        const auto & offsets = samples_column.getOffsets();
 
         typename TimestampColumnType::ValueType min_time{};
         typename TimestampColumnType::ValueType max_time{};
@@ -162,24 +161,48 @@ private:
             max_time = max_time_data[0];
         }
 
-        /// The slices of consecutive rows are adjacent in the nested column if a slice reaches the end of its array
-        /// and the next slice starts at the start of its array. That is the usual case when a time range covers
-        /// whole buckets, so adjacent slices are accumulated in a pending range and copied together.
-        size_t pending_begin = 0;
-        size_t pending_end = 0;
-        size_t res_size = 0;
+        size_t first_trimmed = 0;
+        for (; first_trimmed < input_rows_count; ++first_trimmed)
+        {
+            const size_t begin = (first_trimmed == 0) ? 0 : offsets[first_trimmed - 1];
+            const size_t end = offsets[first_trimmed];
 
-        auto copy_pending = [&]
+            if constexpr (!bounds_are_const)
+            {
+                min_time = min_time_data[first_trimmed];
+                max_time = max_time_data[first_trimmed];
+            }
+
+            if (begin < end && (timestamps_data[begin] < min_time || max_time < timestamps_data[end - 1]))
+                break;
+        }
+
+        if (first_trimmed == input_rows_count)
+            return samples_column_ptr;
+
+        auto res_offsets = ColumnArray::ColumnOffsets::create(input_rows_count);
+        auto & res_offsets_data = res_offsets->getData();
+        if (first_trimmed > 0)
+            memcpy(res_offsets_data.data(), offsets.data(), first_trimmed * sizeof(ColumnArray::Offset));
+
+        /// The slices of consecutive rows are adjacent in the nested column if a slice reaches the end of its array
+        /// and the next slice starts at the start of its array. Collect coalesced ranges first so `res_tuples`
+        /// is reserved once to the exact final size.
+        size_t pending_begin = 0;
+        size_t pending_end = (first_trimmed == 0) ? 0 : offsets[first_trimmed - 1];
+        size_t res_size = pending_end;
+
+        VectorWithMemoryTracking<std::pair<size_t, size_t>> copy_ranges;
+        auto flush_pending = [&]
         {
             if (pending_begin < pending_end)
-                res_tuples->insertRangeFrom(source_tuples, pending_begin, pending_end - pending_begin);
+                copy_ranges.emplace_back(pending_begin, pending_end - pending_begin);
         };
 
-        const auto & offsets = samples_column.getOffsets();
-        for (size_t i = 0; i < input_rows_count; ++i)
+        for (size_t i = first_trimmed; i < input_rows_count; ++i)
         {
-            size_t begin = (i == 0) ? 0 : offsets[i - 1];
-            size_t end = offsets[i];
+            const size_t begin = (i == 0) ? 0 : offsets[i - 1];
+            const size_t end = offsets[i];
 
             if constexpr (!bounds_are_const)
             {
@@ -207,24 +230,22 @@ private:
 
             if (slice_begin != pending_end)
             {
-                copy_pending();
+                flush_pending();
                 pending_begin = slice_begin;
             }
             pending_end = slice_end;
 
             res_size += slice_end - slice_begin;
-            res_offsets_data.push_back(res_size);
+            res_offsets_data[i] = res_size;
         }
 
-        /// Every slice is a whole array: the result is the source column, nothing needs to be copied.
-        /// A copy moves `pending_begin` past the copied range, so nothing has been copied if it's still zero.
-        if ((pending_begin == 0) && (pending_end == source_tuples.size()))
-        {
-            chassert(res_tuples->empty());
-            return samples_column_ptr;
-        }
+        flush_pending();
 
-        copy_pending();
+        auto res_tuples = source_tuples.cloneEmpty();
+        res_tuples->reserve(res_size);
+        for (const auto & [range_begin, range_len] : copy_ranges)
+            res_tuples->insertRangeFrom(source_tuples, range_begin, range_len);
+
         return ColumnArray::create(std::move(res_tuples), std::move(res_offsets));
     }
 };

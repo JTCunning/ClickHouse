@@ -29,7 +29,8 @@ void TableFunctionTimeSeriesSelector::parseArguments(const ASTPtr & ast_function
 
 ColumnsDescription TableFunctionTimeSeriesSelector::getActualTableStructure(ContextPtr /* context */, bool /* is_insert_query */) const
 {
-    if (config.return_columns == StorageTimeSeriesSelector::Configuration::ReturnColumns::Samples)
+    if (config.return_columns == StorageTimeSeriesSelector::Configuration::ReturnColumns::Samples
+        || config.return_columns == StorageTimeSeriesSelector::Configuration::ReturnColumns::RawSamples)
     {
         /// The column `samples`: an array of samples per row.
         DataTypePtr samples_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeTuple>(DataTypes{config.table_timestamp_type, config.table_value_type}));

@@ -1,0 +1,54 @@
+<test>
+    <settings>
+        <enable_time_series_table>1</enable_time_series_table>
+        <max_threads>8</max_threads>
+        <max_insert_threads>8</max_insert_threads>
+    </settings>
+
+    <!--
+        Benchmarks PromQL range queries and direct timeSeriesSliceSortedArray over a version 11
+        bucketed TimeSeries table (300 series x 168 hourly buckets x 240 samples/bucket = 12.1M samples).
+    -->
+
+    <create_query>
+        CREATE TABLE ts_slice_stale ENGINE = TimeSeries
+        SETTINGS samples_bucket_step_seconds = 3600, recent_samples_ttl_seconds = 0
+    </create_query>
+
+    <fill_query>
+        INSERT INTO ts_slice_stale (metric_name, tags, samples)
+        SELECT
+            'cpu_seconds_total' AS metric_name,
+            map('host', concat('h', toString(series_id % 30)), 'cpu', toString(intDiv(series_id, 30))) AS tags,
+            arrayMap(
+                i -> (toDateTime64(604800 + bucket_id * 3600 + i * 15, 3, 'UTC'), toFloat64(bucket_id * 240 + i)),
+                range(240)
+            ) AS samples
+        FROM
+        (
+            SELECT
+                intDiv(number, 168) AS series_id,
+                number % 168 AS bucket_id
+            FROM numbers(300 * 168)
+        )
+    </fill_query>
+
+    <fill_query>OPTIMIZE TABLE ts_slice_stale FINAL</fill_query>
+
+    <!-- 7d @ 10m step PromQL range queries (bucketed raw_samples + zero-copy stale filter) -->
+    <query>SELECT count() FROM prometheusQueryRange(ts_slice_stale, 'rate(cpu_seconds_total[5m])', 604800, 1209600, 600) FORMAT Null</query>
+    <query>SELECT count() FROM prometheusQueryRange(ts_slice_stale, 'sum by (host) (rate(cpu_seconds_total[5m]))', 604800, 1209600, 600) FORMAT Null</query>
+    <query>SELECT count() FROM prometheusQueryRange(ts_slice_stale, 'increase(cpu_seconds_total[1h])', 604800, 1209600, 600) FORMAT Null</query>
+    <query>SELECT count() FROM prometheusQueryRange(ts_slice_stale, 'cpu_seconds_total', 604800, 1209600, 600) FORMAT Null</query>
+
+    <!-- Direct timeSeriesSliceSortedArray: mixed boundary/interior block (tests exact pre-reserve) -->
+    <query>SELECT sum(length(timeSeriesSliceSortedArray(samples, toDateTime64(605000, 3, 'UTC'), toDateTime64(1209000, 3, 'UTC')))) FROM timeSeriesSamples(ts_slice_stale) FORMAT Null</query>
+
+    <!-- Direct timeSeriesSliceSortedArray: 100% untouched block (tests zero-alloc early return) -->
+    <query>SELECT sum(length(timeSeriesSliceSortedArray(samples, toDateTime64(0, 3, 'UTC'), toDateTime64(2000000, 3, 'UTC')))) FROM timeSeriesSamples(ts_slice_stale) FORMAT Null</query>
+
+    <!-- Guard: bare range vector query (still slices boundary buckets) -->
+    <query>SELECT count() FROM prometheusQuery(ts_slice_stale, 'cpu_seconds_total[1h]', 700000) FORMAT Null</query>
+
+    <drop_query>DROP TABLE IF EXISTS ts_slice_stale</drop_query>
+</test>

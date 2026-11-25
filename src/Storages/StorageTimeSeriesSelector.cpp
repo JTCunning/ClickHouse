@@ -126,11 +126,13 @@ DateTime64 convertToScale(DateTime64 timestamp, UInt32 timestamp_scale, UInt32 t
     return DateTime64{quotient};
 }
 
-/// Parses the value of the argument `return_columns` of the table function: 'samples' or 'timestamp_and_value'.
+/// Parses the value of the argument `return_columns` of the table function: 'samples', 'raw_samples', or 'timestamp_and_value'.
 StorageTimeSeriesSelector::Configuration::ReturnColumns parseReturnColumns(std::string_view str, std::string_view function_name)
 {
     if (str == "samples")
         return StorageTimeSeriesSelector::Configuration::ReturnColumns::Samples;
+    if (str == "raw_samples")
+        return StorageTimeSeriesSelector::Configuration::ReturnColumns::RawSamples;
     if (str == "timestamp_and_value")
         return StorageTimeSeriesSelector::Configuration::ReturnColumns::TimestampAndValue;
     throw Exception(ErrorCodes::BAD_ARGUMENTS,
@@ -801,6 +803,7 @@ namespace
                                            const TableTimeRange & time_range_to_filter_samples,
                                            const DataTypePtr & table_timestamp_type,
                                            Decimal64 bucket_step,
+                                           bool slice_samples,
                                            ASTPtr whole_metric_id_range_condition)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
@@ -818,16 +821,23 @@ namespace
 
             if (bucket_step)
             {
-                /// timeSeriesSliceSortedArray(samples, <min_time>, <max_time>) AS samples
-                /// A row contains the samples of one series within one bucket sorted by timestamp,
-                /// the function cuts out the samples with timestamps in [min_time, max_time].
-                auto samples = makeASTFunction(
-                    "timeSeriesSliceSortedArray",
-                    make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples),
-                    timeSeriesTimestampToAST(time_range_to_filter_samples.min_time.value_or(minRepresentableTime(table_timestamp_type)), table_timestamp_type),
-                    timeSeriesTimestampToAST(time_range_to_filter_samples.max_time.value_or(maxRepresentableTime(table_timestamp_type)), table_timestamp_type));
-                samples->setAlias(TimeSeriesColumnNames::Samples);
-                select_list.push_back(std::move(samples));
+                if (slice_samples)
+                {
+                    /// timeSeriesSliceSortedArray(samples, <min_time>, <max_time>) AS samples
+                    /// A row contains the samples of one series within one bucket sorted by timestamp,
+                    /// the function cuts out the samples with timestamps in [min_time, max_time].
+                    auto samples = makeASTFunction(
+                        "timeSeriesSliceSortedArray",
+                        make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples),
+                        timeSeriesTimestampToAST(time_range_to_filter_samples.min_time.value_or(minRepresentableTime(table_timestamp_type)), table_timestamp_type),
+                        timeSeriesTimestampToAST(time_range_to_filter_samples.max_time.value_or(maxRepresentableTime(table_timestamp_type)), table_timestamp_type));
+                    samples->setAlias(TimeSeriesColumnNames::Samples);
+                    select_list.push_back(std::move(samples));
+                }
+                else
+                {
+                    select_list.push_back(make_intrusive<ASTIdentifier>(TimeSeriesColumnNames::Samples));
+                }
             }
             else
             {
@@ -886,7 +896,8 @@ namespace
                            const DataTypePtr & table_id_type,
                            const DataTypePtr & table_timestamp_type,
                            const DataTypePtr & table_value_type,
-                           Decimal64 bucket_step)
+                           Decimal64 bucket_step,
+                           bool slice_samples)
     {
         auto select_query = make_intrusive<ASTSelectQuery>();
 
@@ -915,9 +926,9 @@ namespace
 
             /// WHERE notEmpty(samples)
             /// A row matching `min_time` and `max_time` has no samples in the range only if the range lies strictly between them,
-            /// so only a range shorter than a bucket needs the filter.
+            /// so only a range shorter than a bucket needs the filter when the arrays are sliced.
             const auto & range = time_range_to_filter_samples;
-            if (range.min_time && range.max_time
+            if (slice_samples && range.min_time && range.max_time
                 && static_cast<Int128>(range.max_time->value) - range.min_time->value < bucket_step.value)
             {
                 select_query->setExpression(ASTSelectQuery::Expression::WHERE,
@@ -966,7 +977,8 @@ namespace
                                   StorageTimeSeriesSelector::Configuration::ReturnColumns return_columns)
     {
         const bool table_has_bucketed_samples = (bucket_step.value != 0);
-        const bool return_samples = (return_columns == StorageTimeSeriesSelector::Configuration::ReturnColumns::Samples);
+        const bool return_samples = (return_columns == StorageTimeSeriesSelector::Configuration::ReturnColumns::Samples
+            || return_columns == StorageTimeSeriesSelector::Configuration::ReturnColumns::RawSamples);
         if (table_has_bucketed_samples == return_samples)
             return select_query;
 
@@ -1348,12 +1360,15 @@ void StorageTimeSeriesSelector::readImpl(
                   quoteString(config.selector.toString()));
     }
 
+    const bool slice_samples = (config.return_columns != Configuration::ReturnColumns::RawSamples);
+
     ASTPtr select_query_from_samples_table = makeSelectQueryFromSamplesTable(
         samples_table_id,
         select_query_from_tags_table,
         time_range_to_filter_samples,
         config.table_timestamp_type,
         bucket_step,
+        slice_samples,
         std::move(whole_metric_id_range_condition));
 
     ASTPtr select_query = makeSelectQuery(
@@ -1362,7 +1377,8 @@ void StorageTimeSeriesSelector::readImpl(
         config.table_id_type,
         config.table_timestamp_type,
         config.table_value_type,
-        bucket_step);
+        bucket_step,
+        slice_samples);
 
     select_query = convertToReturnColumns(
         std::move(select_query), config.table_timestamp_type, config.table_value_type, bucket_step, config.return_columns);

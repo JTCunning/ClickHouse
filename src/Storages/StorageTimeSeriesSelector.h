@@ -37,11 +37,13 @@ public:
         DateTime64 max_time{};
 
         /// The columns the table function timeSeriesSelector() returns besides `id`:
-        /// `samples` (of type `Array(Tuple(table_timestamp_type, table_value_type))`); or
+        /// `samples` (of type `Array(Tuple(table_timestamp_type, table_value_type))`),
+        /// `raw_samples` (same column without slicing buckets to [min_time, max_time]), or
         /// `timestamp` and `value` with one sample per row.
         enum class ReturnColumns
         {
             Samples,
+            RawSamples,
             TimestampAndValue,
         };
         ReturnColumns return_columns = ReturnColumns::Samples;

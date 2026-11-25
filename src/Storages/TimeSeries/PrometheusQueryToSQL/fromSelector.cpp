@@ -26,9 +26,18 @@ namespace
             make_intrusive<ASTLiteral>(STALE_NAN_BITS));
     }
 
+    bool isConsumedByRangeFunction(const Node * node)
+    {
+        const auto * parent = node->parent;
+        while (parent && parent->node_type == NodeType::Offset)
+            parent = parent->parent;
+        return parent && parent->node_type == NodeType::Function;
+    }
+
     SQLQueryPiece fromRangeSelector(std::string_view instant_selector_text,
                                     const Node * node,
                                     bool filter_stale_markers,
+                                    bool slice_samples,
                                     ConverterContext & context)
     {
         auto node_range = context.node_range_getter.get(node);
@@ -43,7 +52,7 @@ namespace
         SQLQueryPiece res{node, ResultType::RANGE_VECTOR, table_has_bucketed_samples ? StoreMethod::SAMPLES : StoreMethod::TIMESTAMP_AND_VALUE};
 
         /// SELECT timeSeriesIdToGroup(id) AS group, samples
-        /// FROM timeSeriesSelector(<database>, <time_series_table>, <selector>, <min_time>, <max_time>, 'samples')
+        /// FROM timeSeriesSelector(<database>, <time_series_table>, <selector>, <min_time>, <max_time>, 'samples'|'raw_samples')
         /// or
         /// SELECT timeSeriesIdToGroup(id) AS group, timestamp, value
         /// FROM timeSeriesSelector(<database>, <time_series_table>, <selector>, <min_time>, <max_time>, 'timestamp_and_value')
@@ -58,17 +67,9 @@ namespace
         {
             ASTPtr samples = make_intrusive<ASTIdentifier>(ColumnNames::Samples);
 
-            /// arrayFilter(sample -> NOT <sample.2 is a stale marker>, samples) AS samples
             if (filter_stale_markers)
             {
-                const String iterator_name = "sample";
-                samples = makeASTFunction(
-                    "arrayFilter",
-                    makeASTFunction(
-                        "lambda",
-                        makeASTFunction("tuple", make_intrusive<ASTIdentifier>(iterator_name)),
-                        makeASTFunction("not", isStaleMarker(makeASTFunction("tupleElement", make_intrusive<ASTIdentifier>(iterator_name), make_intrusive<ASTLiteral>(UInt64{2}))))),
-                    std::move(samples));
+                samples = makeASTFunction("__timeSeriesRemoveStaleMarkers", std::move(samples));
                 samples->setAlias(ColumnNames::Samples);
             }
 
@@ -89,6 +90,10 @@ namespace
         TimestampType min_time = node_range.start_time - node_range.window + 1;
         TimestampType max_time = node_range.end_time;
 
+        const char * return_columns = "timestamp_and_value";
+        if (table_has_bucketed_samples)
+            return_columns = slice_samples ? "samples" : "raw_samples";
+
         builder.from_table_function = makeASTFunction(
             "timeSeriesSelector",
             make_intrusive<ASTLiteral>(context.time_series_storage_id.getDatabaseName()),
@@ -96,7 +101,7 @@ namespace
             make_intrusive<ASTLiteral>(String{instant_selector_text}),
             timeSeriesTimestampToAST(min_time, context.result_timestamp_type),
             timeSeriesTimestampToAST(max_time, context.result_timestamp_type),
-            make_intrusive<ASTLiteral>(String{table_has_bucketed_samples ? "samples" : "timestamp_and_value"}));
+            make_intrusive<ASTLiteral>(String{return_columns}));
 
         res.select_query = builder.getSelectQuery();
         return res;
@@ -176,7 +181,7 @@ SQLQueryPiece fromSelector(const PrometheusQueryTree::InstantSelector * instant_
 {
     auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
     auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, /* slice_samples = */ false, context);
     auto vector_grid = applyFunctionOverRange(
         instant_selector_node, "last_over_time", {std::move(range_selector)}, context);
     return replaceStaleMarkersWithNulls(std::move(vector_grid), context);
@@ -187,7 +192,7 @@ SQLQueryPiece fromSelectorSampleTimestamps(const PrometheusQueryTree::InstantSel
 {
     auto instant_selector_text = instant_selector_node->toString(*context.promql_tree);
     auto range_selector = fromRangeSelector(
-        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, context);
+        instant_selector_text, instant_selector_node, /* filter_stale_markers = */ false, /* slice_samples = */ true, context);
 
     /// Replaces the value of every sample with its timestamp. Stale markers are kept so that last_over_time() can still
     /// select them and they are turned into absence below, exactly as for a plain instant selector.
@@ -280,7 +285,11 @@ SQLQueryPiece fromSelector(const PrometheusQueryTree::RangeSelector * range_sele
 {
     auto instant_selector_text = range_selector_node->getInstantSelector()->toString(*context.promql_tree);
     return fromRangeSelector(
-        instant_selector_text, range_selector_node, /* filter_stale_markers = */ true, context);
+        instant_selector_text,
+        range_selector_node,
+        /* filter_stale_markers = */ true,
+        /* slice_samples = */ !isConsumedByRangeFunction(range_selector_node),
+        context);
 }
 
 }

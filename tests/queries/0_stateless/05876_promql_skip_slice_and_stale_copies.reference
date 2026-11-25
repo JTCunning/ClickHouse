@@ -1,0 +1,61 @@
+-- plan checks: range functions and instant selectors skip slicing and arrayFilter
+1	1	1
+1	1
+1	1
+1
+1
+-- boundary timestamps (400 excluded, 400.001..700 included, 700.001 excluded) and gap-only bucket
+[('env','prod')]	0.1
+[('env','prod')]	30.0001
+[('env','prod')]	30.0001
+[('env','prod')]	10
+[('env','prod')]	40
+[('env','prod')]	75
+[('env','prod')]	3
+[('__name__','m'),('env','prod')]	40
+[('__name__','m'),('env','prod')]	10
+[('env','prod')]	46.000037
+[('env','prod')]	25
+[('env','gap')]	1
+[('__name__','m'),('env','prod')]	40
+[('env','prod')]	700
+[('__name__','m'),('env','prod')]	[('1970-01-01 00:06:40.001',10),('1970-01-01 00:09:10.000',25),('1970-01-01 00:11:40.000',40)]
+-- offset and @ modifiers on range selectors
+[('env','prod')]	0.1
+[('env','prod')]	[('1970-01-01 00:16:40.000',0.1),('1970-01-01 00:21:40.000',0.1),('1970-01-01 00:26:40.000',0.1)]
+-- stale NaN vs ordinary quiet NaN in PromQL
+[('env','qnan')]	3
+[('env','stale_end')]	1
+[('env','stale_mid')]	2
+[('env','qnan')]	1	nan
+[('env','stale_end')]	0	10
+[('env','stale_mid')]	0	30
+[('__name__','s'),('env','qnan')]	20
+[('__name__','s'),('env','stale_mid')]	20
+-- sub-second scale conversions (DateTime scale 0 and DateTime64(6))
+10
+40
+10
+40
+-- Float32 TimeSeries table
+35
+-- direct __timeSeriesRemoveStaleMarkers edge cases
+0	[]
+1	[(1,4607182418800017408),(2,4611686018427387904)]
+2	[]
+3	[(4,4616189618054758400),(7,9218868437227405313),(8,9221120237041090560)]
+4	[]
+5	[(12,4622945017495814144)]
+32	620
+[(1,2.5),(2,nan)]
+-- direct timeSeriesSliceSortedArray untouched, mixed, empty, and non-const blocks
+10	45
+0	[]
+1	[(120,2),(130,3)]
+2	[]
+3	[(300,0),(310,1)]
+4	[]
+0	[(0,0),(10,1),(20,2),(30,3),(40,4)]
+1	[(0,0),(10,1),(20,2),(30,3),(40,4)]
+2	[]
+3	[(0,0),(10,1),(20,2),(30,3),(40,4)]
