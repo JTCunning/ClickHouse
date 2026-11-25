@@ -1,0 +1,27 @@
+-- synchronous INSERT with rows, in several blocks
+-- asynchronous INSERT with rows, sent as blocks over the native protocol
+-- asynchronous INSERT with rows, inlined in the query
+-- metric families only, synchronous and asynchronous
+-- INSERTs without rows
+ok
+-- outer table
+m1	{'__name__':'m1','host':'h0'}	[('1970-01-01 00:01:40.000',0)]
+m1	{'__name__':'m1','host':'h1'}	[('1970-01-01 00:01:41.000',1)]
+m1	{'__name__':'m1','host':'h2'}	[('1970-01-01 00:01:42.000',2)]
+m1	{'__name__':'m1','host':'h3'}	[('1970-01-01 00:01:43.000',3)]
+m1	{'__name__':'m1','host':'h4'}	[('1970-01-01 00:01:44.000',4)]
+m1	{'__name__':'m1','host':'h5'}	[('1970-01-01 00:01:45.000',5)]
+m1	{'__name__':'m1','host':'h6'}	[('1970-01-01 00:01:46.000',6)]
+m2	{'__name__':'m2','host':'h1'}	[('1970-01-01 00:03:20.000',1.5)]
+m2	{'__name__':'m2','host':'h2'}	[('1970-01-01 00:03:21.000',2.5)]
+m3	{'__name__':'m3','host':'h1'}	[('1970-01-01 00:05:00.000',3)]
+-- the INSERT into the tags table is built only by the queries that write rows
+05875_native_async	Insert	1
+05875_no_rows	Insert	1
+05875_rows	Insert	1
+-- inner tables
+tags	10	0
+time ranges	10	1970-01-01 00:01:40.000	1970-01-01 00:05:00.000
+samples	10	10
+metric families	m1	gauge	bytes	first
+metric families	m2	counter	seconds	second

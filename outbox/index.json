@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-24T10:00:32Z",
+  "updated": "2026-11-25T23:26:32Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -544,6 +544,49 @@
       "pr_text": "prs/ts-from-grid-typed-write.md",
       "ab_plan": "ab-plans/ts-from-grid-typed-write.md",
       "report": "reports/2026-11-22-ts-from-grid-typed-write.md"
+    },
+    {
+      "slug": "sink-lazy-pipelines",
+      "priority": 16,
+      "status": "ready-to-build",
+      "title": "TimeSeries: build the inner INSERTs of the sink with its first block of rows",
+      "branch": "lilred-perf-sink-lazy-pipelines",
+      "summary": "remote write with async insert stops building 4 unused inner INSERTs per request: server CPU per sample -6.6% at 1M series (your prototype run); grants as on master",
+      "claim": "T1: remote write at 1M series, stock table, async insert: server CPU per sample -5..-7% (prototype of the same diff: 21.24 -> 19.83 us, -6.6%); M1: handler CPU in the unused pipelines 1.52 -> <=0.3 us per sample; request latency, the async flush, the 12 dashboard and alert queries and the table contents unchanged.",
+      "perf_tests": [],
+      "guard_perf_tests": [],
+      "tests": {
+        "stateless": [
+          "05875_time_series_sink_lazy_target_pipelines",
+          "05876_time_series_insert_target_access"
+        ],
+        "also_run": [
+          "04416_timeseries_insert_cancel_no_crash",
+          "05019_time_series_recent_samples_table",
+          "05025_time_series_recent_samples_dedup",
+          "05213_timeseries_metric_families_target",
+          "05243_time_series_deduplication_caches",
+          "05294_time_series_samples_ttl",
+          "05452_timeseries_metric_family_low_cardinality",
+          "05814_timeseries_to_grid_insert_result_exception_destroys_states"
+        ],
+        "integration": [
+          "test_prometheus_protocols/test_async_insert.py",
+          "test_prometheus_protocols/test_write_read.py",
+          "test_prometheus_protocols/test_insert_select.py"
+        ],
+        "gtest_filter": null
+      },
+      "pass_if": "Follow ab-plans/sink-lazy-pipelines.md. Pass: T1 (your ingest-at-scale jobs, 1M series, stock table, 6 cells per side, core sets swapped) at least 5% lower server CPU per sample on B with p < 0.05; M1 on B <= 0.3 us per sample; C1 (bench/sink-lazy-pipelines/contents.sh after the same handler_cpu.sh run, async_insert 1 and 0) equal on A and B; no guard (G1 latency, G2 each dashboard query with its query text in the row, G3 flush CPU, E1 async_insert=0) significantly slower; 05875 and 05876 pass on B; on A 05875 fails in exactly its 2 InsertQueriesWithSubqueries lines and 05876 passes (its reference is master's output); also_run and integration tests pass on B.",
+      "notes": "Handoff #27 (your prototype). Commit 1 = the prototype's 14 lines. Commit 2 (preflight rounds 1-3): the sink's constructor checks INSERT on exactly the inner tables and columns its pipelines will write, so grants and missing inner tables behave as on master at the same point (the prototype alone had moved that check into the async flush: wait_for_async_insert = 0 -> success, then data dropped). Still moved to the first block / the flush: checks of MVs on the inner tables, the insert delay and too-many-parts error, share locks (remote write waits for the flush). Lab (2 vCPU, master 521c4bcb7b94): the 4 unused inner INSERTs cost 1.1 ms CPU per INSERT (empty INSERT 2,557 us vs 1,452 us MergeTree control); remote-write handler 4.9 ms per 2,000-sample request. Overlap: your upstream PR 123144 and valerypetrov's 121062 also create some target pipelines on demand (open); whichever lands second keeps first-chunk creation. Idea 2 (skip the handler's outer InterpreterInsertQuery) not done: needs a block path in executeQuery, ~0.7% CPU. Branch can't be compiled here: 05875's reference is master's output with the 2 predicted lines changed; 05876's is master's output.",
+      "base": "2176a0e2a333aebc8f8a90d69016525e949f3f",
+      "head": "7b6fce7643eda21b75d3199d74552454ad19c7ce",
+      "issue": 27,
+      "decision": "Before you submit: (1) read my private note on this item (notification, 2026-11-25); (2) open the upstream issue drafted on #27 (inlined async INSERT, wait 0: success without the inner tables' grants, rows dropped) and put its link in the Related: placeholder, or delete that line to submit without it. Doesn't block the build. Answer on #27.",
+      "upstream_draft": "drafted: comment 7177562401 on #27; 85_bug-report; async INSERT into a TimeSeries table returns success without the inner tables' INSERT grant, then drops the rows",
+      "pr_text": "prs/sink-lazy-pipelines.md",
+      "ab_plan": "ab-plans/sink-lazy-pipelines.md",
+      "report": "reports/2026-11-25-sink-lazy-pipelines.md"
     }
   ]
 }
