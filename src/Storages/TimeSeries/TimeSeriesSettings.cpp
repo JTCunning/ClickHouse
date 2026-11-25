@@ -43,6 +43,8 @@ namespace ErrorCodes
     DECLARE(UInt64, tags_deduplication_cache_size_bytes, 104857600, "Maximum size in bytes of the deduplication cache of the 'tags' table. The cache remembers the time series written recently, so their tags aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). The cache is used only when the 'tags' table doesn't store 'min_time' and 'max_time' (tables of version 7 or earlier store them unless 'store_min_time_and_max_time' is disabled), because otherwise every insert changes these columns: the default value is ignored then, and an explicit non-zero value is rejected. Set to 0 to disable the cache, see also 'tags_deduplication_cache_expiration_seconds'", 0) \
     DECLARE(UInt64, metric_families_deduplication_cache_expiration_seconds, 3600, "Time after which an entry of the deduplication cache of the 'metric families' table expires, counted from the moment the metric family was written. The actual lifetime of an entry is uniformly random in the range [0.8 * expiration_seconds, expiration_seconds], so the metric families written together aren't all written again at the same moment. So every metric family is written again at least once per this period, which limits any difference between the cache and the table. The cache is local to the server and cleared by 'TRUNCATE TABLE' executed on it or by 'SYSTEM DROP TIME SERIES CACHES'. Set to 0 to disable the cache", 0) \
     DECLARE(UInt64, metric_families_deduplication_cache_size_bytes, 10485760, "Maximum size in bytes of the deduplication cache of the 'metric families' table. The cache remembers the descriptions of the metric families written recently, so they aren't written again with every insert. When the cache is full, the entries used only once are evicted first, then the least recently used ones (SLRU). Set to 0 to disable the cache, see also 'metric_families_deduplication_cache_expiration_seconds'", 0) \
+    DECLARE(UInt64, samples_timestamp_alignment_tolerance_ms, 0, "Maximum adjustment in milliseconds when aligning ingested sample timestamps onto each time series' inferred regular scrape interval. Effective tolerance per series is clamped to 1% of its inferred interval. Samples deviating by more than this tolerance are stored unchanged. Set to 0 to disable timestamp alignment. Requires 'version' to be at least 12", 0) \
+    DECLARE(UInt64, samples_timestamp_alignment_cache_size_bytes, 104857600, "Maximum size in bytes of the per-series anchor cache used by ingest timestamp alignment when 'samples_timestamp_alignment_tolerance_ms' is non-zero. When the cache is full, entries used only once are evicted first, then least recently used ones (SLRU). Cleared by 'TRUNCATE TABLE' and 'SYSTEM CLEAR TIME SERIES CACHES'. Set to 0 to disable the cache. Requires 'version' to be at least 12", 0) \
     \
     /** The settings of the earlier versions (see TimeSeriesVersion.h): they apply to tables of those versions only and are rejected for the latest version. \
       * They are not in the OBSOLETE tier because their values are still read for the tables of those versions, \
@@ -189,6 +191,15 @@ void checkTimeSeriesSettings(const TimeSeriesSettings & settings)
     check_setting_requires_version("samples_index_granularity_bytes", TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES);
     check_setting_requires_version("recent_samples_bucket_step_seconds", TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES);
     check_setting_requires_version("recent_samples_index_granularity_bytes", TimeSeriesVersion::MIN_WITH_BUCKETED_SAMPLES);
+
+    check_setting_requires_version("samples_timestamp_alignment_tolerance_ms", TimeSeriesVersion::MIN_WITH_TIMESTAMP_ALIGNMENT);
+    check_setting_requires_version("samples_timestamp_alignment_cache_size_bytes", TimeSeriesVersion::MIN_WITH_TIMESTAMP_ALIGNMENT);
+
+    constexpr UInt64 max_timestamp_alignment_tolerance_ms = 10000;
+    if (settings[TimeSeriesSetting::samples_timestamp_alignment_tolerance_ms].value > max_timestamp_alignment_tolerance_ms)
+        throw Exception(ErrorCodes::INVALID_SETTING_VALUE,
+            "Setting `samples_timestamp_alignment_tolerance_ms` must be in the range [0, {}], got {}",
+            max_timestamp_alignment_tolerance_ms, settings[TimeSeriesSetting::samples_timestamp_alignment_tolerance_ms].value);
 
     auto check_bucket_step = [](const SettingFieldUInt64 & bucket_step, std::string_view setting_name)
     {

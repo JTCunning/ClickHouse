@@ -24,6 +24,7 @@
 #include <Storages/StorageFactory.h>
 #include <Storages/TimeSeries/TimeSeriesDeduplicationCache.h>
 #include <Storages/TimeSeries/TimeSeriesSink.h>
+#include <Storages/TimeSeries/TimeSeriesTimestampAligner.h>
 #include <Parsers/Prometheus/CreateQueryTimeSeriesSettings.h>
 #include <Parsers/Prometheus/TimeSeriesVersion.h>
 #include <Storages/TimeSeries/TimeSeriesSettings.h>
@@ -45,6 +46,8 @@ namespace CurrentMetrics
     extern const Metric TimeSeriesMetricFamiliesDeduplicationCacheBytes;
     extern const Metric TimeSeriesTagsDeduplicationCacheEntries;
     extern const Metric TimeSeriesTagsDeduplicationCacheBytes;
+    extern const Metric TimeSeriesTimestampAlignmentCacheEntries;
+    extern const Metric TimeSeriesTimestampAlignmentCacheBytes;
 }
 
 namespace ProfileEvents
@@ -53,6 +56,8 @@ namespace ProfileEvents
     extern const Event TimeSeriesMetricFamiliesDeduplicationCacheMisses;
     extern const Event TimeSeriesTagsDeduplicationCacheHits;
     extern const Event TimeSeriesTagsDeduplicationCacheMisses;
+    extern const Event TimeSeriesTimestampAlignmentSamplesAligned;
+    extern const Event TimeSeriesTimestampAlignmentSamplesUnchanged;
 }
 
 namespace DB
@@ -66,6 +71,8 @@ namespace TimeSeriesSetting
 {
     extern const TimeSeriesSettingsUInt64 metric_families_deduplication_cache_expiration_seconds;
     extern const TimeSeriesSettingsUInt64 metric_families_deduplication_cache_size_bytes;
+    extern const TimeSeriesSettingsUInt64 samples_timestamp_alignment_cache_size_bytes;
+    extern const TimeSeriesSettingsUInt64 samples_timestamp_alignment_tolerance_ms;
     extern const TimeSeriesSettingsUInt64 tags_deduplication_cache_expiration_seconds;
     extern const TimeSeriesSettingsUInt64 tags_deduplication_cache_size_bytes;
     extern const TimeSeriesSettingsUInt64 version;
@@ -105,7 +112,9 @@ namespace
             && (setting_name != "metric_families_deduplication_cache_size_bytes")
             && (setting_name != "metric_families_deduplication_cache_expiration_seconds")
             && (setting_name != "tags_deduplication_cache_size_bytes")
-            && (setting_name != "tags_deduplication_cache_expiration_seconds"))
+            && (setting_name != "tags_deduplication_cache_expiration_seconds")
+            && (setting_name != "samples_timestamp_alignment_tolerance_ms")
+            && (setting_name != "samples_timestamp_alignment_cache_size_bytes"))
             throw Exception(ErrorCodes::NOT_IMPLEMENTED,
                 "Setting '{}' of storage {} cannot be changed after the table is created", setting_name, storage_name);
     }
@@ -255,6 +264,7 @@ StorageTimeSeries::StorageTimeSeries(
     storage_settings.set(std::move(settings));
     createOrDropTagsDeduplicationCache();
     createOrDropMetricFamiliesDeduplicationCache();
+    createOrDropTimestampAligner();
 
     if (!comment.empty())
         storage_metadata.setComment(comment);
@@ -468,6 +478,35 @@ void StorageTimeSeries::createOrDropMetricFamiliesDeduplicationCache()
         ProfileEvents::TimeSeriesMetricFamiliesDeduplicationCacheMisses);
 }
 
+void StorageTimeSeries::createOrDropTimestampAligner()
+{
+    std::lock_guard lock{caches_mutex};
+
+    auto settings_ptr = storage_settings.get();
+    const auto & settings = *settings_ptr;
+
+    UInt64 tolerance_ms = settings[TimeSeriesSetting::samples_timestamp_alignment_tolerance_ms];
+    size_t max_size_bytes = settings[TimeSeriesSetting::samples_timestamp_alignment_cache_size_bytes];
+    UInt64 version = settings[TimeSeriesSetting::version];
+
+    bool enabled = isTimeSeriesVersionSupported(version)
+        && (version >= TimeSeriesVersion::MIN_WITH_TIMESTAMP_ALIGNMENT)
+        && (tolerance_ms > 0);
+    if (!enabled)
+    {
+        timestamp_aligner = nullptr;
+        return;
+    }
+
+    timestamp_aligner = std::make_shared<TimeSeriesTimestampAligner>(
+        tolerance_ms,
+        max_size_bytes,
+        CurrentMetrics::TimeSeriesTimestampAlignmentCacheEntries,
+        CurrentMetrics::TimeSeriesTimestampAlignmentCacheBytes,
+        ProfileEvents::TimeSeriesTimestampAlignmentSamplesAligned,
+        ProfileEvents::TimeSeriesTimestampAlignmentSamplesUnchanged);
+}
+
 TimeSeriesDeduplicationCachePtr StorageTimeSeries::getTagsDeduplicationCache() const
 {
     std::lock_guard lock{caches_mutex};
@@ -480,11 +519,18 @@ TimeSeriesDeduplicationCachePtr StorageTimeSeries::getMetricFamiliesDeduplicatio
     return metric_families_deduplication_cache;
 }
 
+TimeSeriesTimestampAlignerPtr StorageTimeSeries::getTimestampAligner() const
+{
+    std::lock_guard lock{caches_mutex};
+    return timestamp_aligner;
+}
+
 void StorageTimeSeries::clearCaches()
 {
     checkTimeSeriesVersionIsSupported(*this);
     createOrDropTagsDeduplicationCache();
     createOrDropMetricFamiliesDeduplicationCache();
+    createOrDropTimestampAligner();
 }
 
 
@@ -746,6 +792,8 @@ void StorageTimeSeries::alter(const AlterCommands & params, ContextPtr local_con
             || setting_changed(TimeSeriesSetting::tags_deduplication_cache_expiration_seconds);
         bool metric_families_cache_changed = setting_changed(TimeSeriesSetting::metric_families_deduplication_cache_size_bytes)
             || setting_changed(TimeSeriesSetting::metric_families_deduplication_cache_expiration_seconds);
+        bool timestamp_aligner_changed = setting_changed(TimeSeriesSetting::samples_timestamp_alignment_tolerance_ms)
+            || setting_changed(TimeSeriesSetting::samples_timestamp_alignment_cache_size_bytes);
 
         storage_settings.set(std::move(new_settings));
 
@@ -753,6 +801,8 @@ void StorageTimeSeries::alter(const AlterCommands & params, ContextPtr local_con
             createOrDropTagsDeduplicationCache();
         if (metric_families_cache_changed)
             createOrDropMetricFamiliesDeduplicationCache();
+        if (timestamp_aligner_changed)
+            createOrDropTimestampAligner();
     }
 }
 

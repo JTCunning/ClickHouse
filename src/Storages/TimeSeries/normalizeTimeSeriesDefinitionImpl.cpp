@@ -780,6 +780,9 @@ namespace
             old_settings.removeSettings({"samples_bucket_step_seconds", "samples_partition_by", "samples_index_granularity_bytes",
                                          "recent_samples_bucket_step_seconds", "recent_samples_index_granularity_bytes"});
 
+        if (new_version < TimeSeriesVersion::MIN_WITH_TIMESTAMP_ALIGNMENT)
+            old_settings.removeSettings({"samples_timestamp_alignment_tolerance_ms", "samples_timestamp_alignment_cache_size_bytes"});
+
         /// The default value of `recent_samples_ttl_seconds` is 345600 (4 days), so an absent setting doesn't disable the recent samples table.
         if (const auto * value = get_new_value("recent_samples_ttl_seconds"); value && (SettingFieldUInt64{*value}.value == 0))
             old_settings.removeSettings({"recent_samples_bucket_step_seconds", "recent_samples_partition_by",

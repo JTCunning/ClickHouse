@@ -990,6 +990,7 @@ void TimeSeriesSink::initTagsAndSamplesPipelines()
 
     tags_pipeline = createTargetPipeline(ViewTarget::Tags, tags_header);
     tags_deduplication_cache = time_series_storage.getTagsDeduplicationCache();
+    timestamp_aligner = time_series_storage.getTimestampAligner();
 
     /// The time ranges table (if any) receives the time range of every time series with samples.
     /// The types of `min_time` and `max_time` are the timestamp type of the input chunk, the same way as for
@@ -1189,6 +1190,12 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     /// The identifiers are also used for the time ranges and the samples blocks below.
     ColumnPtr id_column = tags_block.getByName(TimeSeriesColumnNames::ID).column;
 
+    ColumnPtr aligned_timestamps;
+    if (timestamp_aligner && total_samples)
+        aligned_timestamps = timestamp_aligner->alignTimestamps(
+            filter, *id_column, ts_timestamps, timestamp_type, ts_offsets, pending_timestamp_alignment);
+    const IColumn & effective_ts_timestamps = aligned_timestamps ? *aligned_timestamps : ts_timestamps;
+
     /// Step 3. Push the tags block without the time series already written to the "tags" table.
     if (tags_deduplication_cache)
         tags_block = tags_deduplication_cache->filterOutWrittenRows(
@@ -1204,7 +1211,7 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     /// are filtered by their timestamps anyway), while samples outside of the stored time range of their
     /// time series would be invisible to queries filtering time series by time.
     if (time_ranges_pipeline && total_samples)
-        time_ranges_pipeline->push(makeTimeRangesBlock(filter, *id_column, id_type, ts_timestamps, timestamp_type, ts_offsets, num_time_series));
+        time_ranges_pipeline->push(makeTimeRangesBlock(filter, *id_column, id_type, effective_ts_timestamps, timestamp_type, ts_offsets, num_time_series));
 
     /// Step 5. Assemble and push the samples blocks.
     /// The samples table is written before the recent samples table: if the insert fails between
@@ -1214,7 +1221,7 @@ void TimeSeriesSink::consumeTagsAndSamples(const Block & block)
     if (total_samples)
     {
         SamplesBlocks samples_blocks = makeSamplesBlocks(
-            filter, *id_column, id_type, ts_timestamps, timestamp_type, ts_values, value_type, ts_offsets, total_samples,
+            filter, *id_column, id_type, effective_ts_timestamps, timestamp_type, ts_values, value_type, ts_offsets, total_samples,
             samples_bucket_step, recent_samples_bucket_step);
 
         samples_pipeline->push(std::move(samples_blocks.samples_block));
@@ -1304,6 +1311,8 @@ void TimeSeriesSink::onFinish()
         samples_pipeline->executor->finish();
     if (recent_samples_pipeline)
         recent_samples_pipeline->executor->finish();
+    if (timestamp_aligner && !pending_timestamp_alignment.empty())
+        timestamp_aligner->commitStates(std::move(pending_timestamp_alignment));
     if (metric_families_pipeline)
     {
         metric_families_pipeline->executor->finish();

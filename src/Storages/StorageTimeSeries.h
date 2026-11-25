@@ -13,6 +13,8 @@ namespace DB
 {
 class TimeSeriesDeduplicationCache;
 using TimeSeriesDeduplicationCachePtr = std::shared_ptr<TimeSeriesDeduplicationCache>;
+class TimeSeriesTimestampAligner;
+using TimeSeriesTimestampAlignerPtr = std::shared_ptr<TimeSeriesTimestampAligner>;
 struct TimeSeriesSettings;
 using TimeSeriesSettingsPtr = std::shared_ptr<const TimeSeriesSettings>;
 
@@ -74,6 +76,7 @@ public:
     /// and `metric_families_deduplication_cache_size_bytes`).
     TimeSeriesDeduplicationCachePtr getTagsDeduplicationCache() const;
     TimeSeriesDeduplicationCachePtr getMetricFamiliesDeduplicationCache() const;
+    TimeSeriesTimestampAlignerPtr getTimestampAligner() const;
 
     /// Clears the caches used by inserts, so that the next insert writes all its rows to the target tables.
     /// It's called by `TRUNCATE TABLE` and by `SYSTEM DROP TIME SERIES CACHES`.
@@ -163,6 +166,7 @@ private:
     /// The running inserts continue with the old cache.
     void createOrDropTagsDeduplicationCache();
     void createOrDropMetricFamiliesDeduplicationCache();
+    void createOrDropTimestampAligner();
 
     MultiVersion<TimeSeriesSettings> storage_settings;
 
@@ -172,6 +176,7 @@ private:
     mutable std::mutex caches_mutex;
     TimeSeriesDeduplicationCachePtr tags_deduplication_cache TSA_GUARDED_BY(caches_mutex);
     TimeSeriesDeduplicationCachePtr metric_families_deduplication_cache TSA_GUARDED_BY(caches_mutex);
+    TimeSeriesTimestampAlignerPtr timestamp_aligner TSA_GUARDED_BY(caches_mutex);
 };
 
 std::shared_ptr<StorageTimeSeries> storagePtrToTimeSeries(StoragePtr storage);
