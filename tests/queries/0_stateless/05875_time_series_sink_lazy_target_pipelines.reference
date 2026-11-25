@@ -15,6 +15,10 @@ m1	{'__name__':'m1','host':'h6'}	[('1970-01-01 00:01:46.000',6)]
 m2	{'__name__':'m2','host':'h1'}	[('1970-01-01 00:03:20.000',1.5)]
 m2	{'__name__':'m2','host':'h2'}	[('1970-01-01 00:03:21.000',2.5)]
 m3	{'__name__':'m3','host':'h1'}	[('1970-01-01 00:05:00.000',3)]
+-- the INSERT into the tags table is built only by the queries that write rows
+05875_native_async	Insert	0
+05875_no_rows	Insert	0
+05875_rows	Insert	1
 -- inner tables
 tags	10	0
 time ranges	10	1970-01-01 00:01:40.000	1970-01-01 00:05:00.000

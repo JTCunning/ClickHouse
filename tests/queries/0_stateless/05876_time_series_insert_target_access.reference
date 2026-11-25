@@ -1,0 +1,45 @@
+-- INSERT on the TimeSeries table only
+synchronous, rows: ACCESS_DENIED
+synchronous, no rows: ACCESS_DENIED
+asynchronous, native blocks, wait 1: ACCESS_DENIED
+asynchronous, native blocks, wait 0: ACCESS_DENIED
+metric family columns only: ACCESS_DENIED
+series	[]
+samples	0
+metric families	0
+-- and on the tags and metric families tables
+synchronous, rows: ACCESS_DENIED
+synchronous, no rows: ACCESS_DENIED
+asynchronous, native blocks, wait 1: ACCESS_DENIED
+asynchronous, native blocks, wait 0: ACCESS_DENIED
+metric family columns only: OK
+series	[]
+samples	0
+metric families	1
+-- on all tables of the database
+synchronous, rows: OK
+synchronous, no rows: OK
+asynchronous, native blocks, wait 1: OK
+asynchronous, native blocks, wait 0: OK
+metric family columns only: OK
+series	['s3_async_wait_0','s3_async_wait_1','s3_sync']
+samples	3
+metric families	1
+-- on the other inner tables, and on the columns metric_name and tags of the tags table
+synchronous, rows: ACCESS_DENIED
+synchronous, no rows: ACCESS_DENIED
+asynchronous, native blocks, wait 1: ACCESS_DENIED
+asynchronous, native blocks, wait 0: ACCESS_DENIED
+metric family columns only: OK
+series	[]
+samples	0
+metric families	1
+-- and on the column id of the tags table
+synchronous, rows: OK
+synchronous, no rows: OK
+asynchronous, native blocks, wait 1: OK
+asynchronous, native blocks, wait 0: OK
+metric family columns only: OK
+series	['s5_async_wait_0','s5_async_wait_1','s5_sync']
+samples	3
+metric families	1

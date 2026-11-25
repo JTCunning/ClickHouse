@@ -1,5 +1,6 @@
 #include <Storages/TimeSeries/TimeSeriesSink.h>
 
+#include <Access/Common/AccessFlags.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnDecimal.h>
 #include <Columns/ColumnMap.h>
@@ -61,6 +62,7 @@ namespace ErrorCodes
     extern const int ILLEGAL_COLUMN;
     extern const int ILLEGAL_TIME_SERIES_TAGS;
     extern const int INCORRECT_DATA;
+    extern const int LOGICAL_ERROR;
 }
 
 
@@ -783,9 +785,48 @@ TimeSeriesSink::TargetPipeline::~TargetPipeline()
 }
 
 
+Names TimeSeriesSink::getTargetColumnNames(ViewTarget::Kind kind) const
+{
+    const auto & settings = *time_series_settings;
+    switch (kind)
+    {
+        case ViewTarget::Tags:
+        {
+            Names names{TimeSeriesColumnNames::ID, TimeSeriesColumnNames::MetricName};
+            const Map & tags_to_columns = settings[TimeSeriesSetting::tags_to_columns];
+            for (const auto & tag_name_and_column_name : tags_to_columns)
+                names.push_back(tag_name_and_column_name.safeGet<Tuple>().at(1).safeGet<String>());
+            names.push_back(TimeSeriesColumnNames::Tags);
+            if (settings.hasMinTimeAndMaxTimeInTagsTable())
+            {
+                names.push_back(TimeSeriesColumnNames::MinTime);
+                names.push_back(TimeSeriesColumnNames::MaxTime);
+            }
+            return names;
+        }
+        case ViewTarget::TimeRanges:
+            return {TimeSeriesColumnNames::ID, TimeSeriesColumnNames::MinTime, TimeSeriesColumnNames::MaxTime};
+        case ViewTarget::Samples:
+        case ViewTarget::RecentSamples:
+            if (settings.hasBucketedSamples())
+                return {TimeSeriesColumnNames::ID, TimeSeriesColumnNames::Samples, TimeSeriesColumnNames::Bucket,
+                        TimeSeriesColumnNames::MinTime, TimeSeriesColumnNames::MaxTime};
+            return {TimeSeriesColumnNames::ID, TimeSeriesColumnNames::Timestamp, TimeSeriesColumnNames::Value};
+        case ViewTarget::MetricFamilies:
+            return {TimeSeriesColumnNames::getInnerMetricFamily(time_series_storage.getVersion()),
+                    TimeSeriesColumnNames::Type, TimeSeriesColumnNames::Unit, TimeSeriesColumnNames::Help};
+        default:
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected kind of a target table of a TimeSeries table: {}", kind);
+    }
+}
+
+
 std::unique_ptr<TimeSeriesSink::TargetPipeline> TimeSeriesSink::createTargetPipeline(
     ViewTarget::Kind kind, const Block & header)
 {
+    /// The constructor checked the INSERT privilege on these columns.
+    chassert(header.getNames() == getTargetColumnNames(kind));
+
     auto pipeline = std::make_unique<TargetPipeline>();
 
     const auto & target_table_id = time_series_storage.getTargetTableID(kind, getContext());
@@ -855,6 +896,24 @@ TimeSeriesSink::TimeSeriesSink(
         || is_insert_column(TimeSeriesColumnNames::Type)
         || is_insert_column(TimeSeriesColumnNames::Unit)
         || is_insert_column(TimeSeriesColumnNames::Help);
+
+    /// The target pipelines are created with the first block of rows, and each of them checks the INSERT privilege
+    /// on its table. The same checks are made here, so an INSERT without the privilege fails before it runs or is queued.
+    std::vector<ViewTarget::Kind> target_kinds;
+    if (insert_tags_and_samples)
+    {
+        target_kinds.push_back(ViewTarget::Tags);
+        if (time_series_storage.hasTarget(ViewTarget::TimeRanges))
+            target_kinds.push_back(ViewTarget::TimeRanges);
+        target_kinds.push_back(ViewTarget::Samples);
+        if (time_series_storage.hasTarget(ViewTarget::RecentSamples))
+            target_kinds.push_back(ViewTarget::RecentSamples);
+    }
+    if (insert_metric_families)
+        target_kinds.push_back(ViewTarget::MetricFamilies);
+
+    for (auto kind : target_kinds)
+        getContext()->checkAccess(AccessType::INSERT, time_series_storage.getTargetTableID(kind, getContext()), getTargetColumnNames(kind));
 }
 
 

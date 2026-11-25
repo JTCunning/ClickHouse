@@ -58,8 +58,11 @@ private:
     };
 
     /// Creates the target pipelines on the first non-empty chunk, so an INSERT whose sink never gets data doesn't build them.
+    /// Not retried after an exception: the sink gets no more chunks then.
     void initPipelines();
     void initTagsAndSamplesPipelines();
+    /// The columns the sink inserts into the target table of the given kind.
+    Names getTargetColumnNames(ViewTarget::Kind kind) const;
     void initMetricFamiliesPipeline();
     std::unique_ptr<TargetPipeline> createTargetPipeline(ViewTarget::Kind kind, const Block & header);
 
