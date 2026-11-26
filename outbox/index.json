@@ -545,7 +545,7 @@
     {
       "slug": "sink-lazy-pipelines",
       "priority": 16,
-      "status": "ready-to-build",
+      "status": "submitted",
       "title": "TimeSeries: build the inner INSERTs of the sink with its first block of rows",
       "branch": "lilred-perf-sink-lazy-pipelines",
       "summary": "remote write with async insert stops building 4 unused inner INSERTs per request: server CPU per sample -6.6% at 1M series (your prototype run); grants as on master",
@@ -580,10 +580,12 @@
       "head": "7b6fce7643eda21b75d3199d74552454ad19c7ce",
       "issue": 27,
       "decision": "Before you submit: (1) read my private note on this item (notification, 2026-11-25); (2) open the upstream issue drafted on #27 (inlined async INSERT, wait 0: success without the inner tables' grants, rows dropped) and put its link in the Related: placeholder, or delete that line to submit without it. Doesn't block the build. Answer on #27.",
-      "upstream_draft": "drafted: comment 7177562401 on #27; 85_bug-report; async INSERT into a TimeSeries table returns success without the inner tables' INSERT grant, then drops the rows",
+      "upstream_draft": "unlinked: asked James 2026-11-26",
       "pr_text": "prs/sink-lazy-pipelines.md",
       "ab_plan": "ab-plans/sink-lazy-pipelines.md",
-      "report": "reports/2026-11-25-sink-lazy-pipelines.md"
+      "report": "reports/2026-11-25-sink-lazy-pipelines.md",
+      "upstream_pr": 134529,
+      "submitted_head": "7b6fce7643eda21b75d3199d74552454ad19c7ce"
     }
   ]
 }
