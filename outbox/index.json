@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-25T23:26:32Z",
+  "updated": "2026-11-26T10:02:53Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -228,7 +228,6 @@
       "slug": "rollup-samples",
       "title": "Store last-sample rollup columns in TimeSeries samples tables and read them for wide-step selectors",
       "summary": "run 2: 30d 1h 2.2–2.3×, 7d 1h 1.5×, 7d 5m 1.3–1.4×, 30d 5m 1.2–1.3×; 1 of 5 floors met; setting off = master",
-      "decision": "Run 2 met 1 of 5 floors (my predictions); results equal, setting off = master. A (rec.): submit with run 2's numbers, no A/B rerun: you re-run only 05842 (test fix 520aade, binary unchanged), or one tests-only build if you also want the rename (rec. yes). B: park. C: one more rework + full A/B build. Answer on #16.",
       "status": "needs-work",
       "priority": 7,
       "branch": "lilred-perf-rollup-samples",
