@@ -501,7 +501,6 @@
       "report": "reports/2026-11-22-recent-samples-merge.md",
       "pr_text": null,
       "issue": 25,
-      "decision": "A (recommended): run the A/B plan at scale (no build: two table definitions on one master build + a steady state with the mover); if it passes I branch a version-12 default (`tier` column, recent off) and an engine-side mover. B: keep both tables and only cut the duplicate's cost (shorter recent TTL, pick the table by query shape). C: drop it. Answer on the issue.",
       "notes": "Weekend batch 2026-11-22 target 1 (James's chat request). Also seen on master: the selector reads the recent table whenever the range starts inside its TTL; narrow selectors over >= 1 d are 1.6-3.9x slower there than on the samples table. Lab data 6.2 GB in tools/clickhouse/data/recent-samples-merge (gen.sh rebuilds it)."
     },
     {
