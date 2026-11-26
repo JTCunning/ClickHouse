@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-26T11:02:14Z",
+  "updated": "2026-11-26T23:01:53Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -342,8 +342,8 @@
     {
       "slug": "time-ranges-metric-filter",
       "title": "Read the TimeSeries time ranges table by metric for a regex on the metric name",
-      "summary": "Needs upstream #115482 first. Emulated: a `__name__` regex matching 1 of 200 metrics -22..-31%; the XML's broad-regex control +6..11%",
-      "status": "needs-work",
+      "summary": "parked: never built (needed upstream PR 115482). Emulated: a regex matching 1 of 200 metrics -22..-31%; broad-regex control +6..11%",
+      "status": "dropped",
       "priority": 10,
       "branch": "lilred-perf-time-ranges-metric-filter",
       "head": "22340b032da2c02fbf928ea163deb76b794a6405",
@@ -374,7 +374,7 @@
       ],
       "claim": "With upstream #115482, a selector whose __name__ regex matches 1 of 200 metrics (.*_199 in promql_selector_name_alternatives.xml) is at least 15% faster and reads the time ranges table only over that metric's granules; the file's broad regex control m_1[0-9][0-9] is at most 10% slower (emulated +6..11%).",
       "pass_if": "05768 and 05493 pass on B (= branch + #115482); on master 05768 prints '05768_regex 0' and a last line '0 1'. T1/T3 at least 15% faster at 99.5%, T1 selects at most 2 of ~25 time-ranges granules; G1 (broad regex) at most 10% slower; G2, G3, E2 not significantly slower. Profile G1 with processors_profile_log (A/B plan).",
-      "notes": "Not buildable yet: B needs master + upstream #115482 rebased (it conflicts in KeyCondition.cpp/.h; 412 commits to that file since its base). A = master + #115482, B = A + this branch, A2 = plain master. The .reference of 05768 is predicted (master output with its two branch lines changed); take it from the built B if it differs. Side finding for James, not in this branch: regex matchers with '|' are anchored as ^a|b$ (correctness)."
+      "notes": "Parked 2026-11-26 on James's answer on issue 17 (2026-11-25, 'let's park this'): no nudge on upstream PR 115482, no takeover, no build. Branch kept as it is (22340b032da2 on base 83b6da032407; still merges cleanly with master 2c14f8418a09 on 2026-11-26), no more commits. Emulated only: a regex matching 1 of 200 metrics -22..-31%, the in-tree broad-regex control +6..11%. Since then upstream PR 132790 (fullMatch for the selector and primary-key pruning) and 131794 (anchors every alternative, the PR text's side finding) changed its files. To revive: upstream PR 115482 merged or rebased with an IN test; rebase onto current master (open upstream PR 132565 rewrites the selector); drop the anchoring Major from the PR text; re-predict the regex cases; then the A/B plan's build (A = master + 115482, B = A + branch; 05768's .reference is predicted, take it from the built B)."
     },
     {
       "slug": "ts-group-array-result-copy",

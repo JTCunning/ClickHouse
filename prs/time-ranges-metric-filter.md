@@ -1,5 +1,7 @@
 # [unbuilt] Read the `TimeSeries` time ranges table by metric for a regex on the metric name
 
+**Status 2026-11-26:** parked on James's answer on #17, not to be submitted for now. The branch stays at `22340b032da2`; the report's 2026-11-26 update says what a revival needs.
+
 Branch: `lilred-perf-time-ranges-metric-filter` @ `22340b032da2` (base `83b6da032407`; 1 commit) · compare: https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-time-ranges-metric-filter · handoff: https://github.com/JTCunning/ClickHouse/issues/17 · **depends on upstream #115482** (open, conflicts with master since 2026-10)
 
 <!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->
