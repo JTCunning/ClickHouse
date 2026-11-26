@@ -374,8 +374,7 @@
       ],
       "claim": "With upstream #115482, a selector whose __name__ regex matches 1 of 200 metrics (.*_199 in promql_selector_name_alternatives.xml) is at least 15% faster and reads the time ranges table only over that metric's granules; the file's broad regex control m_1[0-9][0-9] is at most 10% slower (emulated +6..11%).",
       "pass_if": "05768 and 05493 pass on B (= branch + #115482); on master 05768 prints '05768_regex 0' and a last line '0 1'. T1/T3 at least 15% faster at 99.5%, T1 selects at most 2 of ~25 time-ranges granules; G1 (broad regex) at most 10% slower; G2, G3, E2 not significantly slower. Profile G1 with processors_profile_log (A/B plan).",
-      "notes": "Not buildable yet: B needs master + upstream #115482 rebased (it conflicts in KeyCondition.cpp/.h; 412 commits to that file since its base). A = master + #115482, B = A + this branch, A2 = plain master. The .reference of 05768 is predicted (master output with its two branch lines changed); take it from the built B if it differs. Side finding for James, not in this branch: regex matchers with '|' are anchored as ^a|b$ (correctness).",
-      "decision": "Blocked on upstream #115482 (idle since 2026-10-19, conflicts with master). Post the drafted nudge on #115482 (recommended), have someone take it over, or park this. Also OK the +6..11% broad-regex cost into the A/B? Answer on #17; no build is possible until then."
+      "notes": "Not buildable yet: B needs master + upstream #115482 rebased (it conflicts in KeyCondition.cpp/.h; 412 commits to that file since its base). A = master + #115482, B = A + this branch, A2 = plain master. The .reference of 05768 is predicted (master output with its two branch lines changed); take it from the built B if it differs. Side finding for James, not in this branch: regex matchers with '|' are anchored as ^a|b$ (correctness)."
     },
     {
       "slug": "ts-group-array-result-copy",
