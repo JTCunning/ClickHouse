@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-26 10:02 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-26 11:02 UTC.
 
 ## For you, in order
 
@@ -16,7 +16,6 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 
 | item | issue | lil red is | what it's for |
 |---|---|---|---|
-| [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | reworking the branch, or dropping it | run 2: 30d 1h 2.2–2.3×, 7d 1h 1.5×, 7d 5m 1.3–1.4×, 30d 5m 1.2–1.3×; 1 of 5 floors met; setting off = master |
 | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | reworking the branch, or dropping it | Needs upstream #115482 first. Emulated: a `__name__` regex matching 1 of 200 metrics -22..-31%; the XML's broad-regex control +6..11% |
 | recent-samples-merge | [#25](https://github.com/JTCunning/ClickHouse/issues/25) | reworking the branch, or dropping it | Report, no branch yet. Recent table's speed = its 5 h partitions only (wide alert rule 726 -> 61 ms; buckets/granules/TTL add 0). One table partitioned by a `tier` column (young 1 d in 5 h partitions, a mover folds them into months) matches it on short shapes (0.93-1.05x), insert CPU -24..-34%, storage -19%; costs up to 1.8x on narrow 7-14 d, 1.7x on wide 1-4 d |
 
@@ -39,6 +38,7 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 |---|---|---|
 | [grid-gap-wraparound](../prs/grid-gap-wraparound.md) | [#10](https://github.com/JTCunning/ClickHouse/issues/10) | parked: James chose upstream 124777 (dense array) as the fix for 125759; run 2 was 8.4x / 5.7x on the gap but the rule kept misfiring |
 | [parallel-statistics-probe](../prs/parallel-statistics-probe.md) | [#15](https://github.com/JTCunning/ClickHouse/issues/15) | dropped: upstream #131667 (merged 2026-11-15) is the same fix; your run 1 was -6.1% on a window with 2 of the 13 serial index loads |
+| [rollup-samples](../prs/rollup-samples.md) | [#16](https://github.com/JTCunning/ClickHouse/issues/16) | parked: run 2 rollup vs raw 2.2–2.3× at 30d/1h, 1.5× at 7d/1h, 1.2–1.4× at 5m over 7–30d (1 of 5 floors); storage 1.24× |
 | [selector-one-tags-row-per-id](../prs/selector-one-tags-row-per-id.md) | [#18](https://github.com/JTCunning/ClickHouse/issues/18) | dropped 2026-11-17: built T1 -13% at 2 threads but -5% at 8 (bar 10%); merged wide +13% at 2 threads; the cost is the part-stream merge (#19) |
 | [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | dropped after your build: cold -6.8..-17%, but prewarmed +15..+40% (99.5%); the loss doesn't reproduce on 2 vCPU |
 
