@@ -506,7 +506,7 @@
     {
       "slug": "ts-from-grid-typed-write",
       "priority": 15,
-      "status": "ready-to-build",
+      "status": "results-in",
       "title": "Write the timestamps of timeSeriesFromGrid and timeSeriesRange straight into the typed column",
       "branch": "lilred-perf-ts-from-grid-typed-write",
       "summary": "run 2 needed: dashboard PromQL queries via /api/v1/query_range (run 1: function 2x/5x, but PromQL range query only -0.6..-2.4%, not significant)",
