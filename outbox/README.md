@@ -2,13 +2,13 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-27 11:04 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-27 23:02 UTC.
 
 ## For you, in order
 
 | # | your move | item | issue | what it's for |
 |---|---|---|---|---|
-| 1 | **Decide** | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | Before you submit: open the upstream issue drafted in #26's description (two pre-existing defects on this path: NULL start/end/step computed as 0, and a DateTime/UInt32 start with a DateTime64 end after 2106 wrapping to 1970; both reproduced on master) and put its link in the placeholder Related: line. Doesn't block the build. Answer on #26. |
+| 1 | **Decide** | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | Run 2 showed no measurable change on dashboard queries. A) park it (recommended): branch kept, issue open; the upstream issue drafted in #26's description (two master defects on this path) stays yours to open on its own. B) submit anyway with timeSeriesFromGrid 2x as the headline (an exception to your 11-23 rule on realistic queries). C) drop it and close #26. Blocks nothing; no build needed. Answer on #26. |
 
 Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
 
