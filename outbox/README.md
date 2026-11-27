@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-26 23:01 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-27 11:04 UTC.
 
 ## For you, in order
 
@@ -14,9 +14,7 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 
 ## With lil red: nothing for you
 
-| item | issue | lil red is | what it's for |
-|---|---|---|---|
-| recent-samples-merge | [#25](https://github.com/JTCunning/ClickHouse/issues/25) | reworking the branch, or dropping it | Report, no branch yet. Recent table's speed = its 5 h partitions only (wide alert rule 726 -> 61 ms; buckets/granules/TTL add 0). One table partitioned by a `tier` column (young 1 d in 5 h partitions, a mover folds them into months) matches it on short shapes (0.93-1.05x), insert CPU -24..-34%, storage -19%; costs up to 1.8x on narrow 7-14 d, 1.7x on wide 1-4 d |
+None.
 
 ## Submitted
 
@@ -41,6 +39,7 @@ Order: review fixes to sync first (an upstream reviewer is waiting), then submit
 | [selector-one-tags-row-per-id](../prs/selector-one-tags-row-per-id.md) | [#18](https://github.com/JTCunning/ClickHouse/issues/18) | dropped 2026-11-17: built T1 -13% at 2 threads but -5% at 8 (bar 10%); merged wide +13% at 2 threads; the cost is the part-stream merge (#19) |
 | [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | dropped after your build: cold -6.8..-17%, but prewarmed +15..+40% (99.5%); the loss doesn't reproduce on 2 vCPU |
 | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | parked: never built (needed upstream PR 115482). Emulated: a regex matching 1 of 200 metrics -22..-31%; broad-regex control +6..11% |
+| recent-samples-merge | [#25](https://github.com/JTCunning/ClickHouse/issues/25) | parked: report only, never run at scale. Recent table's speed = its 5 h partitions; one table with labelled tiers matched it on short shapes, insert CPU -24..-34%, storage -19% |
 
 ## How an item moves
 
