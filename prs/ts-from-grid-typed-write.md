@@ -1,10 +1,11 @@
 # Write the timestamps of `timeSeriesFromGrid` and `timeSeriesRange` straight into their typed column
+**Status 2026-11-28:** parked on James's answer (option A on #26), not to be submitted. The branch stays at `92789976f58`; the report's 2026-11-28 update says what a revival needs (and, on revival: category `Performance Improvement`, his 11-25 convention).
 
 **Branch:** [`lilred-perf-ts-from-grid-typed-write`](https://github.com/ClickHouse/ClickHouse/compare/master...JTCunning:ClickHouse:lilred-perf-ts-from-grid-typed-write) @ `92789976f58` (base master `521c4bcb7b94`) · **Status:** run 1 (function level, `a25c640b65b3`) passed 2026-11-23; run 2 (dashboard queries through the HTTP API, head `92789976f58`) pending, A/B plan section "Run 2" · **Report:** [reports/2026-11-22-ts-from-grid-typed-write.md](../reports/2026-11-22-ts-from-grid-typed-write.md) · **A/B plan:** [ab-plans/ts-from-grid-typed-write.md](../ab-plans/ts-from-grid-typed-write.md)
 
 <!-- upstream:start (the PR body is everything between these markers; the title is the heading above) -->
 Related: https://github.com/ClickHouse/ClickHouse/pull/133502
-Related: (tracking issue for the NULL-argument and 32-bit wrap defects, James to open)
+Related: (lil red: open the issue drafted on fork #26 and put its link here, or delete this line)
 
 ### Changelog category (leave one):
 - Experimental Feature

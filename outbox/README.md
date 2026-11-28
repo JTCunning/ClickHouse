@@ -2,7 +2,7 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-28 10:00 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-28 11:02 UTC.
 
 ## For you, in order
 
@@ -10,9 +10,7 @@ Nothing for you right now.
 
 ## With lil red: nothing for you
 
-| item | issue | lil red is | what it's for |
-|---|---|---|---|
-| [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | reworking the branch, or dropping it | run 2: no measurable change on 6 dashboard PromQL queries (-2.0..+0.3%, none significant); function alone 2x/5x. Park or drop: your call |
+None.
 
 ## Submitted
 
@@ -38,6 +36,7 @@ Nothing for you right now.
 | [selector-ids-fixed-join-order](../prs/selector-ids-fixed-join-order.md) | [#20](https://github.com/JTCunning/ClickHouse/issues/20) | dropped after your build: cold -6.8..-17%, but prewarmed +15..+40% (99.5%); the loss doesn't reproduce on 2 vCPU |
 | [time-ranges-metric-filter](../prs/time-ranges-metric-filter.md) | [#17](https://github.com/JTCunning/ClickHouse/issues/17) | parked: never built (needed upstream PR 115482). Emulated: a regex matching 1 of 200 metrics -22..-31%; broad-regex control +6..11% |
 | recent-samples-merge | [#25](https://github.com/JTCunning/ClickHouse/issues/25) | parked: report only, never run at scale. Recent table's speed = its 5 h partitions; one table with labelled tiers matched it on short shapes, insert CPU -24..-34%, storage -19% |
+| [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | parked: no measurable change on 6 dashboard PromQL queries (-2.0..+0.3%, none significant); the function alone 2x/5x. Branch kept |
 
 ## How an item moves
 

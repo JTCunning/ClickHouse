@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-28T10:00:47Z",
+  "updated": "2026-11-28T11:02:20Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -506,10 +506,10 @@
     {
       "slug": "ts-from-grid-typed-write",
       "priority": 15,
-      "status": "needs-work",
+      "status": "dropped",
       "title": "Write the timestamps of timeSeriesFromGrid and timeSeriesRange straight into the typed column",
       "branch": "lilred-perf-ts-from-grid-typed-write",
-      "summary": "run 2: no measurable change on 6 dashboard PromQL queries (-2.0..+0.3%, none significant); function alone 2x/5x. Park or drop: your call",
+      "summary": "parked: no measurable change on 6 dashboard PromQL queries (-2.0..+0.3%, none significant); the function alone 2x/5x. Branch kept",
       "claim": "Run 2 (dashboard queries through /api/v1/query_range, JSON, 2000 series of a counter and a gauge scraped every 15 s): R5 g (2000 series, 1 h, step 15 s) -1..-3%; R2 rate(m[5m]) and R6 (6 h, step 30 s) -0.5..-2%; R1 and R4 (one job, 200 series) 0..-1.5%; R3 sum by (job) unchanged; results identical. Run 1 (function level, a25c640b65b3): timeSeriesFromGrid 2x, timeSeriesRange 5x, 3.0-3.6 ns per output point.",
       "perf_tests": [
         "tests/performance/promql_set_operator_presence_mask.xml"
@@ -533,13 +533,14 @@
         "gtest_filter": null
       },
       "pass_if": "Run 2 only: follow ab-plans/ts-from-grid-typed-write.md section Run 2 (bench/range-json-timestamps/gen.sh SERIES=2000 + server.sh; bench/ts-from-grid-typed-write/realistic/run.py ROUNDS=100, A/A first; post summarize.py's table as printed). Pass: 05850 passes on A and B, also_run and integration tests pass on B, every row equal (R3 may be equal (rounded)), no row significantly slower, A/A no difference. No floor on R1-R6: they set the PR's headline; if none shows a difference, talk about parking or dropping before submit. Don't rerun ab.sh or perf.py: run 1 stands.",
-      "notes": "Run 2 (James, 2026-11-25, #26 issuecomment-7169566218; A 42f59f8a4c25 = master, B 62e531a2ff81 = the branch merged onto A): pass on pass_if, no measurable change: R1-R6 -2.0..+0.3%, none significant at p < 0.005 (100 rounds), A/A within 0.9%, every row equal, all tests pass. Per the plan, park or drop asked on #26 2026-11-27 (no run 3). If James picks B (submit): put run 2's table first in prs/, say plainly that dashboard queries don't change, and switch the changelog category from Experimental Feature to Performance Improvement (his 11-25 convention). Run 2 asked by James 2026-11-23 (chat, option B): run 1's PromQL cases were the best case for this change (one sample per window, FORMAT Null) and still not significant, so the headline must come from dashboard queries. Realistic kit dry run 2026-11-23 on master (A/A, SERIES=500, 12 rounds): every row no difference and equal. Upstream PR 120906 merged 2026-11-23 (NO_SANITIZE_UNSIGNED_OVERFLOW on doExecute); branch merges cleanly into master 05f159a69597 with both expressions inside doExecute. Run 1 (James, 2026-11-23, #26 issuecomment-7091347505; A 521c4bcb7b94, B a25c640b65b3): pass. T3 -65.0%, T5 -80.7%, T4 -20.6%, q7 -51.1% (3 passes -51..-53%), q8 -31.2%; q6 -2.4% and kit T1 -6.7% not significant at query level, so the changelog entry names only timeSeriesFromGrid (2x, 1.45x with NULLs). 92789976f58 (rework after run 1): upstream PR 120906 (open) puts NO_SANITIZE_UNSIGNED_OVERFLOW on doExecute, and a lambda doesn't inherit it (clang 20 trap test), so 05850's range across 1970 would fail the UBSan job once it lands; the expression is inline again, as on master. Merges cleanly into master 9cbdad9a7e3c; 05850 still free. Kit: ab.sh reads cases.tsv with grep now (build host has no rg). Earlier: Preflight: 2 rounds (independent reviewer), no finding in the changed code; round 1 nits taken (q9 control, changelog wording); round 2 [Major] pre-existing NULL-argument defect -> tracking issue drafted for James (decision), Related: placeholder in the PR text. The query-level gain is under CI's 5% bar by the emulation (0.4x rule), so the PR's evidence is the function-level queries q7/q8; if the built query-level gain is under 5%, drop it from the changelog entry (note in prs/). Test number 05850 free on master e4f82e0c28b and on every lilred-perf-* branch. The unsigned wrap in start + j * step (a start before 1970) is pre-existing and unchanged. Kit dry run 2026-11-22 on master 521c4bcb (A/A): hashes equal on 10 cases, none significant.",
+      "notes": "Parked 2026-11-28 on James's answer on issue 26 (2026-11-28, 'park it.' = option A): not to be submitted; branch kept at 92789976f58. Run 2 (James, 2026-11-25; A 42f59f8a4c25, B 62e531a2ff81): 6 dashboard queries through /api/v1/query_range -2.0..+0.3%, none significant at p < 0.005 (100 rounds), A/A within 0.9%, every row equal, all tests pass. Run 1 (2026-11-23; A 521c4bcb7b94, B a25c640b65b3): timeSeriesFromGrid 2x (q7 -51.1%), timeSeriesRange 5x (T5 -80.7%). Cause: the saving is 3.0-3.6 ns of ~60 ns per output point through the JSON API. 2026-11-28: merges cleanly into master 9c5336e66e25, upstream unchanged on timeSeriesRange.cpp since 05f159a69597, no open upstream PR names either function, 05850 free. To revive: a workload where the functions' own output dominates (SQL reading timeSeriesFromGrid rows directly); run 1's kit as evidence, run 2's kit as guard; category Performance Improvement. Open, independent of the branch: the drafted upstream issue in issue 26's body (NULL start/end/step computed as 0; 32-bit wrap after 2106), James's to open.",
       "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
       "head": "92789976f58bfbddaf4c294cad840865f1bf6b01",
       "issue": 26,
       "pr_text": "prs/ts-from-grid-typed-write.md",
       "ab_plan": "ab-plans/ts-from-grid-typed-write.md",
-      "report": "reports/2026-11-22-ts-from-grid-typed-write.md"
+      "report": "reports/2026-11-22-ts-from-grid-typed-write.md",
+      "upstream_draft": "drafted: fork #26 body; 85_bug-report; NULL start/end/step computed as 0 + 32-bit wrap after 2106"
     },
     {
       "slug": "sink-lazy-pipelines",
