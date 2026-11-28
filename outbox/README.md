@@ -2,19 +2,17 @@
 
 What James does for lil red, in order. When a move is done, its row leaves this list: a submitted item moves to **Submitted**, and an item lil red is working on moves to **With lil red**.
 
-Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-27 23:02 UTC.
+Generated from [`index.json`](index.json) by `render.py`; don't edit this file by hand. Updated 2026-11-28 10:00 UTC.
 
 ## For you, in order
 
-| # | your move | item | issue | what it's for |
-|---|---|---|---|---|
-| 1 | **Decide** | [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | Run 2 showed no measurable change on dashboard queries. A) park it (recommended): branch kept, issue open; the upstream issue drafted in #26's description (two master defects on this path) stays yours to open on its own. B) submit anyway with timeSeriesFromGrid 2x as the headline (an exception to your 11-23 rule on realistic queries). C) drop it and close #26. Blocks nothing; no build needed. Answer on #26. |
-
-Order: review fixes to sync first (an upstream reviewer is waiting), then submits, then decisions, then builds. Within each, lil red's `priority` order. A move is a command for the `lil-red-outbox` skill; answer a decision on the item's issue.
+Nothing for you right now.
 
 ## With lil red: nothing for you
 
-None.
+| item | issue | lil red is | what it's for |
+|---|---|---|---|
+| [ts-from-grid-typed-write](../prs/ts-from-grid-typed-write.md) | [#26](https://github.com/JTCunning/ClickHouse/issues/26) | reworking the branch, or dropping it | run 2: no measurable change on 6 dashboard PromQL queries (-2.0..+0.3%, none significant); function alone 2x/5x. Park or drop: your call |
 
 ## Submitted
 

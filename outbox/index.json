@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-27T23:02:51Z",
+  "updated": "2026-11-28T10:00:47Z",
   "repo": "JTCunning/ClickHouse",
   "research_branch": "lilred-research",
   "statuses": {
@@ -537,7 +537,6 @@
       "base": "521c4bcb7b9441a8f591a80965d9a9714703190e",
       "head": "92789976f58bfbddaf4c294cad840865f1bf6b01",
       "issue": 26,
-      "decision": "Run 2 showed no measurable change on dashboard queries. A) park it (recommended): branch kept, issue open; the upstream issue drafted in #26's description (two master defects on this path) stays yours to open on its own. B) submit anyway with timeSeriesFromGrid 2x as the headline (an exception to your 11-23 rule on realistic queries). C) drop it and close #26. Blocks nothing; no build needed. Answer on #26.",
       "pr_text": "prs/ts-from-grid-typed-write.md",
       "ab_plan": "ab-plans/ts-from-grid-typed-write.md",
       "report": "reports/2026-11-22-ts-from-grid-typed-write.md"
